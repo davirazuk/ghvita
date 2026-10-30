@@ -1,0 +1,24 @@
+20 press cross
+25 release cross
+40 press cross
+45 release cross
+100 press cross
+105 release cross
+130 shot df1_select
+140 press up
+145 release up
+150 press up
+155 release up
+170 shot df2_after_up
+180 press right
+185 release right
+200 shot df3_bass
+210 press right
+215 release right
+230 shot df4_keys
+240 press right
+245 release right
+260 press cross
+265 release cross
+400 shot df5_playing
+410 quit

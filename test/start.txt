@@ -1,0 +1,14 @@
+20 press cross
+25 release cross
+40 press cross
+45 release cross
+100 press cross
+105 release cross
+140 press cross
+140 shot st0_pressed
+141 shot st1_loading
+142 shot st2_loading_frame
+143 shot st3_song
+145 release cross
+200 shot st4_song
+210 quit

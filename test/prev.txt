@@ -1,0 +1,7 @@
+20 press cross
+25 release cross
+40 press cross
+45 release cross
+60 press cross
+65 release cross
+120 quit

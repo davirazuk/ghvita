@@ -1,0 +1,17 @@
+400 suspend 5000
+420 shot ap1_after_suspend
+440 press start
+445 release start
+500 shot ap2_resumed
+600 overlay on
+620 shot ap3_overlay
+640 overlay off
+660 press start
+665 release start
+700 overlay on
+720 shot ap4_overlay_again
+740 press start
+745 release start
+800 shot ap5_overlay_stuck
+900 shot ap6_still_playing
+920 quit

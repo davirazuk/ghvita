@@ -1,0 +1,5 @@
+300 shot play1
+600 shot play2
+900 shot play3
+1500 shot play4
+1600 quit

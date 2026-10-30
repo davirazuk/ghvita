@@ -1,0 +1,75 @@
+// The song library (ux0:data/ghvita/songs/*/: ghvita.ini from the Vita's own converter, or song.ini from
+// tools/pack.py), best scores and the settings
+#pragma once
+#include <stdbool.h>
+#include <stdint.h>
+#include "chart.h"
+#include "audio.h"
+
+typedef struct {
+    int score;
+    uint8_t stars;          // 0-6 (6: gold)
+    uint8_t percent;
+    uint8_t fc;
+} Score;
+
+typedef struct {
+    char folder[256];
+    char name[96], artist[96], album[96], genre[48], year[12], charter[64];
+    char sort_name[96], sort_artist[96];
+    int length_ms, preview_ms;
+    uint8_t parts;                          // bit per PART_*
+    int8_t diff[PART_COUNT];                // song.ini's difficulty tiers (-1 unknown)
+    char stems[MAX_STEMS][24];
+    int stem_count;
+    int8_t part_stem[PART_COUNT];           // index into stems, -1 none
+    char source[48];                        // where the downloader got it ("chorus:<md5>"), else empty
+    Score best[PART_COUNT][DIFF_COUNT];
+} Song;
+
+enum { SORT_TITLE, SORT_ARTIST, SORT_COUNT };
+
+// progress (or NULL) every 25 songs found, and before each new Clone Hero song (a folder or a .sng dropped in songs/)
+// is converted, with its name
+int songs_scan(void (*progress)(int found, const char * converting));
+// a song just installed (the downloader's): its index after sorting, or -1
+int songs_add(const char * folder);
+int songs_find(const char * folder);
+// 2: a song from this source ("chorus:<md5>"), 1: one by the same artist and name (any case and punctuation), 0: no
+int songs_have(const char * source, const char * artist, const char * name);
+int songs_count(void);
+// off the card and out of the list
+void songs_delete(int index);
+Song * songs_get(int index);
+void songs_sort(int mode);
+void songs_save_score(Song * s, int part, int diff, Score score);
+const char * part_name(int part);
+const char * diff_name(int diff);
+
+// lanes: green red yellow blue orange, then the open note
+#define LANES 5
+#define LANE_OPEN 5
+
+typedef struct {
+    int speed;              // note speed 1-10
+    char highway[32];
+    char venue[16];         // "song" (each song its own), "random", "classic" (no venue) or a venue's zone
+    int offset_ms;          // audio offset: notes are judged and drawn this much later
+    int layout;             // 0 default, 1 alternate
+    bool tilt;              // Star Power by tilting
+    bool nofail;
+    int music_vol, sfx_vol, crowd_vol;      // 0-10
+    bool lefty;
+    bool show_fps;
+    bool no_band;           // no band on the venue's stage (saves its four sheets and draws)
+    bool sing_along;        // the mic and the lyrics on top of any instrument, when the song has vocals
+    int last_part, last_diff;
+    int sort;
+    char last_song[256];
+} Config;
+
+extern Config cfg;
+void config_load(void);
+void config_save(void);
+// the buttons that play each lane (and the open note) in the current layout
+uint32_t lane_buttons(int lane);

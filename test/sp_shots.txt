@@ -1,0 +1,13 @@
+600 shot sp1
+1200 shot sp2
+1800 shot sp3
+2400 shot sp4
+3000 shot sp5
+3600 shot sp6
+4200 shot sp7
+4800 shot sp8
+5400 shot sp9
+6000 shot sp10
+6600 shot sp11
+7200 shot sp12
+7300 quit

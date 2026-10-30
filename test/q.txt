@@ -1,0 +1,2 @@
+60 shot first_title
+61 quit

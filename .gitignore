@@ -1,0 +1,17 @@
+# builds and what they make
+build*/
+out/
+*.vpk
+__pycache__/
+backups/
+
+# songs, and what the tests leave behind
+test/songs/
+test/data/
+test/shots/
+test/bot_*.txt
+
+# art and sound made from your own copies of the games: tools/ builds them
+assets/*
+!assets/cacert.pem
+vita/sce_sys/**/*.png
