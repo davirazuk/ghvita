@@ -13,7 +13,9 @@
 #endif
 #include "dl.h"
 #include "json.h"
+#include "mega.h"
 #include "net.h"
+#include "rar.h"
 #include "songconv.h"
 #include "plat.h"
 #include "rbcon.h"
@@ -106,7 +108,7 @@ void dl_remove_tree(const char * path)
     rmdir(path);
 }
 
-static void mkdirs(const char * path)
+void dl_mkdirs(const char * path)
 {
     char p[700];
     snprintf(p, sizeof(p), "%s", path);
@@ -121,7 +123,7 @@ static void mkdirs(const char * path)
 }
 
 // a name from an archive or a web page as a file name the memory card takes
-static void safe_part(char * s)
+void dl_safe_part(char * s)
 {
     for (; *s; s++)
         if (strchr(":*?\"<>|\\", *s) || (unsigned char)*s < 0x20)
@@ -269,10 +271,35 @@ static int parse_chorus(const char * body, size_t len, DlHit ** out, int * total
     return k;
 }
 
+static void html_unescape(char * s)
+{
+    static const struct { const char * from; char to; } ents[] = {
+        {"&amp;", '&'}, {"&lt;", '<'}, {"&gt;", '>'}, {"&quot;", '"'}, {"&#39;", '\''}, {"&#34;", '"'}, {"&#33;", '!'},
+    };
+    char * o = s;
+    for (char * p = s; *p;) {
+        bool done = false;
+        for (size_t k = 0; k < sizeof(ents) / sizeof(ents[0]) && !done; k++) {
+            size_t l = strlen(ents[k].from);
+            if (!strncmp(p, ents[k].from, l)) {
+                *o++ = ents[k].to;
+                p += l;
+                done = true;
+            }
+        }
+        if (!done)
+            *o++ = *p++;
+    }
+    *o = 0;
+}
+
 // a RhythmVerse download address as something this can fetch
-static void resolve_rv(DlHit * h, const char * u)
+static void resolve_rv(DlHit * h, const char * address)
 {
     const char * p;
+    char u[600];
+    snprintf(u, sizeof(u), "%s", address);
+    html_unescape(u);
     h->url[0] = 0;
     if (!u[0] || !strcmp(u, "none")) {
         snprintf(h->unplayable, sizeof(h->unplayable), "no download link");
@@ -319,13 +346,21 @@ static void resolve_rv(DlHit * h, const char * u)
             strncat(h->url, strchr(h->url, '?') ? "&dl=1" : "?dl=1", sizeof(h->url) - strlen(h->url) - 1);
     } else if (strstr(u, "mediafire.com"))
         snprintf(h->url, sizeof(h->url), "mediafire:%s", u);
-    else if (strstr(u, "mega.nz") || strstr(u, "mega.co.nz"))
-        snprintf(h->unplayable, sizeof(h->unplayable), "on Mega (can't be downloaded here)");
-    else {
+    else if (strstr(u, "mega.nz") || strstr(u, "mega.co.nz")) {
+        if (mega_link_ok(u))
+            snprintf(h->url, sizeof(h->url), "mega:%s", u);
+        else
+            snprintf(h->unplayable, sizeof(h->unplayable), "its Mega link has no key");
+    } else if (!strncmp(u, "http", 4)) {
         char low[600];
         lower(low, sizeof(low), u);
-        if (strstr(low, ".zip") || strstr(low, ".rar") || strstr(low, ".7z") || strstr(low, ".sng"))
+        if (strstr(low, "bit.ly/") || strstr(low, "tinyurl.com/"))
+            snprintf(h->url, sizeof(h->url), "short:%s", u);
+        else if (strstr(low, ".zip") || strstr(low, ".rar") || strstr(low, ".7z") || strstr(low, ".sng") ||
+                 strstr(low, "onyxite.org/") || strstr(low, "keepitfishy.com/"))
             snprintf(h->url, sizeof(h->url), "%s", u);
+        else if (strstr(low, "xbox.com/"))
+            snprintf(h->unplayable, sizeof(h->unplayable), "official Rock Band DLC");
     }
     if (!h->url[0] && !h->unplayable[0])
         snprintf(h->unplayable, sizeof(h->unplayable), "its file host isn't supported");
@@ -689,7 +724,7 @@ static void start(void)
     if (started)
         return;
     started = true;
-    mkdirs(tmp_dir());
+    dl_mkdirs(tmp_dir());
     char p[400];
     snprintf(p, sizeof(p), "%s/covers", tmp_dir());
     mkdir(p, 0777);
@@ -926,14 +961,49 @@ static bool entry_path(const char * name, const char * dir, char * path, size_t 
             *p = '/';
     if (rel[0] == '/' || strstr(rel, "../") || !strcmp(rel, ".."))
         return false;
-    safe_part(rel);
+    dl_safe_part(rel);
     snprintf(path, size, "%s/%s", dir, rel);
     return true;
 }
 
+// a solid RAR, each file packed on the ones before: libarchive won't, so these go through rar.c
+typedef struct {
+    const char * dir;
+    char * err;
+    size_t err_size;
+    bool failed;
+} SolidOut;
+
+static FILE * solid_open(void * user, const char * name)
+{
+    SolidOut * o = user;
+    char path[800];
+    if (o->failed || !entry_path(name, o->dir, path, sizeof(path)))
+        return NULL;
+    char * slash = strrchr(path, '/');
+    *slash = 0;
+    dl_mkdirs(path);
+    *slash = '/';
+    FILE * f = fopen(path, "wb");
+    if (!f) {
+        snprintf(o->err, o->err_size, "can't write to the memory card");
+        o->failed = true;
+    }
+    return f;
+}
+
+static void solid_close(void * user, FILE * f)
+{
+    SolidOut * o = user;
+    if (fclose(f) != 0 && !o->failed) {
+        snprintf(o->err, o->err_size, "the memory card is full");
+        o->failed = true;
+    }
+}
+
 static bool extract_archive(const char * file, const char * dir, char * err, size_t err_size)
 {
-    mkdirs(dir);
+    dl_mkdirs(dir);
 #ifdef __vita__
     // the Vita's libarchive has no LZMA: 7-Zip packages go through un7zip
     FILE * f = fopen(file, "rb");
@@ -972,10 +1042,12 @@ static bool extract_archive(const char * file, const char * dir, char * err, siz
             break;
         if (r < ARCHIVE_WARN) {
             const char * why = archive_error_string(a);
-            if (why && strstr(why, "solid"))
-                snprintf(err, err_size, "this is a solid RAR, which the Vita can't unpack yet");
-            else
-                snprintf(err, err_size, "the archive is damaged: %s", why);
+            if (why && strstr(why, "solid")) {
+                SolidOut o = {dir, err, err_size, false};
+                archive_read_free(a);
+                return rar_extract(file, solid_open, solid_close, &o, err, err_size) && !o.failed;
+            }
+            snprintf(err, err_size, "the archive is damaged: %s", why);
             ok = false;
             break;
         }
@@ -988,14 +1060,14 @@ static bool extract_archive(const char * file, const char * dir, char * err, siz
         if (!entry_path(name, dir, path, sizeof(path)))
             continue;
         if (archive_entry_filetype(e) == AE_IFDIR) {
-            mkdirs(path);
+            dl_mkdirs(path);
             continue;
         }
         if (archive_entry_filetype(e) != AE_IFREG)
             continue;
         char * slash = strrchr(path, '/');
         *slash = 0;
-        mkdirs(path);
+        dl_mkdirs(path);
         *slash = '/';
         FILE * out = fopen(path, "wb");
         if (!out) {
@@ -1172,28 +1244,6 @@ static void web_page_instead(const char * file, const char * url, const char * n
                                                                                              : "the host", name);
 }
 
-static void html_unescape(char * s)
-{
-    static const struct { const char * from; char to; } ents[] = {
-        {"&amp;", '&'}, {"&lt;", '<'}, {"&gt;", '>'}, {"&quot;", '"'}, {"&#39;", '\''}, {"&#34;", '"'},
-    };
-    char * o = s;
-    for (char * p = s; *p;) {
-        bool done = false;
-        for (size_t k = 0; k < sizeof(ents) / sizeof(ents[0]) && !done; k++) {
-            size_t l = strlen(ents[k].from);
-            if (!strncmp(p, ents[k].from, l)) {
-                *o++ = ents[k].to;
-                p += l;
-                done = true;
-            }
-        }
-        if (!done)
-            *o++ = *p++;
-    }
-    *o = 0;
-}
-
 // what of a song folder is worth fetching: 2 needed (the chart, song.ini, the audio, packed songs), 1 nice to have
 // (the cover), 0 not used here (videos, backgrounds, the editors' own files)
 static int wanted(const char * name)
@@ -1205,7 +1255,14 @@ static int wanted(const char * name)
             return 2;
     if (!strncasecmp(name, "album.", 6) && (has_ext(name, ".png") || has_ext(name, ".jpg") || has_ext(name, ".jpeg")))
         return 1;
-    return strchr(name, '.') ? 0 : 2;       // a Rock Band package has no extension
+    // a Rock Band package has no extension, though it may have a dot ("Mr. Brightside_rb3con")
+    const char * dot = strrchr(name, '.');
+    return !dot || strlen(dot) > 6 || strchr(dot, ' ') || strchr(dot, '_') ? 2 : 0;
+}
+
+static void mega_file(void * user, const char * name)
+{
+    job_msg(user, "file %s", name);
 }
 
 // a shared Google Drive folder: its listing page names the files, each then comes on its own
@@ -1223,7 +1280,7 @@ static bool drive_folder(Job * j, const char * id, const char * dir, int depth, 
         free(body);
         return false;
     }
-    mkdirs(dir);
+    dl_mkdirs(dir);
     bool ok = true;
     int found = 0;
     for (char * p = body; ok && (p = strstr(p, "id=\"entry-"));) {
@@ -1237,7 +1294,7 @@ static bool drive_folder(Job * j, const char * id, const char * dir, int depth, 
         sscanf(h + 6, "%399[^\"]", href);
         sscanf(t + 18, "%255[^<]", name);
         html_unescape(name);
-        safe_part(name);
+        dl_safe_part(name);
         for (char * q = name; *q; q++)
             if (*q == '/')
                 *q = '_';
@@ -1290,7 +1347,7 @@ static void run_job(Job * j)
     snprintf(xdir, sizeof(xdir), "%s/unpacked", base);
     dl_remove_tree(xdir);
     remove(file);
-    mkdirs(base);
+    dl_mkdirs(base);
     pthread_mutex_lock(&lock);
     j->state = JOB_DOWNLOADING;
     j->done = j->total = 0;
@@ -1301,10 +1358,37 @@ static void run_job(Job * j)
     const char * url = j->hit.url;
     char page_url[600];
     bool ok = true, folder = false;
-    if (!strncmp(url, "gdrive-folder:", 14)) {
+    static DlHit landed;        // (the job thread's alone)
+    if (!strncmp(url, "short:", 6)) {
+        // a short link: the same hosts as the rest, once it's been followed
+        char to[600];
+        snprintf(to, sizeof(to), "%s", url + 6);
+        for (int hop = 0; hop < 5 && (strstr(to, "bit.ly/") || strstr(to, "tinyurl.com/")); hop++) {
+            char next[600];
+            if (!http_location(to, next, sizeof(next), &j->cancel)) {
+                ok = false;
+                snprintf(err, sizeof(err), "the short link doesn't lead anywhere");
+                break;
+            }
+            snprintf(to, sizeof(to), "%s", next);
+        }
+        if (ok) {
+            memset(&landed, 0, sizeof(landed));
+            resolve_rv(&landed, to);
+            url = landed.url[0] ? landed.url : to;
+            plat_log("dl: the short link leads to %s", url);
+        }
+    }
+    if (!ok) {
+        // (a short link that went nowhere)
+    } else if (!strncmp(url, "gdrive-folder:", 14)) {
         int files = 0;
         folder = true;
         ok = drive_folder(j, url + 14, xdir, 0, &files, err, sizeof(err));
+    } else if (!strncmp(url, "mega:", 5)) {
+        MegaJob m = {.cancel = &j->cancel, .done = &j->done, .total = &j->total, .wanted = wanted, .on_file = mega_file,
+                     .user = j};
+        ok = mega_fetch(url + 5, file, xdir, &m, &folder, err, sizeof(err));
     } else {
         if (!strncmp(url, "mediafire:", 10)) {
             // the download button's address is on the file's page

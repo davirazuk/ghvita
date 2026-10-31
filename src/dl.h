@@ -17,7 +17,7 @@ typedef struct {
     char name[96], artist[96], album[96], year[16], charter[64];
     int length_ms;
     int64_t size;                   // bytes, 0 when unknown
-    char url[600];                  // what to fetch ("gdrive-folder:<id>" and "mediafire:<page>" are looked up first)
+    char url[600];                  // what to fetch ("gdrive-folder:<id>", "mediafire:<page>", "mega:<link>" are looked up)
     char art[400];                  // the cover's address
     int8_t parts[PART_COUNT];       // what's charted and how hard, 0-6; -1 not there (the sites' numbers)
     bool any_parts, rock_band;      // the site told them; a Rock Band package
@@ -25,8 +25,10 @@ typedef struct {
     bool have, have_name;           // (the screen's) in the library: this very chart / a song of the same name
 } DlHit;
 
-void dl_search(int site, const char * query);
-void dl_remove_tree(const char * path);       // "" lists the newest charts
+void dl_search(int site, const char * query);       // "" lists the newest charts
+void dl_remove_tree(const char * path);
+void dl_mkdirs(const char * path);
+void dl_safe_part(char * s);                        // a name off the web as one the memory card takes
 void dl_more(void);                                 // the next page of the last search
 bool dl_searching(void);
 bool dl_can_more(void);

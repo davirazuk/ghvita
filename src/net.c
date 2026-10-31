@@ -10,6 +10,7 @@ typedef struct {
     char * mem;
     size_t len, cap;
     FILE * file;
+    uint64_t file_pos;
     bool write_failed;
 } Sink;
 
@@ -18,6 +19,9 @@ static size_t on_data(char * data, size_t size, size_t n, void * user)
     Sink * s = user;
     size_t bytes = size * n;
     if (s->file) {
+        if (s->r->filter)
+            s->r->filter(s->r->filter_user, s->file_pos, (unsigned char *)data, bytes);
+        s->file_pos += bytes;
         if (fwrite(data, 1, bytes, s->file) != bytes) {
             s->write_failed = true;
             return 0;
@@ -49,6 +53,16 @@ static int on_progress(void * user, curl_off_t total, curl_off_t done, curl_off_
     return r->cancel && *r->cancel;         // non-zero stops the transfer
 }
 
+// a song site's link can't reach anything but the web
+static void web_only(CURL * c)
+{
+#if LIBCURL_VERSION_NUM >= 0x075500
+    curl_easy_setopt(c, CURLOPT_PROTOCOLS_STR, "http,https");
+#else
+    curl_easy_setopt(c, CURLOPT_PROTOCOLS, (long)(CURLPROTO_HTTP | CURLPROTO_HTTPS));
+#endif
+}
+
 static int fetch_once(const HttpReq * r, char ** body, size_t * len, char * err, size_t err_size, bool * again)
 {
     static bool global;
@@ -67,7 +81,7 @@ static int fetch_once(const HttpReq * r, char ** body, size_t * len, char * err,
         snprintf(err, err_size, "no network library");
         return 0;
     }
-    Sink sink = {r, NULL, 0, 0, NULL, false};
+    Sink sink = {r, NULL, 0, 0, NULL, 0, false};
     if (r->to_file && !(sink.file = fopen(r->to_file, "wb"))) {
         snprintf(err, err_size, "can't write to the memory card");
         curl_easy_cleanup(c);
@@ -80,6 +94,7 @@ static int fetch_once(const HttpReq * r, char ** body, size_t * len, char * err,
     for (int i = 0; r->headers && r->headers[i]; i++)
         hl = curl_slist_append(hl, r->headers[i]);
     curl_easy_setopt(c, CURLOPT_URL, r->url);
+    web_only(c);
     curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(c, CURLOPT_MAXREDIRS, 10L);
     curl_easy_setopt(c, CURLOPT_USERAGENT, "GHVita/1.0 (PS Vita)");
@@ -144,6 +159,31 @@ int http_fetch(const HttpReq * r, char ** body, size_t * len, char * err, size_t
             *r->done = 0;
         plat_sleep_us(attempt * 1000000);
     }
+}
+
+bool http_location(const char * url, char * out, size_t size, volatile bool * cancel)
+{
+    char err[160], ca[300];
+    if (!plat_net_up(err, sizeof(err)) || (cancel && *cancel))
+        return false;
+    CURL * c = curl_easy_init();
+    if (!c)
+        return false;
+    snprintf(ca, sizeof(ca), "%scacert.pem", plat_asset_dir());
+    curl_easy_setopt(c, CURLOPT_URL, url);
+    curl_easy_setopt(c, CURLOPT_NOBODY, 1L);
+    web_only(c);
+    curl_easy_setopt(c, CURLOPT_USERAGENT, "GHVita/1.0 (PS Vita)");
+    curl_easy_setopt(c, CURLOPT_CAINFO, ca);
+    curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT, 20L);
+    curl_easy_setopt(c, CURLOPT_TIMEOUT, 30L);
+    curl_easy_setopt(c, CURLOPT_NOSIGNAL, 1L);
+    char * to = NULL;
+    bool ok = curl_easy_perform(c) == CURLE_OK && curl_easy_getinfo(c, CURLINFO_REDIRECT_URL, &to) == CURLE_OK && to;
+    if (ok)
+        snprintf(out, size, "%s", to);
+    curl_easy_cleanup(c);
+    return ok;
 }
 
 void url_escape(char * out, size_t size, const char * in)

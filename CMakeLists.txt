@@ -13,8 +13,10 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -Wno-unused-parameter -Wno-mis
 # the menus' and the downloader's code for size: the executable's code has to end short of a 1 MB boundary, or
 # vita-elf-create has no room for its tables ("segment 1 overlaps"), and none of this runs in a song
 set_source_files_properties(src/main.c src/shrink.c src/rbcon.c src/songconv.c src/dl.c src/net.c src/json.c src/songs.c PROPERTIES COMPILE_OPTIONS -Os)
+# its memory is one block read as whatever's in it
+set_source_files_properties(src/ppmd7.c PROPERTIES COMPILE_FLAGS -fno-strict-aliasing)
 set(SRCS src/main.c src/game.c src/gfx.c src/font.c src/audio.c src/decoder.c src/chart.c src/songs.c src/songconv.c
-         src/res.c src/json.c src/net.c src/dl.c src/vocals.c src/rbcon.c src/shrink.c)
+         src/res.c src/json.c src/net.c src/dl.c src/mega.c src/rar.c src/ppmd7.c src/vocals.c src/rbcon.c src/shrink.c)
 
 if (VITA)
     set(VITA_APP_NAME "GH Vita")
