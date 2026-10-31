@@ -139,12 +139,15 @@ bool plat_poll(Pad * pad)
 
 static int perf_level = -1;
 
-// Battery: a song starts at full speed (444/222 MHz) and drops to 333/166 after 10 s without a late frame and with
-// the main thread under 6 ms a frame; a late frame (or the audio falling behind) puts it back at once, and each
-// failed try waits twice as long before the next (30 s, 60 s, ... 5 min), like the FNaF ports. Nothing is logged
-// mid-song (a card write could make a frame late): a song's frame times go to the log when it ends or pauses.
+// Battery: a song loads onto eco clocks (333/166 MHz) and stays there, because changing them holds a frame or two up:
+// mid-song that was a stutter, and read as a late frame it sent the clocks straight back, so no song ever stayed on eco.
+// Now they change where nothing's on the screen to miss, and the frames just after a change aren't judged. A real late
+// frame (or the audio falling behind) puts them back at full for the rest of the run, and the next two runs start there.
+// Nothing is logged mid-song (a card write could make a frame late): a song's frame times go to the log when it ends or
+// pauses.
+#define ECO_GRACE 30
 static bool eco, trouble;
-static int calm_frames, eco_wait, eco_backoff = 30 * 60;
+static int eco_grace, eco_skip;
 static int64_t last_swap;
 static struct {
     int frames, late, eco_frames, eco_tries, eco_fails;
@@ -171,29 +174,19 @@ static void govern(int64_t dt, int64_t busy)
         st.busy_max = busy;
     if (eco)
         st.eco_frames++;
-    if (eco_wait > 0)
-        eco_wait--;
-    if (dt > 20000 || trouble) {
-        st.late += dt > 20000;
+    st.late += dt > 20000;
+    if (eco_grace > 0) {
+        eco_grace--;
         trouble = false;
-        calm_frames = 0;
-        if (eco) {
-            eco = false;
-            clocks(444, 222, 222, 166);
-            st.eco_fails++;
-            eco_wait = eco_backoff;
-            eco_backoff = eco_backoff * 2 > 300 * 60 ? 300 * 60 : eco_backoff * 2;
-        }
         return;
     }
-    if (eco)
-        return;
-    calm_frames = busy < 6000 ? calm_frames + 1 : 0;
-    if (calm_frames >= 10 * 60 && eco_wait == 0) {
-        eco = true;
-        clocks(333, 222, 166, 111);
-        st.eco_tries++;
+    if (eco && (dt > 20000 || trouble)) {
+        eco = false;
+        clocks(444, 222, 222, 166);
+        st.eco_fails++;
+        eco_skip = 2;
     }
+    trouble = false;
 }
 
 void plat_perf_trouble(void)
@@ -334,13 +327,19 @@ void plat_set_perf(int level)
                  st.eco_frames * 100 / st.frames, st.eco_tries, st.eco_fails);
     perf_level = level;
     eco = trouble = false;
-    calm_frames = 0;
     last_swap = 0;                      // the first frame after a change carries the loading
     memset(&st, 0, sizeof(st));
-    if (level)
-        clocks(444, 222, 222, 166);     // songs: full, until the governor sees it can do with less
-    else
+    if (!level)
         clocks(333, 166, 166, 111);     // menus
+    else if (eco_skip > 0) {
+        eco_skip--;
+        clocks(444, 222, 222, 166);
+    } else {
+        eco = true;
+        eco_grace = ECO_GRACE;
+        st.eco_tries = 1;
+        clocks(333, 222, 166, 111);
+    }
 }
 
 void plat_log(const char * fmt, ...)

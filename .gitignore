@@ -9,6 +9,7 @@ backups/
 test/songs/
 test/data/
 test/shots/
+test/card/
 test/bot_*.txt
 
 # art and sound made from your own copies of the games: tools/ builds them

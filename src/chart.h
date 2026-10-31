@@ -51,6 +51,7 @@ typedef struct {
 } Part;
 
 typedef struct {
+    int version;            // 2: drum gems tell cymbals from toms, and disco flips are done
     int length_ms;
     int tempo_count, beat_count, section_count, part_count;
     const TempoPoint * tempo;

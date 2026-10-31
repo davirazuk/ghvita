@@ -1277,9 +1277,10 @@ static void results_screen(void);
 static void finish_song(int how)
 {
     result = game_result();
-    plat_log("result: %s, score %d, %d stars, %d/%d notes, best streak %d, %d/%d phrases, %d overhits%s",
-             how == GAME_DONE ? "done" : "failed", result.score, result.stars, result.notes_hit, result.notes_total,
-             result.best_streak, result.sp_hit, result.sp_total, result.overhits, result.fc ? ", full combo" : "");
+    plat_log("result: %s, score %d, %d stars, %d/%d notes, best streak %d, %d/%d phrases, %d overhits%s; hits %+d ms "
+             "on average, spread %d", how == GAME_DONE ? "done" : "failed", result.score, result.stars,
+             result.notes_hit, result.notes_total, result.best_streak, result.sp_hit, result.sp_total, result.overhits,
+             result.fc ? ", full combo" : "", result.off_ms, result.spread_ms);
     Song * s = songs_get(sel);
     result_best = false;
     if (s && !result.failed) {
@@ -1460,7 +1461,7 @@ static void results_screen(void)
     struct {
         const char * label;
         char value[48];
-    } rows[5];
+    } rows[6];
     snprintf(rows[0].value, sizeof(rows[0].value), "%d", result.score);
     rows[0].label = "Score";
     snprintf(rows[1].value, sizeof(rows[1].value), "%d%%  (%d / %d)", pct, result.notes_hit, result.notes_total);
@@ -1471,8 +1472,16 @@ static void results_screen(void)
     rows[3].label = "Star Power phrases";
     snprintf(rows[4].value, sizeof(rows[4].value), "%d", result.overhits);
     rows[4].label = "Overhits";
-    for (int i = 0; i < 5; i++) {
-        float y = 258 + i * 40;
+    rows[5].label = "Your timing";
+    if (!result.timed)
+        strcpy(rows[5].value, "-");
+    else if (abs(result.off_ms) < 5)
+        strcpy(rows[5].value, "Right on it");
+    else
+        snprintf(rows[5].value, sizeof(rows[5].value), "%d ms %s", abs(result.off_ms),
+                 result.off_ms > 0 ? "late" : "early");
+    for (int i = 0; i < 6; i++) {
+        float y = 252 + i * 33;
         font_draw_shadow(res.ui, rows[i].label, 300, y, 30, RGBA(220, 210, 200, 255), ALIGN_LEFT);
         font_draw_shadow(res.ui, rows[i].value, 660, y, 30, RGBA(255, 236, 190, 255), ALIGN_RIGHT);
     }

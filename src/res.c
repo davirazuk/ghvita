@@ -105,7 +105,9 @@ static const char * sound_names[SND_COUNT] = {
     "miss", "overstrum_1", "overstrum_2", "overstrum_3", "overstrum_4", "sp_award", "sp_deploy", "sp_ready",
     "sp_release", "star", "star_gold", "sp_crowd", "crowd_good", "crowd_neutral", "crowd_bad", "cheer_1",
     "cheer_2", "cheer_3", "boo_1", "boo_2", "boo_3", "applause", "ui_move", "ui_select", "ui_back",
-    "drum_kick", "drum_snare", "drum_hat", "drum_tom_hi", "drum_tom_lo", "drum_crash",
+    "drum_kick_1", "drum_kick_2", "drum_kick_3", "drum_snare_1", "drum_snare_2", "drum_snare_3", "drum_hat_1",
+    "drum_hat_2", "drum_hat_3", "drum_tom_hi_1", "drum_tom_hi_2", "drum_tom_mid_1", "drum_tom_mid_2", "drum_tom_lo_1",
+    "drum_tom_lo_2", "drum_ride_1", "drum_ride_2", "drum_crash_1", "drum_crash_2",
 };
 static volatile bool sounds_ready;
 

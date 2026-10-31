@@ -11,6 +11,8 @@ typedef struct {
     int notes_hit, notes_total, best_streak, overhits;
     int sp_hit, sp_total;
     bool failed, fc;
+    bool timed;                 // enough hits to tell: on average off_ms late (early if negative), spread_ms either way
+    int off_ms, spread_ms;
 } Result;
 
 enum { GAME_PLAYING, GAME_DONE, GAME_FAILED, GAME_PAUSE };

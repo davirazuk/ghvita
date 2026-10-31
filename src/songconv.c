@@ -501,6 +501,7 @@ typedef struct {
     VEC(VoxIn) vox;                 // PART VOCALS
     VEC(TR) vox_phrases;
     VEC(TR) toms[3];                // .mid drums: while yellow, blue, green are toms
+    VEC(TR) disco[DIFF_COUNT];      // .mid drums: while a disco flip's on, red and yellow trade places
     VEC(TempoIn) tempos;
     VEC(Sig) sigs;
     VEC(Name) names;
@@ -517,6 +518,8 @@ static void parsed_free(Parsed * p)
     FREE(p->vox_phrases);
     for (int i = 0; i < 3; i++)
         FREE(p->toms[i]);
+    for (int i = 0; i < DIFF_COUNT; i++)
+        FREE(p->disco[i]);
     for (int i = 0; i < p->names.n; i++)
         free(p->names.v[i].text);
     FREE(p->names);
@@ -987,6 +990,25 @@ static bool parse_mid(const uint8_t * d, size_t n, const Source * src, Parsed * 
                 TR r = {notes[110 + k].v[i].s, notes[110 + k].v[i].e};
                 PUSH(P->toms[k], r);
             }
+        // [mix 3 drums2d]: from here to the next mix event of that difficulty, a disco flip
+        int32_t flip_from[DIFF_COUNT] = {-1, -1, -1, -1};
+        for (int i = 0; pid == PART_DRUMS && i < texts.n; i++) {
+            const char * m = strstr(texts.v[i].text, "mix ");
+            int di, layout;
+            char how[16] = "";
+            if (!m || sscanf(m, "mix %d drums%d%15[a-z]", &di, &layout, how) < 2 || di < 0 || di >= DIFF_COUNT)
+                continue;
+            if (flip_from[di] >= 0) {
+                TR r = {flip_from[di], texts.v[i].tick};
+                PUSH(P->disco[di], r);
+            }
+            flip_from[di] = strcmp(how, "d") ? -1 : texts.v[i].tick;
+        }
+        for (int di = 0; pid == PART_DRUMS && di < DIFF_COUNT; di++)
+            if (flip_from[di] >= 0) {
+                TR r = {flip_from[di], INT32_MAX};
+                PUSH(P->disco[di], r);
+            }
         for (int i = 0; i < 128; i++) {
             FREE(notes[i]);
             FREE(open[i]);
@@ -1387,7 +1409,7 @@ static bool write_vhc(const char * path, Parsed * P, const Tempo * T, OutNote * 
 
     Buf b = {0};
     put(&b, "VHC1", 4);
-    put32(&b, 1);
+    put32(&b, 2);
     put32(&b, T->n);
     put32(&b, beats.n);
     put32(&b, P->names.n);
@@ -1768,6 +1790,11 @@ bool songconv_install(const char * src_path, const char * dest_root, const ConvO
                         }
                         if (!pro)
                             o->flags |= NOTE_TOM_B;
+                        // as YARG plays one: red's a hi-hat on yellow, yellow the snare on red
+                        if (in_ranges(P.disco[d].v, P.disco[d].n, o->tick)) {
+                            o->mask = (o->mask & ~3) | (o->mask & 1) << 1 | (o->mask >> 1 & 1);
+                            o->flags &= ~NOTE_TOM_Y;
+                        }
                     }
                 }
         char path[800];

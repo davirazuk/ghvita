@@ -70,6 +70,8 @@ static struct {
     Sustain sus[MAX_SUS];
     double score;
     int streak, best_streak, hits, misses, overhits, sp_hit;
+    double off_sum, off_sq;             // how early or late the hits came, seconds
+    int off_n;
     float sp, rock;
     bool sp_active, sp_ready_told;
     double sp_last_q;           // where Star Power's drain has got to, in quarter notes
@@ -717,6 +719,7 @@ static void setup_camera(void)
 #define GAP_MIN 2.0                     // seconds between gems for freestyle
 #define GAP_AFTER 0.3
 #define PRESS_GRACE 0.13                // a press this soon after its lane's note was judged belongs to that note
+#define NEXT_LATE 0.05                  // a drum hit this late on a gem may be meant for the next on that pad
 #define ROLL_GAP 0.11                   // gems this close on a pad are a roll: no thumb keeps up with them
 #define ROLL_RUN 4                      // that many in a row
 #define ROLL_HOLD 0.18                  // a roll goes on while its pad was hit this recently
@@ -845,6 +848,8 @@ static void reset_play(void)
     G.first = 0;
     G.score = 0;
     G.streak = G.best_streak = G.hits = G.misses = G.overhits = G.sp_hit = 0;
+    G.off_sum = G.off_sq = 0;
+    G.off_n = 0;
     G.sp = 0;
     G.rock = G.needle = 0.5f;
     G.sp_active = G.sp_ready_told = false;
@@ -1067,6 +1072,12 @@ Result game_result(void)
     r.notes_total = G.vocal ? vox_phrases() : G.part ? G.part->note_count : 0;
     r.best_streak = G.best_streak;
     r.overhits = G.overhits;
+    if (G.off_n >= 20) {
+        double mean = G.off_sum / G.off_n, var = G.off_sq / G.off_n - mean * mean;
+        r.timed = true;
+        r.off_ms = (int)floor(mean * 1000 + 0.5);
+        r.spread_ms = (int)(sqrt(var > 0 ? var : 0) * 1000 + 0.5);
+    }
     r.sp_hit = G.sp_hit;
     r.sp_total = G.part ? G.part->sp_count : 0;
     r.failed = G.failed;
@@ -1250,20 +1261,36 @@ static double gap_left(void)
     return next - prev >= GAP_MIN && G.t > prev + GAP_AFTER && G.t < next - WINDOW ? next - WINDOW - G.t : 0;
 }
 
-static void pad_sound(int lane, float volume)
+// a pad's piece of the kit, from what the gem says it is (a chart from before they were told apart, or a hit with no gem:
+// yellow's the hi-hat, blue a tom, green the crash)
+static bool lane_cymbal(int lane, int flags)
+{
+    if (G.lanes == 5)
+        return lane == 1 || lane == 3;
+    return lane >= 1 && lane <= 3 && !(flags & (NOTE_TOM_Y << (lane - 1)));
+}
+
+static void pad_sound(int lane, const Note * n, float volume)
 {
     static const int four[4] = {SND_DRUM_SNARE, SND_DRUM_HAT, SND_DRUM_TOM_HI, SND_DRUM_CRASH};
     static const int five[5] = {SND_DRUM_SNARE, SND_DRUM_HAT, SND_DRUM_TOM_HI, SND_DRUM_CRASH, SND_DRUM_TOM_LO};
+    static const int toms[4] = {SND_DRUM_SNARE, SND_DRUM_TOM_HI, SND_DRUM_TOM_MID, SND_DRUM_TOM_LO};
+    static int turn;
     int snd = lane == LANE_OPEN ? SND_DRUM_KICK : G.lanes == 4 ? four[lane & 3] : five[lane % 5];
-    sound_play(res.snd[snd], volume, false);
+    if (n && G.lanes == 4 && lane != LANE_OPEN && G.chart->version >= 2) {
+        snd = toms[lane & 3];
+        if (lane_cymbal(lane, n->flags))
+            snd = lane == 1 ? SND_DRUM_HAT : lane == 2 ? SND_DRUM_RIDE : SND_DRUM_CRASH;
+    }
+    // the takes in turn, so a run isn't one sample over and over
+    int takes = snd == SND_DRUM_KICK || snd == SND_DRUM_SNARE || snd == SND_DRUM_HAT ? 3 : 2;
+    sound_play(res.snd[snd + turn++ % takes], volume, false);
 }
 
 static void press_lane(int lane)
 {
     const Part * p = G.part;
     uint8_t bit = lane == LANE_OPEN ? FRET_OPEN : 1 << lane;
-    if (G.drums && cfg.drum_hits)
-        pad_sound(lane, 0.5f);
     for (int i = G.first; i < p->note_count; i++) {
         const Note * n = &p->notes[i];
         double nt = n->time / 1e6;
@@ -1271,12 +1298,31 @@ static void press_lane(int lane)
             break;
         if (G.state[i] != PENDING || nt < G.t - WINDOW || !(n->frets & bit) || (G.got[i] & bit))
             continue;
+        // on a fast run a hit nearer the next gem on this pad is that gem: the one skipped goes as the miss it was, not
+        // one further down the run, and the flame and the sound land on what was played
+        if (G.drums && G.t - nt > NEXT_LATE) {
+            int k = i + 1;
+            while (k < p->note_count && !(p->notes[k].frets & bit))
+                k++;
+            if (k < p->note_count && p->notes[k].time / 1e6 - G.t < G.t - nt)
+                continue;
+        }
         // the fingers already down count: a repeated chord needs just one key pressed again
         G.got[i] |= bit | (G.drums ? 0 : G.held & n->frets);
-        if (G.got[i] == n->frets)
+        if (G.drums && cfg.drum_hits)
+            pad_sound(lane, n, 0.5f);
+        if (G.got[i] == n->frets) {
             hit_note(i);
+            double off = G.t - nt;
+            G.off_sum += off;
+            G.off_sq += off * off;
+            G.off_n++;
+        }
         return;
     }
+    bool gap = G.drums && gap_left() > 0;
+    if (G.drums && (gap || cfg.drum_hits))
+        pad_sound(lane, NULL, gap ? 0.9f : 0.5f);
     // a finger coming down just after its chord counted, or a press just late for a note that's already cost the miss,
     // isn't a stray one
     if (G.t - G.judged_t[lane] < PRESS_GRACE)
@@ -1284,8 +1330,7 @@ static void press_lane(int lane)
     // a stray drum hit is just a fill, and heard in a gap of the chart
     if (!G.drums)
         overhit();
-    else if (gap_left() > 0) {
-        pad_sound(lane, cfg.drum_hits ? 0.4f : 0.9f);
+    else if (gap) {
         G.freestyle++;
         // a fill, and the crowd's with it. Hits as a drummer could play them: mashing adds nothing
         if (G.t > 0 && G.t - G.free_t >= 0.08) {
@@ -1862,14 +1907,19 @@ static void draw_gems(void)
             if (!(n->frets & (1 << l)))
                 continue;
             int c = G.sp_active ? 5 : lane_art(l);
+            // a cymbal lies wide and flat, its dome lit, so it can be told from a drum at a glance
+            bool cym = G.drums && G.chart->version >= 2 && lane_cymbal(l, n->flags);
+            const char * look = cym ? kinds[1] : kinds[kind];
+            float gw = cym ? 1.2f : 1.04f, gh = cym ? 0.4f : 0.52f;
             if (star)
-                snprintf(name, sizeof(name), "star_%s_%d_%d", kinds[kind], c, star_frame);
+                snprintf(name, sizeof(name), "star_%s_%d_%d", look, c, star_frame);
             else
-                snprintf(name, sizeof(name), "gem_%s_%d", kinds[kind], c);
+                snprintf(name, sizeof(name), "gem_%s_%d", look, c);
             // a soft shadow lifts the gem off the board art; a touch larger than before
             const Sprite * gem = atlas_get(res.game, name);
-            board(lane_x(l), 0, z - 0.07f, 1.12f, 0.56f, gem, 0, 0, 1, 1, with_alpha(RGBA(0, 0, 0, 255), a * 0.45f));
-            board(lane_x(l), 0, z, 1.04f, 0.52f, gem, 0, 0, 1, 1, col);
+            board(lane_x(l), 0, z - 0.07f, gw * 1.08f, gh * 1.08f, gem, 0, 0, 1, 1,
+                  with_alpha(RGBA(0, 0, 0, 255), a * 0.45f));
+            board(lane_x(l), 0, z, gw, gh, gem, 0, 0, 1, 1, col);
         }
     }
 }

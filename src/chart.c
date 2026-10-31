@@ -34,6 +34,7 @@ Chart * chart_load(const char * path)
     if (size < 28 || memcmp(d, "VHC1", 4) != 0)
         goto bad;
     memcpy(h, d + 4, sizeof(h));
+    c->version = h[0];
     c->tempo_count = h[1];
     c->beat_count = h[2];
     c->section_count = h[3];

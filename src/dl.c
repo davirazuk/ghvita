@@ -916,6 +916,21 @@ static void job_msg(Job * j, const char * fmt, const char * a)
 
 // -------------------------------------------------------------------------------------------- unpacking a download
 
+// where an archive's file goes in dir, its folders made; false: skip it (no climbing out of the folder)
+static bool entry_path(const char * name, const char * dir, char * path, size_t size)
+{
+    char rel[500];
+    snprintf(rel, sizeof(rel), "%s", name);
+    for (char * p = rel; *p; p++)
+        if (*p == '\\')
+            *p = '/';
+    if (rel[0] == '/' || strstr(rel, "../") || !strcmp(rel, ".."))
+        return false;
+    safe_part(rel);
+    snprintf(path, size, "%s/%s", dir, rel);
+    return true;
+}
+
 static bool extract_archive(const char * file, const char * dir, char * err, size_t err_size)
 {
     mkdirs(dir);
@@ -956,7 +971,11 @@ static bool extract_archive(const char * file, const char * dir, char * err, siz
         if (r == ARCHIVE_EOF)
             break;
         if (r < ARCHIVE_WARN) {
-            snprintf(err, err_size, "the archive is damaged: %s", archive_error_string(a));
+            const char * why = archive_error_string(a);
+            if (why && strstr(why, "solid"))
+                snprintf(err, err_size, "this is a solid RAR, which the Vita can't unpack yet");
+            else
+                snprintf(err, err_size, "the archive is damaged: %s", why);
             ok = false;
             break;
         }
@@ -965,17 +984,9 @@ static bool extract_archive(const char * file, const char * dir, char * err, siz
             name = archive_entry_pathname(e);
         if (!name)
             continue;
-        // no climbing out of the folder
-        char rel[500];
-        snprintf(rel, sizeof(rel), "%s", name);
-        for (char * p = rel; *p; p++)
-            if (*p == '\\')
-                *p = '/';
-        if (rel[0] == '/' || strstr(rel, "../") || !strcmp(rel, ".."))
-            continue;
-        safe_part(rel);
         char path[800];
-        snprintf(path, sizeof(path), "%s/%s", dir, rel);
+        if (!entry_path(name, dir, path, sizeof(path)))
+            continue;
         if (archive_entry_filetype(e) == AE_IFDIR) {
             mkdirs(path);
             continue;
@@ -1000,7 +1011,7 @@ static bool extract_archive(const char * file, const char * dir, char * err, siz
                 break;
             }
         if (n < 0 && ok) {
-            snprintf(err, err_size, "couldn't unpack %s: %s", rel, archive_error_string(a));
+            snprintf(err, err_size, "couldn't unpack %s: %s", name, archive_error_string(a));
             ok = false;
         }
         if (fclose(out) != 0 && ok) {

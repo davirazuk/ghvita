@@ -13,7 +13,7 @@ A native rhythm game for the PS Vita in the style of Guitar Hero World Tour, wri
 
 ## What isn't here
 
-This repository holds the code only. The art and sound in `assets/` and the LiveArea images in `vita/sce_sys/` are made from your own copies of the games, and songs are yours to bring. `tools/mkassets.py`, `tools/venues.py` and `tools/band.py` build them, and `tools/mkdrums.py` makes the drum kit sounds.
+This repository holds the code only. The art and sound in `assets/` and the LiveArea images in `vita/sce_sys/` are made from your own copies of the games, and songs are yours to bring. `tools/mkassets.py`, `tools/venues.py` and `tools/band.py` build them, and `tools/mkdrums.py` cuts the drum kit from a YARG install.
 
 ## Building
 

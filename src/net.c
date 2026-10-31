@@ -49,7 +49,7 @@ static int on_progress(void * user, curl_off_t total, curl_off_t done, curl_off_
     return r->cancel && *r->cancel;         // non-zero stops the transfer
 }
 
-int http_fetch(const HttpReq * r, char ** body, size_t * len, char * err, size_t err_size)
+static int fetch_once(const HttpReq * r, char ** body, size_t * len, char * err, size_t err_size, bool * again)
 {
     static bool global;
     if (!global) {
@@ -107,6 +107,9 @@ int http_fetch(const HttpReq * r, char ** body, size_t * len, char * err, size_t
     if (sink.file && fclose(sink.file) != 0)
         sink.write_failed = true;
     if (rc != CURLE_OK || sink.write_failed) {
+        *again = !sink.write_failed &&
+                 (rc == CURLE_RECV_ERROR || rc == CURLE_SEND_ERROR || rc == CURLE_PARTIAL_FILE || rc == CURLE_GOT_NOTHING ||
+                  rc == CURLE_COULDNT_CONNECT || rc == CURLE_OPERATION_TIMEDOUT || rc == CURLE_SSL_CONNECT_ERROR);
         if (sink.write_failed)
             snprintf(err, err_size, "the memory card is full");
         else if (rc == CURLE_ABORTED_BY_CALLBACK)
@@ -126,6 +129,21 @@ int http_fetch(const HttpReq * r, char ** body, size_t * len, char * err, size_t
     if (len)
         *len = sink.len;
     return (int)status;
+}
+
+// a host dropping the connection now and then is no reason to give up on a song
+int http_fetch(const HttpReq * r, char ** body, size_t * len, char * err, size_t err_size)
+{
+    for (int attempt = 1;; attempt++) {
+        bool again = false;
+        int status = fetch_once(r, body, len, err, err_size, &again);
+        if (!again || attempt == 3 || (r->cancel && *r->cancel))
+            return status;
+        plat_log("http: trying again (%d)", attempt);
+        if (r->done)
+            *r->done = 0;
+        plat_sleep_us(attempt * 1000000);
+    }
 }
 
 void url_escape(char * out, size_t size, const char * in)
