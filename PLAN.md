@@ -151,3 +151,22 @@ The venue is a picture, and the show is drawn over it in `draw_stage`: screens, 
 Every other four bars the camera closes in on one of the band, keeping them where they are on the screen, and a solo goes to whoever's playing it.
 
 Clocks: a song loads onto eco clocks and a real late frame sends it to full. Changing them mid-song costs a late frame by itself, which is why the old governor never stayed on eco.
+
+## Fair on a controller (2026-10-30)
+- Tremolos (find_tremolos): the same frets over and over under SPAM_GAP 0.12 s, as Rock Band's lanes. The first gem is played, the rest pass while the frets were hit within SPAM_HOLD 0.2 s. Mashing with no timing still fails: the hit window stays +-95 ms and the rule asks for real tapping.
+- Slips: PRESS_GRACE and the pull-off rules forgive a finger landing a moment early. Don't widen these further: "dont make the engine too innacurate".
+- test/tools/dl_main.c is the real downloader without the game, tools/humanbot.py plays like a person and tools/runs.py compares rule changes.
+
+## Downloads (2026-10-31)
+- mega.c: public file and folder links with their own AES (the key is in the link). Folder links were never tested on a live folder: every one found was dead.
+- rar.c, ppmd7.c: RAR 3/4 for the solid archives libarchive refuses. Written against the format, checked by each file's CRC; 25 real archives pass and 300 damaged ones neither crash nor hang under ASan.
+- Short links (bit.ly, tinyurl) are followed with HEAD, one hop at a time, then treated as whatever they lead to. Song-site links can only reach http and https.
+
+## World Tour (tour.c)
+- 8 legs of 5 gigs, every venue once. A gig is 3 songs and an encore, kept in tour.txt once picked. The pool for a leg is its stretch of the library sorted by the part's difficulty; least used first, no band twice on a bill while there's a choice.
+- The gig's venue is forced through game_force_venue. tour_on sends select, pause and results back to S_TOUR.
+- TOUR_TO_OPEN gigs open the next leg. A played song with no stars still counts as one star, so it's never unplayed again.
+
+## Start-up (2026-10-31)
+- Hardware log before this: pictures 6.1 s of about 8 s. tools/rawtex.py and gfx.c load_raw cut the decoding. The vita time hasn't been measured yet: read "loaded: pictures" in log.txt.
+- library.bin: Song records keyed on the folder's time. On the Vita the listing has the time, so a known song costs no file access at all. Songs edited in place can keep the folder's time: the list menu's "Read the whole card again" drops the file.
