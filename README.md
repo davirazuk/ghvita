@@ -11,7 +11,7 @@ A native rhythm game for the PS Vita in the style of Guitar Hero World Tour, wri
 - World Tour: forty gigs in eight legs, setlists picked from your own songs, an encore and a rank to earn
 - Practice: any stretch of a song by its sections, looping, from 50% to full speed
 - A song browser with search, ten sorts, filters, favourites and jumping between groups
-- A downloader for Chorus Encore and RhythmVerse, with Clone Hero folders, `.sng` packages and unencrypted Rock Band packages; downloads are turned into small Opus stems on the Vita
+- A downloader for Chorus Encore and RhythmVerse, with Clone Hero folders, `.sng` packages and Rock Band `.con` packages (encrypted audio included); downloads are turned into small Opus stems on the Vita
 - Downloads from Google Drive, Mega, MediaFire and short links, unpacking zip, 7z and RAR, solid RAR archives too
 - A venue that follows the song: lights by section and loudness, moving beams, a crowd that jumps with how you're doing, screens with the cover, a camera that closes in on the band, and a band that plays its own parts of the chart
 

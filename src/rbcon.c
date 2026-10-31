@@ -6,6 +6,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include "rbcon.h"
+#include "moggdec.h"
 #include "shrink.h"
 
 #define BLOCK 0x1000
@@ -92,7 +93,10 @@ static bool read_table(Con * c, uint32_t start, int blocks)
 }
 
 // a file's bytes from skip on, into out or a new buffer
-static bool extract(const Con * c, const Entry * e, FILE * out, uint8_t * mem, uint32_t skip, uint32_t limit)
+typedef void (*XorFn)(void *, uint8_t *, size_t, uint32_t);
+
+static bool extract_ex(const Con * c, const Entry * e, FILE * out, uint8_t * mem, uint32_t skip, uint32_t limit,
+                       XorFn fn, void * ctx)
 {
     static uint8_t buf[BLOCK];
     uint32_t b = e->first, left = e->size, pos = 0;
@@ -100,6 +104,8 @@ static bool extract(const Con * c, const Entry * e, FILE * out, uint8_t * mem, u
         uint32_t want = left < BLOCK ? left : BLOCK;
         if (fseek(c->f, block_at(c, b), SEEK_SET) || fread(buf, 1, want, c->f) != want)
             return false;
+        if (fn)
+            fn(ctx, buf, want, pos);
         if (mem) {
             uint32_t k = pos + want > limit ? (pos < limit ? limit - pos : 0) : want;
             memcpy(mem + pos, buf, k);
@@ -118,6 +124,11 @@ static bool extract(const Con * c, const Entry * e, FILE * out, uint8_t * mem, u
         }
     }
     return true;
+}
+
+static bool extract(const Con * c, const Entry * e, FILE * out, uint8_t * mem, uint32_t skip, uint32_t limit)
+{
+    return extract_ex(c, e, out, mem, skip, limit, NULL, NULL);
 }
 
 static const Entry * find_ext(const Con * c, const char * ext, const char * stem)
@@ -253,14 +264,35 @@ static bool unpack_song(Con * c, const Entry * mogg, const char * dta, size_t dt
     if (!mid)
         return false;
     // the header of a .mogg: its version, where the Ogg starts. Past 10 the audio is encrypted
-    uint8_t head[8];
+    uint8_t head[20];
     if (!extract(c, mogg, NULL, head, 0, sizeof(head)))
         return false;
     uint32_t version = head[0] | head[1] << 8 | head[2] << 16 | (uint32_t)head[3] << 24;
     uint32_t ogg = head[4] | head[5] << 8 | head[6] << 16 | (uint32_t)head[7] << 24;
-    if (version != 10 || ogg >= mogg->size) {
-        snprintf(err, err_size, "its audio is encrypted (can't be played here)");
+    if (ogg >= mogg->size) {
+        snprintf(err, err_size, "its audio header is broken");
         return false;
+    }
+    bool encrypted = version != 10;
+    MoggCipher cipher;
+    uint8_t * keys = NULL;
+    if (encrypted) {
+        uint32_t hmx = head[16] | head[17] << 8 | head[18] << 16 | (uint32_t)head[19] << 24;
+        size_t need = 20 + (size_t)hmx * 8 + 80;
+        if (version > 17 || hmx > 0x10000 || need > mogg->size) {
+            snprintf(err, err_size, "its audio is encrypted in a way this can't read");
+            return false;
+        }
+        keys = malloc(need);
+        if (!keys || !extract(c, mogg, NULL, keys, 0, (uint32_t)need)) {
+            free(keys);
+            snprintf(err, err_size, "couldn't read its audio header");
+            return false;
+        }
+        if (!mogg_cipher_init(&cipher, keys, need, err, err_size)) {
+            free(keys);
+            return false;
+        }
     }
     char title[96] = "", artist[96] = "", album[96] = "", genre[48] = "", year[12] = "", author[64] = "";
     const char * mix_s = NULL, * mix_end = NULL;
@@ -313,8 +345,19 @@ static bool unpack_song(Con * c, const Entry * mogg, const char * dta, size_t dt
     mkdir(dest, 0777);
     mkdir(folder, 0777);
     snprintf(path, sizeof(path), "%s/song.ogg", folder);
-    FILE * f = fopen(path, "wb");
-    bool ok = f && extract(c, mogg, f, NULL, ogg, 0);
+    FILE * f = fopen(path, encrypted ? "wb+" : "wb");
+    bool ok = f && (encrypted ? extract_ex(c, mogg, f, NULL, ogg, 0, (XorFn)mogg_cipher_xor, &cipher)
+                              : extract(c, mogg, f, NULL, ogg, 0));
+    bool cipher_err = false;
+    if (ok && encrypted) {
+        uint8_t first[64];
+        ok = fseek(f, 0, SEEK_SET) == 0 && fread(first, 1, sizeof(first), f) == sizeof(first) &&
+             mogg_fix_ogg(&cipher, first, sizeof(first), err, err_size);
+        if (ok)
+            ok = fseek(f, 0, SEEK_SET) == 0 && fwrite(first, 1, sizeof(first), f) == sizeof(first);
+        cipher_err = !ok;
+    }
+    free(keys);
     if (f)
         ok = !fclose(f) && ok;
     snprintf(path, sizeof(path), "%s/song.mix", folder);
@@ -340,9 +383,10 @@ static bool unpack_song(Con * c, const Entry * mogg, const char * dta, size_t dt
         ok = !fclose(f);
     } else
         ok = false;
-    if (!ok)
-        snprintf(err, err_size, "couldn't write the song (card full?)");
-    else
+    if (!ok) {
+        if (!cipher_err)
+            snprintf(err, err_size, "couldn't write the song (card full?)");
+    } else
         shrink_mogg(folder);
     return ok;
 }

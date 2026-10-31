@@ -57,6 +57,11 @@ pack.py CHART_VERSION: bump when the chart output changes; repacking then redoes
   pack.py's song.ini. Raw CH folders and .sng files in songs/ are converted at startup ("ADDING <name>").
 - decoder.c: Vorbis, Opus, MP3, WAV to 48 kHz stereo (Catmull-Rom resampling); two decode threads (cores 2 and 1),
   stem s on thread s % 2. 2026-10-30: all 15 test songs full-combo by the bot on the new engine.
+- rbcon.c: Xbox 360 STFS packages (.con) holding songs.dta, a .mid and a .mogg per song; each is unpacked into the
+  song folder the converter takes, from a download or a file dropped in songs/. Rock Band's encrypted moggs (versions
+  11-17, every key index and the five v17 hidden-key sets, HMXA first pages) are decrypted while they stream out by
+  moggdec.c, a C port of DarkRTA/themethod3; aes128.c is shared with mega.c. Unencrypted (version 10) audio is copied
+  as-is. Songs already unpacked on the card don't need a re-download.
 - dl.c (threads at priority 120 on cores 1-2, below the decoders): Chorus Encore (POST api.enchor.us/search, files.enchor.us
   /<md5>.sng) and RhythmVerse (api/ch + api/ps songfiles/search/live, or songfiles/list sorted by update_date when
   nothing is typed; needs 3+ letters; a phrase that finds < 5 also searches its two longest words, 60 each, and keeps
