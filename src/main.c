@@ -975,9 +975,11 @@ static void jump_group(int dir)
 }
 
 // Select: what to sort by, what to show, this song
+static void scan_progress(int found, const char * converting);
+
 static void list_menu_update(void)
 {
-    enum { ROWS = 4 };
+    enum { ROWS = 5 };
     Song * s = songs_get(sel);
     if (repeat & BTN_UP)
         list_row = (list_row + ROWS - 1) % ROWS;
@@ -1006,6 +1008,15 @@ static void list_menu_update(void)
         } else if (list_row == 3 && s) {
             del_ask = true;
             list_menu = false;
+        } else if (list_row == 4) {
+            // songs changed by hand on a PC can keep their folder's time: this reads them all
+            stop_preview();
+            art_for = preview_for = -1;
+            sel = pos = top = 0;
+            songs_forget();
+            songs_scan(scan_progress);
+            view_stale = true;
+            list_menu = false;
         }
     }
     if (pressed & (BTN_CIRCLE | BTN_SELECT)) {
@@ -1018,14 +1029,15 @@ static void list_menu_update(void)
 static void list_menu_draw(const Song * s)
 {
     gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(0, 0, 0, 170));
-    panel(200, 130, 560, 280);
-    char rows[4][64];
+    panel(200, 104, 560, 336);
+    char rows[5][64];
     snprintf(rows[0], sizeof(rows[0]), "Sort by   %s", sort_name(cfg.sort));
     snprintf(rows[1], sizeof(rows[1]), "Show   %s", show_name());
     snprintf(rows[2], sizeof(rows[2]), "%s", s && s->fav ? "Take out of favourites" : "Add to favourites");
     snprintf(rows[3], sizeof(rows[3]), "Delete this song");
-    for (int i = 0; i < 4; i++) {
-        float y = 168 + i * 54;
+    snprintf(rows[4], sizeof(rows[4]), "Read the whole card again");
+    for (int i = 0; i < 5; i++) {
+        float y = 142 + i * 54;
         if (i == list_row)
             gfx_sprite(atlas_get(res.hud, "wor_select"), 224, y - 6, 512, 48, WHITE);
         font_draw_fit(res.ui, rows[i], SCREEN_W / 2, y + 2, 30, 460, i == list_row ? RGBA(255, 230, 150, 255)

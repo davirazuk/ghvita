@@ -1336,6 +1336,8 @@ void game_stop(void)
     memset(G.band, 0, sizeof(G.band));
     res_band_free();
     free_song();
+    tex_free(G.art);
+    G.art = NULL;
     plat_set_perf(0);
 }
 

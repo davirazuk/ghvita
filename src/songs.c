@@ -145,66 +145,214 @@ static bool has_ext(const char * name, const char * ext)
     return n > e && strcasecmp(name + n - e, ext) == 0;
 }
 
+// ------------------------------------------------------------------------------------------------ the library file
+// What every folder said last time, so a library of thousands doesn't mean opening thousands of files at each start.
+// A folder whose time has changed is read afresh. New songs, gone songs and a new Song layout all just rewrite it
+
+#define LIB_MAGIC 0x3142494cu
+
+typedef struct {
+    uint32_t magic, size;
+} LibHead;
+
+static Song * lib;
+static int lib_n, lib_mask;
+static int * lib_slots;
+static bool lib_changed;
+
+static uint32_t folder_hash(const char * s)
+{
+    uint32_t h = 2166136261u;
+    while (*s)
+        h = (h ^ (uint8_t)*s++) * 16777619u;
+    return h;
+}
+
+static void lib_path(char * path, size_t size)
+{
+    snprintf(path, size, "%slibrary.bin", plat_data_dir());
+}
+
+static void lib_free(void)
+{
+    free(lib);
+    free(lib_slots);
+    lib = NULL;
+    lib_slots = NULL;
+    lib_n = 0;
+}
+
+static void lib_load(void)
+{
+    char path[400];
+    lib_path(path, sizeof(path));
+    FILE * f = fopen(path, "rb");
+    if (!f)
+        return;
+    LibHead h;
+    long size = 0;
+    if (fread(&h, sizeof(h), 1, f) == 1 && h.magic == LIB_MAGIC && h.size == sizeof(Song)) {
+        fseek(f, 0, SEEK_END);
+        size = ftell(f) - (long)sizeof(h);
+        fseek(f, sizeof(h), SEEK_SET);
+    }
+    int n = size > 0 ? (int)(size / sizeof(Song)) : 0;
+    int slots = 64;
+    while (slots < n * 2)
+        slots *= 2;
+    lib = n ? malloc(n * sizeof(Song)) : NULL;
+    lib_slots = n ? malloc(slots * sizeof(int)) : NULL;
+    if (lib && lib_slots && fread(lib, sizeof(Song), n, f) == (size_t)n) {
+        lib_n = n;
+        lib_mask = slots - 1;
+        memset(lib_slots, -1, slots * sizeof(int));
+        for (int i = 0; i < n; i++) {
+            lib[i].folder[sizeof(lib[i].folder) - 1] = 0;
+            uint32_t at = folder_hash(lib[i].folder) & lib_mask;
+            while (lib_slots[at] >= 0)
+                at = (at + 1) & lib_mask;
+            lib_slots[at] = i;
+        }
+    } else
+        lib_free();
+    fclose(f);
+}
+
+static const Song * lib_find(const char * folder, long stamp)
+{
+    if (!lib_n)
+        return NULL;
+    for (uint32_t at = folder_hash(folder) & lib_mask; lib_slots[at] >= 0; at = (at + 1) & lib_mask) {
+        const Song * s = &lib[lib_slots[at]];
+        if (strcmp(s->folder, folder) == 0)
+            return s->stamp == stamp ? s : NULL;
+    }
+    return NULL;
+}
+
+// scores, plays and favourites have their own files and come in after this
+static void lib_save(void)
+{
+    char path[400], fresh[410];
+    lib_path(path, sizeof(path));
+    snprintf(fresh, sizeof(fresh), "%s.new", path);
+    FILE * f = fopen(fresh, "wb");
+    if (!f)
+        return;
+    LibHead h = {LIB_MAGIC, sizeof(Song)};
+    bool ok = fwrite(&h, sizeof(h), 1, f) == 1 && fwrite(songs, sizeof(Song), count, f) == (size_t)count;
+    ok &= fclose(f) == 0;
+    remove(path);
+    if (!ok || rename(fresh, path) != 0)
+        remove(fresh);
+}
+
+void songs_forget(void)
+{
+    char path[400];
+    lib_path(path, sizeof(path));
+    remove(path);
+}
+
+static void scan_dir(const char * dir, int depth);
+
+// a folder listed by scan_dir: what the library file has for it, or read it
+static void scan_entry(const char * dir, const char * name, bool is_dir, long stamp, int depth)
+{
+    char path[400];
+    snprintf(path, sizeof(path), "%s/%s", dir, name);
+    const Song * known = is_dir ? lib_find(path, stamp) : NULL;
+    if (known) {
+        if (count == cap) {
+            cap = cap ? cap * 2 : 256;
+            songs = realloc(songs, cap * sizeof(Song));
+        }
+        songs[count++] = *known;
+        if (scan_progress && count % 250 == 0)
+            scan_progress(count, NULL);
+        return;
+    }
+    lib_changed = true;
+    struct stat st;
+    if (stat(path, &st) != 0)
+        return;
+    if (!S_ISDIR(st.st_mode)) {
+        // a .sng copied onto the card: unpacked into a song folder of its own, then the package goes
+        if (!has_ext(name, ".sng"))
+            return;
+        if (scan_progress)
+            scan_progress(count, name);
+        char out[400], err[160];
+        if (songconv_install(path, dir, NULL, out, sizeof(out), err, sizeof(err))) {
+            remove(path);
+            if (load_song(out)) {
+                songs[count - 1].added = (long)st.st_mtime;
+                return;
+            }
+        }
+        plat_log("songs: can't add %s: %s", path, err);
+        return;
+    }
+    if (load_song(path)) {
+        songs[count - 1].added = (long)st.st_mtime;
+        songs[count - 1].stamp = stamp;
+        if (scan_progress && count % 25 == 0)
+            scan_progress(count, NULL);
+    } else if (songconv_is_raw(path)) {
+        // a Clone Hero song folder copied onto the card: converted where it is, once
+        if (scan_progress)
+            scan_progress(count, name);
+        ConvOptions opt = {.in_place = true};
+        char out[400], err[160];
+        if (songconv_install(path, dir, &opt, out, sizeof(out), err, sizeof(err)) && load_song(path)) {
+            songs[count - 1].added = (long)st.st_mtime;
+            return;
+        }
+        plat_log("songs: can't add %s: %s", path, err);
+    } else if (depth < 2)
+        scan_dir(path, depth + 1);
+}
+
 static void scan_dir(const char * dir, int depth)
 {
     DIR * d = opendir(dir);
     if (!d)
         return;
     // names first (a .sng unpacked into this folder mustn't upset readdir)
-    char (*names)[256] = NULL;
-    int n = 0, cap = 0;
+    typedef struct {
+        char name[256];
+        bool is_dir;
+        long stamp;
+    } Entry;
+    Entry * names = NULL;
+    int n = 0, cap_names = 0;
     struct dirent * e;
     while ((e = readdir(d))) {
         if (e->d_name[0] == '.')
             continue;
-        if (n == cap) {
-            cap = cap ? cap * 2 : 64;
-            names = realloc(names, cap * sizeof(*names));
+        if (n == cap_names) {
+            cap_names = cap_names ? cap_names * 2 : 64;
+            names = realloc(names, cap_names * sizeof(*names));
         }
-        snprintf(names[n++], sizeof(names[0]), "%s", e->d_name);
+        Entry * en = &names[n++];
+        snprintf(en->name, sizeof(en->name), "%s", e->d_name);
+#ifdef __vita__
+        // the Vita's listing carries the file's details: no stat for each of thousands of folders
+        const SceDateTime * t = &e->d_stat.st_mtime;
+        en->is_dir = SCE_S_ISDIR(e->d_stat.st_mode);
+        en->stamp = (long)(((unsigned long)(t->year - 1980) << 25) | ((unsigned long)t->month << 21) |
+                           ((unsigned long)t->day << 16) | (t->hour << 11) | (t->minute << 5) | (t->second >> 1));
+#else
+        char path[700];
+        struct stat st;
+        snprintf(path, sizeof(path), "%s/%s", dir, e->d_name);
+        en->is_dir = stat(path, &st) == 0 && S_ISDIR(st.st_mode);
+        en->stamp = en->is_dir ? (long)st.st_mtime : 0;
+#endif
     }
     closedir(d);
-    for (int i = 0; i < n; i++) {
-        char path[400];
-        snprintf(path, sizeof(path), "%s/%s", dir, names[i]);
-        struct stat st;
-        if (stat(path, &st) != 0)
-            continue;
-        if (!S_ISDIR(st.st_mode)) {
-            // a .sng copied onto the card: unpacked into a song folder of its own, then the package goes
-            if (!has_ext(names[i], ".sng"))
-                continue;
-            if (scan_progress)
-                scan_progress(count, names[i]);
-            char out[400], err[160];
-            if (songconv_install(path, dir, NULL, out, sizeof(out), err, sizeof(err))) {
-                remove(path);
-                if (load_song(out)) {
-                    songs[count - 1].added = (long)st.st_mtime;
-                    continue;
-                }
-            }
-            plat_log("songs: can't add %s: %s", path, err);
-            continue;
-        }
-        if (load_song(path)) {
-            songs[count - 1].added = (long)st.st_mtime;
-            if (scan_progress && count % 25 == 0)
-                scan_progress(count, NULL);
-        } else if (songconv_is_raw(path)) {
-            // a Clone Hero song folder copied onto the card: converted where it is, once
-            if (scan_progress)
-                scan_progress(count, names[i]);
-            ConvOptions opt = {.in_place = true};
-            char out[400], err[160];
-            if (songconv_install(path, dir, &opt, out, sizeof(out), err, sizeof(err)) && load_song(path)) {
-                songs[count - 1].added = (long)st.st_mtime;
-                continue;
-            }
-            plat_log("songs: can't add %s: %s", path, err);
-        } else if (depth < 2)
-            scan_dir(path, depth + 1);
-    }
+    for (int i = 0; i < n; i++)
+        scan_entry(dir, names[i].name, names[i].is_dir, names[i].stamp, depth);
     free(names);
 }
 
@@ -286,7 +434,18 @@ int songs_scan(void (*progress)(int found, const char * converting))
     count = 0;
     char dir[400];
     snprintf(dir, sizeof(dir), "%ssongs", plat_data_dir());
+    lib_load();
+    lib_changed = false;
+    int known = lib_n;
     scan_dir(dir, 0);
+    lib_free();
+    for (int i = 0; i < count; i++) {
+        memset(songs[i].best, 0, sizeof(songs[i].best));
+        songs[i].plays = 0;
+        songs[i].fav = false;
+    }
+    if (lib_changed || known != count)
+        lib_save();
     load_scores();
     load_favs();
     songs_sort(cfg.sort);

@@ -136,10 +136,45 @@ Tex * tex_rgba(const uint8_t * px, int w, int h, int flags)
     return t;
 }
 
+// The game's own pictures as tools/rawtex.py lays them out in assets/raw/: reading those is several times quicker than
+// decoding them on the Vita. Without them (or for any other picture) it decodes as usual
+static uint8_t * load_raw(const char * path, int * w, int * h)
+{
+    char raw[400];
+    const char * dir = plat_asset_dir(), * dot = strrchr(path, '.');
+    size_t len = strlen(dir);
+    if (!dot || strncmp(path, dir, len) != 0)
+        return NULL;
+    snprintf(raw, sizeof(raw), "%sraw/%.*s.rgba", dir, (int)(dot - path - len), path + len);
+    FILE * f = fopen(raw, "rb");
+    if (!f)
+        return NULL;
+    uint32_t head[2];
+    uint8_t * px = NULL;
+    if (fread(head, sizeof(head), 1, f) == 1 && head[0] && head[1] && head[0] <= 4096 && head[1] <= 4096) {
+        size_t size = (size_t)head[0] * head[1] * 4;
+        px = malloc(size);
+        if (px && fread(px, 1, size, f) != size) {
+            free(px);
+            px = NULL;
+        }
+        *w = (int)head[0];
+        *h = (int)head[1];
+    }
+    fclose(f);
+    return px;
+}
+
 Tex * tex_load(const char * path, int flags)
 {
     int w, h, n;
-    uint8_t * px = stbi_load(path, &w, &h, &n, 4);
+    uint8_t * px = load_raw(path, &w, &h);
+    if (px) {
+        Tex * t = tex_rgba(px, w, h, flags);
+        free(px);
+        return t;
+    }
+    px = stbi_load(path, &w, &h, &n, 4);
     if (!px) {
         plat_log("tex: can't load %s", path);
         return NULL;

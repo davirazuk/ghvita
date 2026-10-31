@@ -26,6 +26,7 @@ typedef struct {
     char source[48];                        // where the downloader got it ("chorus:<md5>"), else empty
     Score best[PART_COUNT][DIFF_COUNT];
     long added;                             // when it came onto the card
+    long stamp;                             // its folder's time when read: the library file's test for a change
     int plays;
     bool fav;
 } Song;
@@ -36,6 +37,8 @@ enum { SORT_TITLE, SORT_ARTIST, SORT_ALBUM, SORT_YEAR, SORT_GENRE, SORT_CHARTER,
 // progress (or NULL) every 25 songs found, and before each new Clone Hero song (a folder or a .sng dropped in songs/)
 // is converted, with its name
 int songs_scan(void (*progress)(int found, const char * converting));
+// forget what the library file remembers: the next scan opens every folder
+void songs_forget(void);
 // a song just installed (the downloader's): its index after sorting, or -1
 int songs_add(const char * folder);
 int songs_find(const char * folder);
