@@ -183,3 +183,12 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 - Lone-stem rule: a stem with over 85% of the heard power is never muted or bent, checked past the first 3 s.
 - The log's "whammy:" lines give the meter earned and each frame's cost on the hardware. A frame must stay well under the 10.7 ms buffer. Whether it does on a Vita has not been measured.
 - test/tools/whammy_main.c runs the real mixer on a raw stem (tools/whammy.py reads it), bar_main.c the input. In the PC build, GHV_FIXED + GHV_PACE with SDL's disk audio driver captures the game's own mix, and script line "bar N" holds the whammy.
+
+## Updates from GitHub (update.c, update_apply.c, updater_main.c)
+- `tools/release.py --notes "..."` builds HEAD and publishes release v<commit count>: GHVita.vpk, update-full.zip, update-from-<last>.zip with only what changed, and manifest.txt. It refuses a dirty tree or a public repository: the VPK holds art made from your own games.
+- The menu asks GitHub once a boot. With a newer release it offers the update: Cross downloads, unpacks and checks every file's size and CRC, and nothing in the app is touched until that passes.
+- updater.bin (in the VPK) moves the files in with the game closed, the program last, keeping what it replaced in update/old. A failed move puts everything back. Power lost during it carries on at the next start, once, and then the game starts as it is, so it can't get stuck.
+- The repository is private, so the Vita needs a read-only token in ux0:data/ghvita/update.txt: a fine-grained token for this repository with Contents read-only. Without the file nothing is checked. It never goes in the repository or the VPK, and never in the log.
+- A manifest may only name eboot.bin, updater.bin and assets/. LiveArea files aren't updated: a new icon still needs the VPK.
+- PC test: GHV_UPDATE_API, GHV_UPDATE_TOKEN and GHV_APP stand in for GitHub, the token and the install. updater.bin and LoadExec have not been run on a Vita.
+

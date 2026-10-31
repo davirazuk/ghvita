@@ -42,6 +42,8 @@ void plat_present(void);
 int64_t plat_now_us(void);
 const char * plat_data_dir(void);       // saves, settings, songs/ (ends in '/')
 const char * plat_asset_dir(void);      // the app's own files (ends in '/')
+const char * plat_app_dir(void);        // where the app's installed, to write to
+void plat_run_updater(const char * staged, const char * app, const char * old);     // returns only if it couldn't start
 // starts the audio output: mix() fills frames of 48 kHz interleaved stereo and is called from the audio thread;
 // started() is told when that buffer starts playing, as (first frame's number since start, plat_now_us())
 void plat_audio_start(void (*mix)(int16_t * out, int frames), void (*started)(int64_t frame, int64_t when_us));

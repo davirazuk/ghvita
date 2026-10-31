@@ -1001,7 +1001,7 @@ static void solid_close(void * user, FILE * f)
     }
 }
 
-static bool extract_archive(const char * file, const char * dir, char * err, size_t err_size)
+bool dl_extract_archive(const char * file, const char * dir, char * err, size_t err_size)
 {
     dl_mkdirs(dir);
 #ifdef __vita__
@@ -1209,7 +1209,7 @@ static void install_tree(Install * in, const char * dir, int depth)
         else if (depth < 4 && (has_ext(names[i], ".zip") || has_ext(names[i], ".rar") || has_ext(names[i], ".7z"))) {
             char sub[720], err[200];
             snprintf(sub, sizeof(sub), "%s.x", p);
-            if (extract_archive(p, sub, err, sizeof(err)))
+            if (dl_extract_archive(p, sub, err, sizeof(err)))
                 install_tree(in, sub, depth + 1);
             else
                 snprintf(in->last_err, sizeof(in->last_err), "%s", err);
@@ -1431,7 +1431,7 @@ static void run_job(Job * j)
             if (!strcmp(kind, "sng"))
                 install_one(&in, file, true);
             else if (!strcmp(kind, "archive")) {
-                if (extract_archive(file, xdir, err, sizeof(err))) {
+                if (dl_extract_archive(file, xdir, err, sizeof(err))) {
                     remove(file);
                     install_tree(&in, xdir, 0);
                 } else

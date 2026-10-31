@@ -21,6 +21,7 @@
 #include <string.h>
 #include <stdarg.h>
 #include "plat.h"
+#include "update_apply.h"
 
 static SDL_Window * window;
 static SDL_GLContext context;
@@ -285,6 +286,30 @@ const char * plat_data_dir(void)
 const char * plat_asset_dir(void)
 {
     return asset_dir;
+}
+
+const char * plat_app_dir(void)
+{
+    return getenv("GHV_APP") ? getenv("GHV_APP") : "./app";
+}
+
+// what updater.bin does on a Vita, then a restart is the next run
+void plat_run_updater(const char * staged, const char * app, const char * old)
+{
+    char err[200] = "", path[512];
+    int n = update_apply(staged, app, old, err, sizeof(err));
+    snprintf(path, sizeof(path), "%supdate/result.txt", data_dir);
+    FILE * f = fopen(path, "w");
+    if (f) {
+        if (n >= 0)
+            fprintf(f, "ok %d\n", n);
+        else
+            fprintf(f, "failed %s\n", err);
+        fclose(f);
+    }
+    snprintf(path, sizeof(path), "%supdate/pending", data_dir);
+    remove(path);
+    exit(n >= 0 ? 0 : 1);
 }
 
 static void (*audio_mix)(int16_t * out, int frames);

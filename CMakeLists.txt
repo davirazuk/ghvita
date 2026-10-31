@@ -16,7 +16,15 @@ set_source_files_properties(src/main.c src/shrink.c src/rbcon.c src/moggdec.c sr
 # its memory is one block read as whatever's in it
 set_source_files_properties(src/ppmd7.c PROPERTIES COMPILE_FLAGS -fno-strict-aliasing)
 set(SRCS src/main.c src/game.c src/gfx.c src/font.c src/audio.c src/decoder.c src/chart.c src/songs.c src/songconv.c
-         src/res.c src/json.c src/net.c src/dl.c src/mega.c src/aes128.c src/moggdec.c src/rar.c src/ppmd7.c src/tour.c src/vocals.c src/rbcon.c src/shrink.c)
+         src/res.c src/json.c src/net.c src/dl.c src/mega.c src/aes128.c src/moggdec.c src/rar.c src/ppmd7.c src/tour.c src/vocals.c src/rbcon.c src/shrink.c
+         src/update.c src/update_apply.c)
+
+# the build's number is how many commits it has: a release is tagged with the same one (tools/release.py)
+execute_process(COMMAND git rev-list --count HEAD WORKING_DIRECTORY ${CMAKE_SOURCE_DIR} OUTPUT_VARIABLE GHV_COMMITS OUTPUT_STRIP_TRAILING_WHITESPACE)
+if (NOT GHV_BUILD)
+    set(GHV_BUILD ${GHV_COMMITS})
+endif()
+set_source_files_properties(src/update.c PROPERTIES COMPILE_DEFINITIONS GHV_BUILD=${GHV_BUILD})
 
 if (VITA)
     set(VITA_APP_NAME "GH Vita")
@@ -36,9 +44,13 @@ if (VITA)
         SceIme_stub SceAudioIn_stub
         pthread stdc++ m c)
     vita_create_self(eboot.bin ghvita UNSAFE)
+    # moves an update in with the game closed
+    add_executable(updater src/updater_main.c src/update_apply.c)
+    target_link_libraries(updater SceAppMgr_stub SceLibKernel_stub SceKernelThreadMgr_stub SceIofilemgr_stub SceProcessmgr_stub SceSysmem_stub pthread c)
+    vita_create_self(updater.bin updater UNSAFE)
     # everything in assets/ goes in the package under assets/
     file(GLOB_RECURSE ASSET_FILES RELATIVE ${CMAKE_SOURCE_DIR} CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/assets/*)
-    set(VPK_FILES)
+    set(VPK_FILES FILE ${CMAKE_BINARY_DIR}/updater.bin updater.bin)
     foreach(f ${ASSET_FILES})
         list(APPEND VPK_FILES FILE ${CMAKE_SOURCE_DIR}/${f} ${f})
     endforeach()
@@ -59,7 +71,7 @@ else()
     target_include_directories(ghvita PRIVATE ${SDL2_INCLUDE_DIRS} src/ext/include ${PCDEPS} ${PCDEPS}/opus
                                ${PCDEPS}/x86_64-linux-gnu)
     set(L /usr/lib/x86_64-linux-gnu)
-    target_link_libraries(ghvita ${SDL2_LIBRARIES} GL
+    target_link_libraries(ghvita ${SDL2_LIBRARIES} GL z
         ${L}/libcurl.so.4 ${L}/libarchive.so.13
         ${L}/libopusfile.so.0 ${L}/libopus.so.0 ${L}/libmpg123.so.0
         ${L}/libvorbisfile.so.3 ${L}/libvorbis.so.0 ${L}/libogg.so.0 pthread m)

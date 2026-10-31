@@ -17,9 +17,10 @@
 #include "game.h"
 #include "vocals.h"
 #include "dl.h"
+#include "update.h"
 
 enum { S_TITLE, S_MAIN, S_TOUR, S_SONGS, S_SELECT, S_PRACTICE, S_PLAY, S_PAUSE, S_RESUME, S_RESULTS, S_OPTIONS, S_CALIBRATE, S_EMPTY,
-       S_DOWNLOAD };
+       S_DOWNLOAD, S_UPDATE };
 
 static int screen = S_TITLE;
 static double now_s, screen_t;
@@ -272,8 +273,75 @@ static void title_screen(void)
 
 static void tour_enter(void);
 
+// a new build on GitHub: one press and it's in, or it asks again next time
+static void update_screen(void)
+{
+    UpState st = update_state();
+    char t[200];
+    if (st == UP_READY)
+        update_install();
+    if (pressed & BTN_CIRCLE) {
+        ui_sound(SND_UI_BACK);
+        if (st == UP_DOWNLOADING) {
+            update_cancel();
+            return;
+        }
+        if (st != UP_UNPACKING) {
+            go(S_MAIN);
+            return;
+        }
+    }
+    if ((pressed & BTN_CROSS) && (st == UP_AVAILABLE || st == UP_FAILED)) {
+        ui_sound(SND_UI_SELECT);
+        update_get();
+    }
+    plat_keep_awake();
+    gfx_begin(0, 0, 0);
+    gfx_2d();
+    draw_background(res.bg_menu, WHITE);
+    panel(180, 150, 600, 230);
+    font_draw_shadow(res.title, "UPDATE", SCREEN_W / 2, 170, 44, RGBA(255, 225, 160, 255), ALIGN_CENTER);
+    snprintf(t, sizeof(t), "A new build is here: %d", update_version());
+    font_draw_shadow(res.ui, t, SCREEN_W / 2, 232, 26, RGBA(230, 230, 230, 255), ALIGN_CENTER);
+    int64_t done, total;
+    update_progress(&done, &total);
+    t[0] = 0;
+    if (st == UP_AVAILABLE)
+        snprintf(t, sizeof(t), "%.1f MB to download", update_size() / 1048576.0);
+    else if (st == UP_DOWNLOADING)
+        snprintf(t, sizeof(t), "Downloading %.1f of %.1f MB", done / 1048576.0, total / 1048576.0);
+    else if (st == UP_UNPACKING)
+        snprintf(t, sizeof(t), "Unpacking and checking every file");
+    else if (st == UP_READY)
+        snprintf(t, sizeof(t), "Ready: it restarts to finish");
+    else if (st == UP_FAILED)
+        snprintf(t, sizeof(t), "%s", update_error());
+    font_draw_fit(res.ui, t, SCREEN_W / 2, 270, 24, 560, RGBA(140, 220, 255, 255), ALIGN_CENTER);
+    if (st == UP_DOWNLOADING && total > 0) {
+        gfx_rect(220, 316, 520, 18, RGBA(0, 0, 0, 180));
+        gfx_rect(222, 318, 516.0f * (float)done / (float)total, 14, RGBA(140, 220, 255, 255));
+    }
+    static const char * help[] = {"btn_cross", "Update", "btn_circle", "Later"};
+    static const char * help_wait[] = {"btn_circle", "Stop"};
+    if (st == UP_DOWNLOADING)
+        help_bar(help_wait, 2);
+    else if (st != UP_UNPACKING)
+        help_bar(help, 4);
+    gfx_end();
+}
+
 static void main_menu(void)
 {
+    static bool offered;
+    update_check();
+    const char * news = update_news();
+    if (news)
+        say(news);
+    if (update_state() == UP_AVAILABLE && !offered) {
+        offered = true;
+        go(S_UPDATE);
+        return;
+    }
     static const char * items[] = {"QUICKPLAY", "WORLD TOUR", "DOWNLOAD SONGS", "OPTIONS", "CALIBRATE", "EXIT"};
     const int n = 6;
     if (repeat & BTN_UP) {
@@ -2285,6 +2353,7 @@ static void scan_progress(int found, const char * converting)
 int main(void)
 {
     plat_init();
+    update_boot();
     plat_log("GH Vita starting");
     // QUICKPLAY's song and a random venue differ from boot to boot (test runs on the fixed clock stay repeatable)
     srand((unsigned)(getenv("GHV_FIXED") ? 1 : time(NULL)) ^ (unsigned)plat_now_us());
@@ -2346,6 +2415,7 @@ int main(void)
         case S_CALIBRATE: calibrate_screen(); break;
         case S_EMPTY: empty_screen(); break;
         case S_DOWNLOAD: download_screen(); break;
+        case S_UPDATE: update_screen(); break;
         }
         take_downloads();
         // downloads keep the Vita from sleeping (a second at a time)

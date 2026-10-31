@@ -27,6 +27,7 @@ typedef struct {
 
 void dl_search(int site, const char * query);       // "" lists the newest charts
 void dl_remove_tree(const char * path);
+bool dl_extract_archive(const char * file, const char * dir, char * err, size_t err_size);
 void dl_mkdirs(const char * path);
 void dl_safe_part(char * s);                        // a name off the web as one the memory card takes
 void dl_more(void);                                 // the next page of the last search

@@ -226,6 +226,18 @@ const char * plat_asset_dir(void)
     return "app0:assets/";
 }
 
+const char * plat_app_dir(void)
+{
+    return "ux0:app/" "GHVT00001";
+}
+
+void plat_run_updater(const char * staged, const char * app, const char * old)
+{
+    (void)staged, (void)app, (void)old;
+    int r = sceAppMgrLoadExec("app0:updater.bin", NULL, NULL);
+    plat_log("update: updater.bin wouldn't start: %08x", r);    // back to the game, which must never stop starting
+}
+
 static void (*audio_mix)(int16_t * out, int frames);
 static void (*audio_started)(int64_t frame, int64_t when_us);
 static int audio_port;
