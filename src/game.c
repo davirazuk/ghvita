@@ -1598,7 +1598,7 @@ static void overhit(void)
         return;
     }
     G.overhits++;
-    break_streak();
+    G.streak = 0;           // the song keeps your part: only a missed note takes it away, as YARG has it
     rock_change(-0.02f);
     G.miss_flash = 0.7f;
 }

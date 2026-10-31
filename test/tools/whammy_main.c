@@ -39,6 +39,7 @@ static float wave_bar(const char * s, double t, float full)
     if (!strcmp(s, "hold") || !strcmp(s, "pause")) return full;
     if (!strcmp(s, "wobble")) return fmod(t, 3) < 2 ? 0.5f + 0.5f * sinf(t * 18) : 0;
     if (!strcmp(s, "fast")) return (long)(t * 60) & 1 ? 1 : 0;     // every 60 fps frame, end to end
+    if (!strcmp(s, "zero")) return fabsf(sinf(t * 6));              // down and up, touching the top each time, as a wobble does
     if (!strcmp(s, "bursts")) return fmod(t, 0.4) < 0.1 ? 1 : 0;   // a bend hardly under way before it's let go
     return fmod(t, 3) < 2 ? 1 : 0;
 }

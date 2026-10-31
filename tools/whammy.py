@@ -31,6 +31,15 @@ def clicks(x):
     around = np.convolve(m, np.ones(11) / 11, 'same')
     return float((m[10:-10] / (around[10:-10] + 8)).max()), float(m.max())
 
+if sys.argv[1] == 'dips':
+    # 5 ms steps of what came out against the stem: how far under it it ever falls, while the stem is sounding
+    g, y = load(sys.argv[2])[:, 0], load(sys.argv[3])[:, 0]
+    n = min(len(g), len(y)) // 240 * 240
+    e = lambda x: np.sqrt((x[:n].reshape(-1, 240) ** 2).mean(1))
+    a, b = e(y)[20:-20], e(g)[20:-20]
+    m = b > max(200, np.median(b) * 0.5); r = 20 * np.log10((a[m] + 1) / (b[m] + 1))
+    print('5 ms steps %d: worst %.1f dB, under -6 dB %d, under -12 dB %d' % (m.sum(), r.min(), (r < -6).sum(), (r < -12).sum()))
+    sys.exit()
 if sys.argv[1] == 'stem':
     g, y = load(sys.argv[2])[:, 0], load(sys.argv[3])[:, 0]
     n = min(len(g), len(y)) - 9600; g, y = g[4800:n], y[4800:n]

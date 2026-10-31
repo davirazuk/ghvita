@@ -8,6 +8,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument('vhc'); ap.add_argument('part', type=int); ap.add_argument('diff', type=int)
 ap.add_argument('--speed', type=int, default=5); ap.add_argument('--miss', type=int, default=0)
 ap.add_argument('--late', type=float, default=0); ap.add_argument('--overhit', type=int, default=0)
+ap.add_argument('--mash', type=int, default=0, help='a wrong fret just after every Nth note, however fast the part')
 ap.add_argument('--sp', action='store_true'); ap.add_argument('--shots', default='')
 ap.add_argument('--limit', type=float, default=0, help='stop after this many seconds of song')
 a = ap.parse_args()
@@ -59,6 +60,12 @@ for i, (t, ln, frets, flags, sus) in enumerate(notes):
         free = [l for l in range(5) if not busy >> l & 1]
         if nf - f >= 30 and free and all(h[1] < f + 12 for h in holds[free[0]][-1:]):
             hold(free[0], f + 12, f + 14)
+    if a.mash and i % a.mash == 0 and i + 1 < len(notes):
+        nf = frame(notes[i + 1][0] / 1e6)
+        busy = frets | notes[i + 1][2]
+        free = [l for l in range(5) if not busy >> l & 1]
+        if nf - f >= 5 and free and all(h[1] < f + 3 for h in holds[free[0]][-1:]):
+            hold(free[0], f + 3, f + 4)
 ev = {}
 for l in range(6):
     for p, r in holds[l]:
