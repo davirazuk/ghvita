@@ -1,4 +1,4 @@
-// no game code in here: updater.bin is this and a main
+// no game code in here: the GH Vita Updater app is this and a main
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>

@@ -234,8 +234,14 @@ const char * plat_app_dir(void)
 void plat_run_updater(const char * staged, const char * app, const char * old)
 {
     (void)staged, (void)app, (void)old;
-    int r = sceAppMgrLoadExec("app0:updater.bin", NULL, NULL);
-    plat_log("update: updater.bin wouldn't start: %08x", r);    // back to the game, which must never stop starting
+    // A different title: a running game can't write its own ux0:app directory, but the updater can. It applies the
+    // staged files and starts this game again.
+    int r = sceAppMgrLaunchAppByUri(0xFFFFF, "psgm:play?titleid=GHVUPD001");
+    if (r < 0) {
+        plat_log("update: the updater app wouldn't start: %08x", r);    // back to the game, which must never stop starting
+        return;
+    }
+    sceKernelExitProcess(0);
 }
 
 static void (*audio_mix)(int16_t * out, int frames);

@@ -16,5 +16,5 @@ void update_progress(int64_t * done, int64_t * total);
 const char * update_error(void);
 void update_get(void);                  // fetch it, unpack it, check every file
 void update_cancel(void);
-void update_install(void);              // hands over to updater.bin; if that can't start, says so in update_state
+void update_install(void);              // hands over to the GH Vita Updater app; if that can't start, says so in update_state
 const char * update_news(void);         // once: "Updated to build N", or what went wrong, or NULL

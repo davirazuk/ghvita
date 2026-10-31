@@ -2,6 +2,7 @@
 """Puts the build at HEAD on GitHub, where Vitas with update.txt pick it up: release.py [--notes "what changed"]
 Builds the VPK from a clean tree, tags v<commit count>, and uploads:
   GHVita.vpk               the whole thing, for a first install
+  GHVitaUpdater.vpk        the little app that swaps updates in; install it once, alongside the game
   update-full.zip          every file the game has, for a Vita more than one release behind
   update-from-<last>.zip   only what changed since the last release
   manifest.txt             what the next release compares itself with
@@ -24,6 +25,7 @@ env = dict(os.environ, VITASDK=sdk, PATH=sdk + '/bin:' + os.environ['PATH'])
 subprocess.run(['cmake', '-S', '.', '-B', 'build-vita', '-G', 'Ninja', f'-DCMAKE_TOOLCHAIN_FILE={sdk}/share/vita.toolchain.cmake', f'-DGHV_BUILD={n}'], check=True, env=env, stdout=subprocess.DEVNULL)
 subprocess.run(['ninja', '-C', 'build-vita'], check=True, env=env, stdout=subprocess.DEVNULL)
 vpk = 'build-vita/GHVita.vpk'
+updater_vpk = 'build-vita/GHVitaUpdater.vpk'
 tmp = tempfile.mkdtemp()
 z = zipfile.ZipFile(vpk); z.extractall(tmp)
 files = {}
@@ -41,7 +43,9 @@ def pack(path, names):
             o.write(os.path.join(tmp, p), p)
 out = tempfile.mkdtemp()
 pack(out + '/update-full.zip', files)
-up = [vpk, out + '/update-full.zip', out + '/manifest.txt']
+if not os.path.exists(updater_vpk):
+    sys.exit('the build made no updater VPK')
+up = [vpk, updater_vpk, out + '/update-full.zip', out + '/manifest.txt']
 open(out + '/manifest.txt', 'w').write(''.join(line(p) for p in sorted(files)))
 last = subprocess.run(['gh', 'release', 'view', '--json', 'tagName', '-q', '.tagName'], capture_output=True, text=True).stdout.strip()
 if last:

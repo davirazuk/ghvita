@@ -19,6 +19,8 @@ A native rhythm game for the PS Vita in the style of Guitar Hero World Tour, wri
 
 Once it's installed, the game finds new builds on GitHub by itself: press Cross when it offers one and it downloads, checks every file, swaps them in and restarts. It needs Wi-Fi and a read-only token in `ux0:data/ghvita/update.txt`, because the repository is private. Make a fine-grained token at github.com/settings/tokens for this repository with Contents read-only, and put it alone in that file. `tools/release.py` publishes a build.
 
+Swapping the files in is done by a tiny second app, `GHVitaUpdater.vpk`: the Vita won't let a running game write its own app directory, but another title can. Install it once alongside the game and keep it; after that every update is a press of Cross.
+
 ## What isn't here
 
 This repository holds the code only. The art and sound in `assets/` and the LiveArea images in `vita/sce_sys/` are made from your own copies of the games, and songs are yours to bring. `tools/mkassets.py`, `tools/venues.py`, `tools/band.py` and `tools/band_ink.py` build them, `tools/mkstage.py` draws the stage's rig and crowd, and `tools/mkdrums.py` cuts the drum kit from a YARG install.

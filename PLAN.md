@@ -197,8 +197,9 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 ## Updates from GitHub (update.c, update_apply.c, updater_main.c)
 - `tools/release.py --notes "..."` builds HEAD and publishes release v<commit count>: GHVita.vpk, update-full.zip, update-from-<last>.zip with only what changed, and manifest.txt. It refuses a dirty tree or a public repository: the VPK holds art made from your own games.
 - The menu asks GitHub once a boot. With a newer release it offers the update: Cross downloads, unpacks and checks every file's size and CRC, and nothing in the app is touched until that passes.
-- updater.bin (in the VPK) moves the files in with the game closed, the program last, keeping what it replaced in update/old. A failed move puts everything back. Power lost during it carries on at the next start, once, and then the game starts as it is, so it can't get stuck.
+- The GH Vita Updater app (GHVUPD001, `GHVitaUpdater.vpk`, installed once alongside the game) moves the files in with the game closed, the program last, keeping what it replaced in update/old. A failed move puts everything back. Power lost during it carries on at the next start, once, and then the game starts as it is, so it can't get stuck.
+- It has to be a separate title: the Vita mounts a running game's own `ux0:app` directory read-only, so the game can't rename its files in place (that was the first updater's Permission denied). Another title gets a writable path, so the game starts the updater with `sceAppMgrLaunchAppByUri` and the updater starts the game again when it's done.
 - The repository is private, so the Vita needs a read-only token in ux0:data/ghvita/update.txt: a fine-grained token for this repository with Contents read-only. Without the file nothing is checked. It never goes in the repository or the VPK, and never in the log.
 - A manifest may only name eboot.bin, updater.bin and assets/. LiveArea files aren't updated: a new icon still needs the VPK.
-- PC test: GHV_UPDATE_API, GHV_UPDATE_TOKEN and GHV_APP stand in for GitHub, the token and the install. updater.bin and LoadExec have not been run on a Vita.
+- PC test: GHV_UPDATE_API, GHV_UPDATE_TOKEN and GHV_APP stand in for GitHub, the token and the install. The updater app itself has only been run on a Vita.
 

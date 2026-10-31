@@ -1,4 +1,4 @@
-// Puts a staged update in place: shared by updater.bin, which runs with the game closed, and the game itself for updater.bin
+// Puts a staged update in place: shared by the GH Vita Updater app, which runs with the game closed, and the desktop build
 #pragma once
 #include <stdbool.h>
 #include <stddef.h>

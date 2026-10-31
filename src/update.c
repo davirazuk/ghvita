@@ -1,7 +1,8 @@
 // Asks GitHub for the latest release, and if it's newer than this build fetches update-from-<this build>.zip, or update-full.zip
-// from further back. Every file is checked against the zip's manifest before anything's touched; updater.bin then moves
-// them in with the game closed (update_apply.c). The repository is private, so a read-only token lives in update.txt on the
-// card. It only ever goes to GitHub's API, and it's never logged.
+// from further back. Every file is checked against the zip's manifest before anything's touched; the GH Vita Updater app
+// (GHVUPD001) then moves them in with this game closed, because a running game can't write its own app directory
+// (update_apply.c). The repository is private, so a read-only token lives in update.txt on the card. It only ever goes to
+// GitHub's API, and it's never logged.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -263,11 +264,10 @@ void update_install(void)
         fprintf(f, "%d\n", offered);
         fclose(f);
     }
-    update_apply_one(dir, app, old, "updater.bin");
     plat_log("update: handing over for build %d", offered);
     plat_run_updater(dir, app, old);
     remove(flag);
-    fail("the updater wouldn't start");
+    fail("the GH Vita Updater app isn't installed");
 }
 
 void update_boot(void)

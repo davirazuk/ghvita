@@ -44,13 +44,35 @@ if (VITA)
         SceIme_stub SceAudioIn_stub
         pthread stdc++ m c)
     vita_create_self(eboot.bin ghvita UNSAFE)
-    # moves an update in with the game closed
+    # A tiny separate title: with the game closed it moves a staged update into the game's app directory. A running
+    # game may not write there (the Vita mounts its own ux0:app read-only), but another title can. Install it once
+    # alongside the game; every later update hands over to it.
     add_executable(updater src/updater_main.c src/update_apply.c)
     target_link_libraries(updater SceAppMgr_stub SceLibKernel_stub SceKernelThreadMgr_stub SceIofilemgr_stub SceProcessmgr_stub SceSysmem_stub pthread c)
     vita_create_self(updater.bin updater UNSAFE)
+    # vita_create_vpk can't be used twice (it appends to a shared cache string), so pack the updater by hand
+    set(UPDATER_SFO ${CMAKE_CURRENT_BINARY_DIR}/updater_param.sfo)
+    add_custom_command(OUTPUT ${UPDATER_SFO}
+        COMMAND ${VITA_MKSFOEX} -s APP_VER=${VITA_VERSION} -s TITLE_ID=GHVUPD001 "GH Vita Updater" ${UPDATER_SFO}
+        DEPENDS updater.bin
+        COMMENT "Generating param.sfo for the updater"
+        VERBATIM)
+    set(UPDATER_VPK_OUT ${CMAKE_CURRENT_BINARY_DIR}/GHVitaUpdater.vpk.out)
+    add_custom_command(OUTPUT ${UPDATER_VPK_OUT}
+        COMMAND ${VITA_PACK_VPK} -s ${UPDATER_SFO} -b ${CMAKE_CURRENT_BINARY_DIR}/updater.bin
+            -a ${CMAKE_SOURCE_DIR}/vita/sce_sys/icon0.png=sce_sys/icon0.png
+            -a ${CMAKE_SOURCE_DIR}/vita/sce_sys/livearea/contents/bg.png=sce_sys/livearea/contents/bg.png
+            -a ${CMAKE_SOURCE_DIR}/vita/sce_sys/livearea/contents/startup.png=sce_sys/livearea/contents/startup.png
+            -a ${CMAKE_SOURCE_DIR}/vita/sce_sys/livearea/contents/template.xml=sce_sys/livearea/contents/template.xml
+            ${UPDATER_VPK_OUT}
+        DEPENDS ${UPDATER_SFO} updater.bin
+        COMMENT "Building the updater VPK"
+        VERBATIM)
+    add_custom_target(GHVitaUpdater.vpk ALL DEPENDS ${UPDATER_VPK_OUT}
+        COMMAND ${CMAKE_COMMAND} -E copy "${UPDATER_VPK_OUT}" GHVitaUpdater.vpk)
     # everything in assets/ goes in the package under assets/
     file(GLOB_RECURSE ASSET_FILES RELATIVE ${CMAKE_SOURCE_DIR} CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/assets/*)
-    set(VPK_FILES FILE ${CMAKE_BINARY_DIR}/updater.bin updater.bin)
+    set(VPK_FILES)
     foreach(f ${ASSET_FILES})
         list(APPEND VPK_FILES FILE ${CMAKE_SOURCE_DIR}/${f} ${f})
     endforeach()
