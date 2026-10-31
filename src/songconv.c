@@ -1456,7 +1456,8 @@ static bool write_vhc(const char * path, Parsed * P, const Tempo * T, OutNote * 
             for (int i = 0; i < nn; i++) {
                 OutNote * x = &notes[p][d][i];
                 int32_t start = tempo_us(T, x->tick);
-                int32_t ln = x->len ? tempo_us(T, (int64_t)x->tick + x->len) - start : 0;
+                int64_t end = x->len ? (int64_t)tempo_us(T, (int64_t)x->tick + x->len) - start : 0;
+                int32_t ln = end < 0 || end > INT32_MAX ? 0 : (int32_t)end;
                 put32(&b, (uint32_t)start);
                 put32(&b, (uint32_t)ln);
                 uint8_t mf[2] = {x->mask, x->flags};
