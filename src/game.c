@@ -18,6 +18,8 @@
 #define MAX_ZONES 64
 #define MAX_ROLLS 512
 #define SP_PER_QUARTER (1.0f / 32)
+#define SUS_DROP_GRACE 0.12
+#define HIT_LOG 16
 
 enum { PENDING, HIT, MISSED };
 
@@ -127,6 +129,9 @@ static struct {
     BandPart band_part[4];              // each member's own part of the chart
     float stage_col[3], light_col[3];   // what the stage and its lights are tinted now (they glide to the show's)
     double show_t;
+    int sus_dropped, camera;
+    float hit_log[HIT_LOG];             // the last hits, seconds off the note
+    int hit_log_n;
     int section, section_pal;           // the chart's section now, and its colours
     double pyro_t;                      // when the jets along the stage last went off
     float cam_x, cam_y, cam_z;          // the camera's drift
@@ -829,7 +834,7 @@ static void draw_band(double beat)
         float m[3];
         member_spot(r, m);
         // cell size, pixels per metre and the cell's bottom edge in metres, as in tools/band.py
-        float cw = r == 0 ? 266 : 170, ch = r == 0 ? 232 : 256, ppm = r == 0 ? 88 : 120, y0 = r == 0 ? -0.35f : -0.08f;
+        float cw = r == 0 ? 266 : 170, ch = r == 0 ? 232 : 256, ppm = r == 0 ? 88 : 120, y0 = r == 0 ? -0.62f : -0.08f;
         // each plays when their part does (no music, no playing), and between parts holds still
         BandPart * bp = &G.band_part[r];
         bool playing = band_playing(r, beat_len) && G.band_loud > 0.03f;
@@ -882,8 +887,15 @@ static void draw_band(double beat)
     }
 }
 
+static float clamp01(float v)
+{
+    return v < 0 ? 0 : v > 1 ? 1 : v;
+}
+
 static void popup(const char * text)
 {
+    if (cfg.no_popups)
+        return;
     snprintf(G.popup, sizeof(G.popup), "%s", text);
     G.popup_t = G.t;
 }
@@ -958,7 +970,11 @@ static void project(float x, float y, float z, float * sx, float * sy)
 
 static void setup_camera(void)
 {
-    const float eye[3] = {0, 4.0f, -5.2f}, at[3] = {0, 0, 4.8f}, up[3] = {0, 1, 0};
+    // World Tour's, then lower and nearer for bigger gems, then high up to read further ahead
+    static const float eyes[3][3] = {{0, 4.0f, -5.2f}, {0, 3.5f, -4.9f}, {0, 5.0f, -5.6f}};
+    static const float ats[3] = {4.8f, 3.9f, 5.6f};
+    G.camera = cfg.camera;
+    const float * eye = eyes[cfg.camera], at[3] = {0, 0, ats[cfg.camera]}, up[3] = {0, 1, 0};
     mat_perspective(G.proj, 40, (float)SCREEN_W / SCREEN_H, 0.5f, 60);
     mat_lookat(G.view, eye, at, up);
     // the highway sits a little low on the screen, as in the games
@@ -993,24 +1009,63 @@ static uint8_t drum_frets(const Note * n)
     return n->frets & 0x80 ? (n->frets & 0x1f) | FRET_OPEN : n->frets;
 }
 
+// as YARG lays four pads on five: toms on blue and green, cymbals on yellow and orange
+static uint8_t five_pads(uint8_t frets, uint8_t flags)
+{
+    uint8_t out = frets & (1 | FRET_OPEN);
+    bool yt = (frets & 2) && (flags & NOTE_TOM_Y), bt = (frets & 4) && (flags & NOTE_TOM_B);
+    bool gt = (frets & 8) && (flags & NOTE_TOM_G), yc = (frets & 2) && !yt, bc = (frets & 4) && !bt, gc = (frets & 8) && !gt;
+    if (yc)
+        out |= 2;
+    if (bc)
+        out |= 8;
+    if (gc)
+        out |= out & 8 ? 2 : 8;
+    if (yt)
+        out |= 4;
+    if (bt)
+        out |= out & 4 ? 16 : 4;
+    if (gt)
+        out |= out & 16 ? 4 : 16;
+    return out;
+}
+
 static void split_drums(void)
 {
     const Part * p = G.part;
     int total = 0, used = 0;
-    for (int i = 0; i < p->note_count; i++)
+    bool five = false;
+    for (int i = 0; i < p->note_count; i++) {
         total += frets_count(drum_frets(&p->notes[i]));
+        five |= (drum_frets(&p->notes[i]) & 0x10) != 0;
+    }
+    // World Tour's kit from a 4-pad chart, which needs the charts that know toms from cymbals
+    bool to_five = cfg.five_pads && !five && G.chart->version >= 2;
     G.drum_notes = calloc(total + 1, sizeof(Note));
     if (!G.drum_notes)
         return;
     for (int i = 0; i < p->note_count; i++) {
         const Note * n = &p->notes[i];
-        uint8_t frets = drum_frets(n);
+        uint8_t frets = drum_frets(n), flags = n->flags;
+        if ((flags & NOTE_KICK2) && !cfg.double_kick)
+            frets &= ~FRET_OPEN;
+        if (to_five) {
+            frets = five_pads(frets, flags);
+            flags = (flags & ~(NOTE_TOM_Y | NOTE_TOM_G)) | NOTE_TOM_B;
+        }
+        // a phrase's last gem gone with its kick: the one before ends it
+        if (!frets) {
+            if ((flags & NOTE_SP_END) && used)
+                G.drum_notes[used - 1].flags |= NOTE_SP_END;
+            continue;
+        }
         int left = frets_count(frets);
         for (int b = 0; b < 6; b++) {
             if (!(frets & (1 << b)))
                 continue;
             Note * o = &G.drum_notes[used++];
             *o = *n;
+            o->flags = flags;
             o->frets = (uint8_t)(1 << b);
             // the phrase ends once, on its last gem
             if (--left)
@@ -1018,7 +1073,7 @@ static void split_drums(void)
         }
     }
     G.drums = true;
-    G.lanes = 4;
+    G.lanes = to_five ? 5 : 4;
     for (int i = 0; i < used; i++)
         if (G.drum_notes[i].frets & 0x10)
             G.lanes = 5;
@@ -1138,6 +1193,7 @@ static void reset_play(void)
     G.streak = G.best_streak = G.hits = G.misses = G.overhits = G.sp_hit = 0;
     G.off_sum = G.off_sq = 0;
     G.off_n = 0;
+    G.hit_log_n = 0;
     G.sp = 0;
     G.rock = G.needle = 0.5f;
     G.sp_active = G.sp_ready_told = false;
@@ -1351,6 +1407,8 @@ void game_log_whammy(void)
     if (G.sp_from_bar > 0)
         plat_log("whammy: %.1f%% of the Star Power meter earned on sustains", G.sp_from_bar * 100);
     G.sp_from_bar = 0;
+    plat_log("sustains: %d let go early", G.sus_dropped);
+    G.sus_dropped = 0;
     audio_log_cost();
 }
 
@@ -1393,6 +1451,27 @@ Result game_result(void)
     r.notes_total = G.vocal ? vox_phrases() : G.part ? G.part->note_count : 0;
     r.best_streak = G.best_streak;
     r.overhits = G.overhits;
+    r.misses = G.misses;
+    // the pad that let you down
+    if (G.drums) {
+        static const char * names[6] = {"Red pad", "Yellow pad", "Blue pad", "Orange pad", "Green pad", "Kick"};
+        int hit[6] = {0}, all[6] = {0}, worst = 101;
+        for (int i = 0; i < G.part->note_count; i++)
+            for (int l = 0; l < 6; l++)
+                if (G.part->notes[i].frets & (1 << l)) {
+                    all[l]++;
+                    hit[l] += G.state[i] == HIT;
+                }
+        for (int l = 0; l < 6; l++) {
+            int pct = all[l] >= 10 ? hit[l] * 100 / all[l] : 101, art = l == LANE_OPEN ? 5 : G.lanes == 4 ? (l == 3 ? 4 : l) : l;
+            if (pct < worst) {
+                worst = pct;
+                r.weak_pad = names[art];
+            }
+        }
+        r.weak_pct = worst;
+    }
+    r.played_s = G.t > 0 ? (int)G.t : 0;
     if (G.off_n >= 20) {
         double mean = G.off_sum / G.off_n, var = G.off_sq / G.off_n - mean * mean;
         r.timed = true;
@@ -1591,7 +1670,8 @@ static void overhit(void)
     // a little and the streak goes on; a second soon after is mashing, and that's an overhit
     bool again = G.t - G.slip_t < SLIP_RUN;
     G.slip_t = G.t;
-    sound_play(res.snd[SND_OVERSTRUM1 + rand() % 4], again ? 0.5f : 0.25f, false);
+    if (!cfg.no_miss_sound)
+        sound_play(res.snd[SND_OVERSTRUM1 + rand() % 4], again ? 0.5f : 0.25f, false);
     if (!again) {
         rock_change(-0.01f);
         G.miss_flash = 0.3f;
@@ -1694,6 +1774,7 @@ static bool press_note(int lane)
         if (G.got[i] == n->frets) {
             hit_note(i);
             double off = G.t - nt;
+            G.hit_log[G.hit_log_n++ % HIT_LOG] = (float)off;
             G.off_sum += off;
             G.off_sq += off * off;
             G.off_n++;
@@ -1778,6 +1859,7 @@ static void pull_off(void)
             return;
         hit_note(i);
         double off = G.t - nt;
+        G.hit_log[G.hit_log_n++ % HIT_LOG] = (float)off;
         G.off_sum += off;
         G.off_sq += off * off;
         G.off_n++;
@@ -1915,6 +1997,17 @@ static void update_sustains(void)
                     G.flame_t[l] = G.t - 0.06;          // keep the flame going
         }
         s->last_q = until;
+        // let go with the note still ringing: as in YARG the part goes quiet until the next hit, but it's no miss.
+        // The last moments don't count, nobody times a release to the frame
+        if (!held && G.t < s->end - SUS_DROP_GRACE) {
+            G.sus_dropped++;
+            s->note = -1;
+            bool others = false;
+            for (int j = 0; j < MAX_SUS; j++)
+                others |= G.sus[j].note >= 0;
+            if (!others)
+                set_my_stem(0);
+        }
         if (!held || G.t >= s->end)
             s->note = -1;
     }
@@ -2087,7 +2180,7 @@ int game_update(const Pad * pad, uint32_t pressed)
         ringing |= G.sus[k].note >= 0;
     // whammy: the right stick, or a finger rubbing the rear touchpad (a thumb on the frets can't reach the stick)
     float dw;
-    float bar = bar_read(&G.bar, pad->rx, pad->ry, pad->back_n, pad->back_id, pad->back_xs, pad->back_ys, ringing, &dw);
+    float bar = bar_read(&G.bar, pad->rx, pad->ry, cfg.no_rear_whammy ? 0 : pad->back_n, pad->back_id, pad->back_xs, pad->back_ys, ringing, &dw);
     if (G.autoplay) {
         bar = 0.5f + 0.5f * sinf((float)G.t * 30);
         dw = 1;
@@ -2098,7 +2191,7 @@ int game_update(const Pad * pad, uint32_t pressed)
     // the part's own stem bends while a sustain rings
     G.bend += ((ringing ? (bar > 1 ? 1 : bar) : 0) - G.bend) * 0.5f;
     if (!G.drums)
-        audio_stem_bend(G.my_stem, G.bend > 0.003f && !stem_is_the_song() ? G.bend : 0);
+        audio_stem_bend(G.my_stem, G.bend > 0.003f && !cfg.no_bend && !stem_is_the_song() ? G.bend : 0);
 
     // Star Power: Select, a quick tilt, or on drums both cymbals at once, as in World Tour
     if ((pressed & BTN_SELECT) || (G.drums && both_cymbals(lanes_pressed)))
@@ -2184,6 +2277,7 @@ static void draw_highway(void)
     double beat = G.t > 0 ? chart_quarters(G.chart, G.t) : 0;
     float lift = 22 * expf(-(float)(beat - floor(beat)) * 5);
     gfx_blend(BLEND_ALPHA);
+    const float solid = cfg.highway_alpha / 10.0f;
     const int seg = 6;
     for (int i = 0; i < seg; i++) {
         float z0 = Z_NEAR + (Z_FAR - Z_NEAR) * i / seg, z1 = Z_NEAR + (Z_FAR - Z_NEAR) * (i + 1) / seg;
@@ -2192,8 +2286,8 @@ static void draw_highway(void)
         const float p[4][3] = {{-HALF_W, 0, z0}, {HALF_W, 0, z0}, {HALF_W, 0, z1}, {-HALF_W, 0, z1}};
         const float uv[4][2] = {{1, v0}, {0, v0}, {0, v1}, {1, v1}};
         uint32_t b0 = board_col(z0, lift), b1 = board_col(z1, lift);
-        const uint32_t c[4] = {with_alpha(b0, fade(z0)), with_alpha(b0, fade(z0)), with_alpha(b1, fade(z1)),
-                               with_alpha(b1, fade(z1))};
+        const uint32_t c[4] = {with_alpha(b0, fade(z0) * solid), with_alpha(b0, fade(z0) * solid),
+                               with_alpha(b1, fade(z1) * solid), with_alpha(b1, fade(z1) * solid)};
         gfx_quad(p, uv, c);
     }
     (void)hw;
@@ -2234,8 +2328,8 @@ static void draw_highway(void)
         rc = RGBA(120, 210, 255, 255);
     else if (G.sp >= 0.5f)
         rc = RGBA(170, 220, 255, 255);
-    if (G.miss_flash > 0.05f) {
-        int k = (int)(G.miss_flash * 200);
+    if (G.miss_flash > 0.05f && cfg.flashes < 2) {
+        int k = (int)(G.miss_flash * (cfg.flashes ? 80 : 200));
         rc = RGBA(225, 225 - k, 235 - k, 255);
     }
     for (int side = -1; side <= 1; side += 2) {
@@ -2355,6 +2449,8 @@ static void draw_gems(void)
         float a = fade(z);
         if (G.state[i] == MISSED)
             a *= 0.55f;
+        else if (cfg.vanish)
+            a *= clamp01((z - 2.2f) / 1.6f);    // gone before the strikeline: play it from memory
         int kind = n->flags & NOTE_TAP ? 2 : n->flags & NOTE_HOPO ? 1 : 0;
         bool star = G.phrase[i] >= 0 && G.phrase_ok[G.phrase[i]];
         uint32_t col = with_alpha(WHITE, a);
@@ -2445,11 +2541,6 @@ static void sprite_rot(const Sprite * s, float x, float y, float w, float h, flo
     gfx_quad(p, uv, cc);
 }
 
-static float clamp01(float v)
-{
-    return v < 0 ? 0 : v > 1 ? 1 : v;
-}
-
 // part of a HUD texture laid out at scale (kx, ky) with its top-left at (x0, y0); x, y, w, h in the texture's pixels
 static void hud_at(const char * name, float x0, float y0, float kx, float ky, float x, float y, float w, float h,
                    uint32_t c)
@@ -2493,6 +2584,36 @@ static void draw_keys(void)
                 gfx_sprite(atlas_get(res.hud, keys[k].name), x - size / 2, y + 28, size, size, with_alpha(WHITE, a));
                 break;
             }
+    }
+}
+
+// percent of the notes so far, and a mark while nothing's gone wrong
+static void draw_live_stats(void)
+{
+    int judged = G.hits + G.misses;
+    if (!cfg.live_stats || !judged)
+        return;
+    char t[32];
+    snprintf(t, sizeof(t), "%.1f%%", G.hits * 100.0 / judged);
+    font_draw_shadow(res.ui, t, SCREEN_W - 16, 134, 26, WHITE, ALIGN_RIGHT);
+    if (!G.misses && !G.overhits)
+        font_draw_shadow(res.ui, "FC", SCREEN_W - 16, 162, 26, RGBA(255, 210, 60, 255), ALIGN_RIGHT);
+}
+
+// the hit window under the highway: each hit a tick, left early, right late, the old ones fading out
+static void draw_timing_bar(void)
+{
+    if (!cfg.timing_bar)
+        return;
+    const float cx = SCREEN_W / 2, y = SCREEN_H - 16, half = 120;
+    gfx_rect(cx - half, y, half * 2, 4, RGBA(0, 0, 0, 170));
+    gfx_rect(cx - half * 0.32f, y, half * 0.64f, 4, RGBA(70, 200, 90, 200));    // within 30 ms
+    gfx_rect(cx - 1, y - 6, 2, 16, WHITE);
+    int n = G.hit_log_n < HIT_LOG ? G.hit_log_n : HIT_LOG;
+    for (int k = 1; k <= n; k++) {
+        float off = G.hit_log[(G.hit_log_n - k) % HIT_LOG], d = fabsf(off);
+        uint32_t c = d < 0.03f ? RGBA(120, 240, 140, 255) : d < 0.06f ? RGBA(250, 215, 90, 255) : RGBA(250, 130, 60, 255);
+        gfx_rect(cx + off / (float)WINDOW * half - 1.5f, y - 5, 3, 14, fade_alpha(c, k == 1 ? 1 : 0.75f * (1 - (float)k / HIT_LOG)));
     }
 }
 
@@ -2560,17 +2681,25 @@ static void draw_hud(void)
     project(-HALF_W - 0.22f, 0, 3.3f, &ax, &ay);
     project(-HALF_W - 0.22f, 0, 1.0f, &bx, &by);
     const Sprite * seat = atlas_get(res.hud, "multi_light_seat");
+    gfx_blend(BLEND_ALPHA);
     float seat_len = hypotf(bx - ax, by - ay), rot = atan2f(-(bx - ax), by - ay);
     sprite_rot(seat, (ax + bx) / 2, (ay + by) / 2, 22, seat_len * 128 / 98, seat->w / 2.0f, 61, rot, WHITE);
     int m = multiplier(), base_m = 1 + G.streak / 10, max_m = G.part_id == PART_BASS ? 6 : 4;
     int lit = base_m >= max_m ? 5 : (G.streak % 10) / 2;
-    float size = seat_len / 5 * 1.25f;
+    bool half = base_m < max_m && G.streak % 2;     // the lamp on its way
+    // the art is half a capsule: its flat end sits on the seat, the round end stands out from the rail, nearer lamps
+    // bigger as the rail comes towards you
     for (int i = 0; i < 5; i++) {
-        float f = (i + 0.5f) / 5;
+        float f = (i + 0.5f) / 5, size = seat_len / 5 * (1.15f - 0.3f * f);
         float lx = bx + (ax - bx) * f, ly = by + (ay - by) * f;
-        const char * name = i < lit ? (G.sp_active ? "hud_score_light_2_blue" : "hud_score_light_2")
-                                    : (G.sp_active ? "hud_score_light_0_blue" : "hud_score_light_0");
-        gfx_sprite(atlas_get(res.hud, name), lx - size * 0.2f, ly - size / 2, size, size, WHITE);
+        char name[32];
+        snprintf(name, sizeof(name), "hud_score_light_%d%s", i < lit ? 2 : half && i == lit ? 1 : 0,
+                 G.sp_active ? "_blue" : "");
+        Sprite lamp = *atlas_get(res.hud, name);
+        float u = lamp.u0;
+        lamp.u0 = lamp.u1;
+        lamp.u1 = u;
+        sprite_rot(&lamp, lx, ly, size * 0.95f, size, 0, lamp.h / 2.0f, rot, WHITE);
     }
     if (m > 1) {
         char name[16];
@@ -2647,6 +2776,10 @@ after_rail:;
         snprintf(t, sizeof(t), "PRACTICE  %d%%", (int)(practice.speed * 100 + 0.5f));
         font_draw_shadow(res.ui, t, SCREEN_W - 16, 44, 22, RGBA(255, 225, 150, 255), ALIGN_RIGHT);
     }
+    if (!G.vocal) {
+        draw_live_stats();
+        draw_timing_bar();
+    }
     if (cfg.show_fps) {
         char t[32];
         snprintf(t, sizeof(t), "%d fps", G.fps);
@@ -2656,11 +2789,15 @@ after_rail:;
 
 void game_draw(void)
 {
+    if (G.camera != cfg.camera)
+        setup_camera();         // changed from the pause menu
     gfx_begin(0, 0, 0);
     gfx_2d();
     draw_stage();
-    if (G.sp_flash > 0.02f)
-        gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(80, 160, 255, (int)(G.sp_flash * 70)));
+    if (cfg.venue_light < 10)
+        gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(0, 0, 0, (10 - cfg.venue_light) * 24));
+    if (G.sp_flash > 0.02f && cfg.flashes < 2)
+        gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(80, 160, 255, (int)(G.sp_flash * (cfg.flashes ? 25 : 70))));
     if (!G.vocal) {
         gfx_3d(G.proj, G.view);
         draw_highway();

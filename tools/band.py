@@ -19,7 +19,7 @@ spec.loader.exec_module(wc)
 
 FRAMES, COLS, ROWS = 48, 8, 6
 SING = 32               # the singer's sheet: this many frames of the loop with the mic at the mouth, the rest with it down
-CELLS = {'drummer': (266, 232, 88, -0.35)}
+CELLS = {'drummer': (266, 232, 88, -0.62)}
 STAND = (170, 256, 120, -0.08)      # cell w, h, pixels per metre, the cell's bottom in metres
 SS = 4                  # supersampling of the render
 BEATS = 4

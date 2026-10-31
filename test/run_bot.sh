@@ -7,5 +7,5 @@ script=$(mktemp)
 python3 ../tools/botscript.py "$dir/notes.vhc" $part $diff "$@" > "$script"
 DISPLAY=:77 SDL_AUDIODRIVER=dummy GHV_DATA=data GHV_ASSETS=../assets GHV_SHOTS=shots GHV_FIXED=1 GHV_SONG="$song" \
     GHV_PART=$part GHV_DIFF=$diff GHV_SCRIPT="$script" timeout 600 ../build-pc/ghvita 2>&1 |
-    grep -E "^result|^game:|atlas: no|can't"
+    grep -E "^result|^game:|^sustains:|atlas: no|can't"
 rm -f "$script"

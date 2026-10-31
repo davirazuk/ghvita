@@ -13,6 +13,7 @@
 #include "audio.h"
 #include "songs.h"
 #include "tour.h"
+#include "career.h"
 #include "chart.h"
 #include "game.h"
 #include "vocals.h"
@@ -20,7 +21,7 @@
 #include "update.h"
 
 enum { S_TITLE, S_MAIN, S_TOUR, S_SONGS, S_SELECT, S_PRACTICE, S_PLAY, S_PAUSE, S_RESUME, S_RESULTS, S_OPTIONS, S_CALIBRATE, S_EMPTY,
-       S_DOWNLOAD, S_UPDATE };
+       S_DOWNLOAD, S_UPDATE, S_CAREER };
 
 static int screen = S_TITLE;
 static double now_s, screen_t;
@@ -342,8 +343,8 @@ static void main_menu(void)
         go(S_UPDATE);
         return;
     }
-    static const char * items[] = {"QUICKPLAY", "WORLD TOUR", "DOWNLOAD SONGS", "OPTIONS", "CALIBRATE", "EXIT"};
-    const int n = 6;
+    static const char * items[] = {"QUICKPLAY", "WORLD TOUR", "DOWNLOAD SONGS", "OPTIONS", "CALIBRATE", "CAREER", "EXIT"};
+    const int n = 7;
     if (repeat & BTN_UP) {
         menu_index = (menu_index + n - 1) % n;
         ui_sound(SND_UI_MOVE);
@@ -371,7 +372,9 @@ static void main_menu(void)
             calib_count = 0;
             calib_playing = false;
             go(S_CALIBRATE);
-        } else {
+        } else if (which == 5)
+            go(S_CAREER);
+        else {
             plat_quit();
             exit(0);
         }
@@ -383,9 +386,9 @@ static void main_menu(void)
         gfx_sprite(&(Sprite){res.logo, 0, 0, 1, 1, 512, 370}, 500, 60, 420, 303, WHITE);
     panel(40, 108, 420, 340);
     for (int i = 0; i < n; i++) {
-        float y = 126 + i * 50;
+        float y = 122 + i * 46;
         if (i == menu_index)
-            gfx_sprite(atlas_get(res.hud, "wor_select"), 50, y - 5, 400, 50, WHITE);
+            gfx_sprite(atlas_get(res.hud, "wor_select"), 50, y - 5, 400, 46, WHITE);
         font_draw_shadow(res.title, items[i], 80, y, 38, i == menu_index ? RGBA(255, 230, 150, 255)
                                                                            : RGBA(200, 190, 180, 255), ALIGN_LEFT);
     }
@@ -644,7 +647,7 @@ static void download_screen(void)
     if (pressed & BTN_CIRCLE) {
         ui_sound(SND_UI_BACK);
         go(S_MAIN);
-        menu_index = 1;             // back on DOWNLOAD SONGS
+        menu_index = 2;             // back on DOWNLOAD SONGS
         return;
     }
     if ((pressed & BTN_CROSS) && has) {
@@ -1655,6 +1658,9 @@ static void finish_song(int how)
         if (!autoplay)
             songs_save_score(s, result.part, result.diff, sc);
     }
+    if (!autoplay && !practicing)
+        career_add(result.part, result.score, result.stars, result.notes_hit, result.notes_total, result.best_streak,
+                   result.overhits, result.played_s, result.failed, result.fc);
     game_stop();
     if (how == GAME_DONE) {
         sound_play(res.snd[SND_CHEER1 + rand() % 3], cfg.crowd_vol * 0.1f, false);
@@ -1728,7 +1734,11 @@ static void pause_screen(void)
         }
     }
     if (resume) {
-        go(S_RESUME);
+        if (cfg.no_countdown) {
+            game_pause(false);
+            go(S_PLAY);
+        } else
+            go(S_RESUME);
         return;
     }
     game_draw();
@@ -1781,6 +1791,12 @@ static void resume_screen(void)
 
 // ------------------------------------------------------------------------------------------------------- results
 
+// straight from the results to the part that went worst
+static bool results_can_practice(void)
+{
+    return !tour_on && !practicing && result.worst[0] && result.worst_pct < 100;
+}
+
 static void results_screen(void)
 {
     Song * s = songs_get(sel);
@@ -1790,6 +1806,17 @@ static void results_screen(void)
         sel_t = now_s;
         if (tour_on)
             tour_next();
+        return;
+    }
+    if ((pressed & BTN_SQUARE) && s && results_can_practice()) {
+        ui_sound(SND_UI_SELECT);
+        sel_part = result.part;
+        sel_diff = result.diff;
+        read_sections(s);
+        for (int i = 0; i < pr_count; i++)
+            if (!strcmp(pr[i].name, result.worst))
+                pr_from = pr_to = pr_focus = i;
+        go(pr_count ? S_PRACTICE : S_SELECT);
         return;
     }
     if ((pressed & BTN_TRIANGLE) && s) {
@@ -1878,11 +1905,15 @@ static void results_screen(void)
         else
             snprintf(line, sizeof(line), "Start to end, where the notes went");
         font_draw_fit(res.ui, line, x, 432, 24, 560, RGBA(220, 210, 200, 255), ALIGN_LEFT);
+        if (result.weak_pad && result.weak_pct < 100) {
+            snprintf(line, sizeof(line), "%s: %d%%", result.weak_pad, result.weak_pct);
+            font_draw_fit(res.ui, line, x + w, 432, 24, 220, RGBA(255, 190, 120, 255), ALIGN_RIGHT);
+        }
     }
     if (result_best)
         font_draw_shadow(res.title, "NEW BEST!", 870, 148, 36, RGBA(120, 220, 255, 255), ALIGN_RIGHT);
-    static const char * help[] = {"btn_cross", "Continue", "btn_triangle", "Retry"};
-    help_bar(help, 4);
+    static const char * help[] = {"btn_cross", "Continue", "btn_triangle", "Retry", "btn_square", "Practice it"};
+    help_bar(help, results_can_practice() ? 6 : 4);
     gfx_end();
 }
 
@@ -2085,7 +2116,29 @@ static void tour_screen(void)
 
 // ------------------------------------------------------------------------------------------------------- options
 
-enum { O_SPEED, O_HIGHWAY, O_VENUE, O_BAND, O_SING, O_OFFSET, O_LAYOUT, O_DRUMKEYS, O_DRUMHITS, O_TILT, O_NOFAIL, O_LEFTY, O_MUSIC, O_SFX, O_CROWD, O_FPS, O_COUNT };
+enum { O_SPEED, O_HIGHWAY, O_VENUE, O_BAND, O_SING, O_OFFSET, O_LAYOUT, O_DRUMKEYS, O_DRUMHITS, O_TILT, O_NOFAIL, O_LEFTY, O_MUSIC, O_SFX, O_CROWD, O_FPS,
+       O_CAMERA, O_HWALPHA, O_VLIGHT, O_FLASH, O_POPUPS, O_TIMING, O_LIVE, O_VANISH, O_MISSSND, O_REAR, O_BEND, O_COUNTDOWN,
+       O_RESET, O_FIVEPADS, O_DOUBLEKICK, O_COUNT };
+
+// the options by subject, L and R between them
+enum { OPT_TABS = 4, OPT_TAB_MAX = 11 };
+static const char * opt_tab_names[OPT_TABS] = {"GAME", "CONTROLS", "LOOK", "SOUND"};
+static const int opt_tabs[OPT_TABS][OPT_TAB_MAX + 1] = {
+    {O_SPEED, O_OFFSET, O_NOFAIL, O_VANISH, O_COUNTDOWN, O_SING, O_RESET, -1},
+    {O_LAYOUT, O_DRUMKEYS, O_FIVEPADS, O_DOUBLEKICK, O_LEFTY, O_TILT, O_REAR, -1},
+    {O_HIGHWAY, O_HWALPHA, O_CAMERA, O_VENUE, O_VLIGHT, O_BAND, O_FLASH, O_POPUPS, O_TIMING, O_LIVE, O_FPS, -1},
+    {O_MUSIC, O_SFX, O_CROWD, O_DRUMHITS, O_MISSSND, O_BEND, -1},
+};
+static int opt_tab, opt_top;
+static bool opt_reset_armed;
+
+static int opt_tab_count(void)
+{
+    int n = 0;
+    while (opt_tabs[opt_tab][n] >= 0)
+        n++;
+    return n;
+}
 
 static void option_text(int i, char * name, char * value, size_t n)
 {
@@ -2112,6 +2165,31 @@ static void option_text(int i, char * name, char * value, size_t n)
     case O_SFX: strcpy(name, "Effects volume"); snprintf(value, n, "%d", cfg.sfx_vol); break;
     case O_CROWD: strcpy(name, "Crowd volume"); snprintf(value, n, "%d", cfg.crowd_vol); break;
     case O_FPS: strcpy(name, "Show frame rate"); snprintf(value, n, "%s", cfg.show_fps ? "On" : "Off"); break;
+    case O_CAMERA: {
+        static const char * views[3] = {"World Tour", "Close", "High"};
+        strcpy(name, "Highway camera");
+        snprintf(value, n, "%s", views[cfg.camera]);
+        break;
+    }
+    case O_HWALPHA: strcpy(name, "Highway solid"); snprintf(value, n, "%d%%", cfg.highway_alpha * 10); break;
+    case O_VLIGHT: strcpy(name, "Venue brightness"); snprintf(value, n, "%d%%", cfg.venue_light * 10); break;
+    case O_FLASH: {
+        static const char * how[3] = {"Full", "Soft", "None"};
+        strcpy(name, "Screen flashes");
+        snprintf(value, n, "%s", how[cfg.flashes]);
+        break;
+    }
+    case O_POPUPS: strcpy(name, "Streak messages"); snprintf(value, n, "%s", cfg.no_popups ? "Off" : "On"); break;
+    case O_TIMING: strcpy(name, "Timing bar"); snprintf(value, n, "%s", cfg.timing_bar ? "On" : "Off"); break;
+    case O_LIVE: strcpy(name, "Live percent"); snprintf(value, n, "%s", cfg.live_stats ? "On" : "Off"); break;
+    case O_VANISH: strcpy(name, "Vanishing notes"); snprintf(value, n, "%s", cfg.vanish ? "On" : "Off"); break;
+    case O_MISSSND: strcpy(name, "Wrong note sounds"); snprintf(value, n, "%s", cfg.no_miss_sound ? "Off" : "On"); break;
+    case O_REAR: strcpy(name, "Rear pad whammy"); snprintf(value, n, "%s", cfg.no_rear_whammy ? "Off" : "On"); break;
+    case O_BEND: strcpy(name, "Whammy bends the sound"); snprintf(value, n, "%s", cfg.no_bend ? "Off" : "On"); break;
+    case O_COUNTDOWN: strcpy(name, "Countdown on resume"); snprintf(value, n, "%s", cfg.no_countdown ? "Off" : "On"); break;
+    case O_FIVEPADS: strcpy(name, "Drum pads"); snprintf(value, n, "%s", cfg.five_pads ? "Five, as World Tour" : "As charted"); break;
+    case O_DOUBLEKICK: strcpy(name, "Double kick"); snprintf(value, n, "%s", cfg.double_kick ? "On" : "Off"); break;
+    case O_RESET: strcpy(name, "Reset settings"); snprintf(value, n, "%s", opt_reset_armed ? "Press X again" : ""); break;
     }
 }
 
@@ -2162,22 +2240,59 @@ static void change_option(int i, int d)
     case O_SFX: cfg.sfx_vol = clampi(cfg.sfx_vol + d, 0, 10); break;
     case O_CROWD: cfg.crowd_vol = clampi(cfg.crowd_vol + d, 0, 10); break;
     case O_FPS: cfg.show_fps = !cfg.show_fps; break;
+    case O_CAMERA: cfg.camera = (cfg.camera + d + 3) % 3; break;
+    case O_HWALPHA: cfg.highway_alpha = clampi(cfg.highway_alpha + d, 0, 10); break;
+    case O_VLIGHT: cfg.venue_light = clampi(cfg.venue_light + d, 0, 10); break;
+    case O_FLASH: cfg.flashes = (cfg.flashes + d + 3) % 3; break;
+    case O_POPUPS: cfg.no_popups = !cfg.no_popups; break;
+    case O_TIMING: cfg.timing_bar = !cfg.timing_bar; break;
+    case O_LIVE: cfg.live_stats = !cfg.live_stats; break;
+    case O_VANISH: cfg.vanish = !cfg.vanish; break;
+    case O_MISSSND: cfg.no_miss_sound = !cfg.no_miss_sound; break;
+    case O_REAR: cfg.no_rear_whammy = !cfg.no_rear_whammy; break;
+    case O_BEND: cfg.no_bend = !cfg.no_bend; break;
+    case O_COUNTDOWN: cfg.no_countdown = !cfg.no_countdown; break;
+    case O_FIVEPADS: cfg.five_pads = !cfg.five_pads; break;
+    case O_DOUBLEKICK: cfg.double_kick = !cfg.double_kick; break;
     }
     audio_set_volumes(cfg.music_vol / 10.0f, cfg.sfx_vol / 10.0f);
 }
 
 static void options_screen(void)
 {
-    if (repeat & BTN_UP) {
-        menu_index = (menu_index + O_COUNT - 1) % O_COUNT;
+    if (pressed & (BTN_L | BTN_R)) {
+        opt_tab = (opt_tab + (pressed & BTN_L ? OPT_TABS - 1 : 1)) % OPT_TABS;
+        menu_index = opt_top = 0;
+        opt_reset_armed = false;
         ui_sound(SND_UI_MOVE);
     }
-    if (repeat & BTN_DOWN) {
-        menu_index = (menu_index + 1) % O_COUNT;
+    int count = opt_tab_count();
+    if (menu_index >= count)
+        menu_index = 0;
+    if (repeat & (BTN_UP | BTN_DOWN)) {
+        menu_index = (menu_index + (repeat & BTN_UP ? count - 1 : 1)) % count;
+        opt_reset_armed = false;
         ui_sound(SND_UI_MOVE);
     }
-    if (repeat & (BTN_LEFT | BTN_RIGHT | BTN_CROSS)) {
-        change_option(menu_index, repeat & BTN_LEFT ? -1 : 1);
+    int opt = opt_tabs[opt_tab][menu_index];
+    if (opt == O_RESET) {
+        if (pressed & BTN_CROSS) {
+            if (opt_reset_armed) {
+                // what's been measured and where you were stay
+                Config keep = cfg;
+                config_defaults();
+                cfg.offset_ms = keep.offset_ms;
+                cfg.last_part = keep.last_part;
+                cfg.last_diff = keep.last_diff;
+                cfg.sort = keep.sort;
+                memcpy(cfg.last_song, keep.last_song, sizeof(cfg.last_song));
+                audio_set_volumes(cfg.music_vol / 10.0f, cfg.sfx_vol / 10.0f);
+            }
+            opt_reset_armed = !opt_reset_armed;
+            ui_sound(SND_UI_SELECT);
+        }
+    } else if (repeat & (BTN_LEFT | BTN_RIGHT | BTN_CROSS)) {
+        change_option(opt, repeat & BTN_LEFT ? -1 : 1);
         ui_sound(SND_UI_MOVE);
     }
     if (pressed & (BTN_CIRCLE | BTN_START)) {
@@ -2186,7 +2301,7 @@ static void options_screen(void)
         int back = options_from;
         go(back);
         if (back == S_PAUSE || back == S_MAIN)
-            menu_index = 2;         // back on OPTIONS
+            menu_index = back == S_MAIN ? 3 : 2;    // back on OPTIONS
         return;
     }
     gfx_begin(0, 0, 0);
@@ -2194,18 +2309,24 @@ static void options_screen(void)
     draw_background(res.bg_menu, RGBA(170, 170, 170, 255));
     banner("OPTIONS");
     panel(110, 96, 740, 356);
-    enum { ROWS = 9 };
-    static int opt_top;
+    for (int i = 0; i < OPT_TABS; i++) {
+        float x = 110 + 740 * (i + 0.5f) / OPT_TABS;
+        font_draw(res.ui, opt_tab_names[i], x, 104, 26, i == opt_tab ? RGBA(255, 215, 110, 255) : RGBA(150, 145, 140, 255),
+                  ALIGN_CENTER);
+        if (i == opt_tab)
+            gfx_rect(x - 60, 134, 120, 2, RGBA(255, 215, 110, 255));
+    }
+    enum { ROWS = 8 };
     if (menu_index < opt_top)
         opt_top = menu_index;
     if (menu_index >= opt_top + ROWS)
         opt_top = menu_index - ROWS + 1;
-    for (int r = 0; r < ROWS; r++) {
-        int i = opt_top + r;
+    for (int r = 0; r < ROWS && opt_top + r < count; r++) {
+        int i = opt_tabs[opt_tab][opt_top + r];
         char name[48], value[48];
         option_text(i, name, value, sizeof(value));
-        float y = 116 + r * 36;
-        bool on = i == menu_index;
+        float y = 142 + r * 36;
+        bool on = opt_top + r == menu_index;
         if (on)
             gfx_sprite(atlas_get(res.hud, "wor_select"), 130, y - 3, 700, 38, WHITE);
         uint32_t c = on ? RGBA(255, 230, 150, 255) : RGBA(220, 215, 205, 255);
@@ -2214,8 +2335,8 @@ static void options_screen(void)
     }
     // there's more above or below
     if (opt_top > 0)
-        font_draw(res.ui, "...", SCREEN_W / 2, 96, 22, RGBA(220, 215, 205, 255), ALIGN_CENTER);
-    if (opt_top + ROWS < O_COUNT)
+        font_draw(res.ui, "...", SCREEN_W / 2, 116, 22, RGBA(220, 215, 205, 255), ALIGN_CENTER);
+    if (opt_top + ROWS < count)
         font_draw(res.ui, "...", SCREEN_W / 2, 434, 22, RGBA(220, 215, 205, 255), ALIGN_CENTER);
     static const char * about[O_COUNT] = {
         "How fast the notes come down the highway.",
@@ -2234,21 +2355,94 @@ static void options_screen(void)
         "The volume of misses, Star Power and menu sounds.",
         "The volume of the crowd.",
         "Shows the frame rate during a song.",
+        "World Tour's view, closer with bigger gems, or higher to read further ahead.",
+        "Lower it to see more of the stage through the highway.",
+        "Darken the stage if the lights make the notes hard to read.",
+        "The screen flash of Star Power, and the highway's rails on a mistake.",
+        "Messages like a note streak or Star Power ready.",
+        "A bar under the highway: each hit left of centre was early, right was late.",
+        "The percent of notes hit so far, with FC while there's been no mistake.",
+        "Notes vanish before the strikeline. Play them from memory.",
+        "The clank when you press a wrong fret.",
+        "Rubbing the back of the Vita works the whammy. The right stick always does.",
+        "Off: the whammy still earns Star Power, without changing the sound.",
+        "Three, two, one before the song goes on after a pause.",
+        "Back to how the game came. Your audio offset stays.",
+        "Lay 4-pad charts on World Tour's five pads: cymbals yellow and orange, toms blue and green.",
+        "Expert+: play the extra kicks charted for a second foot, in new downloads that have them.",
     };
     char line[160];
-    const char * text = about[menu_index];
-    if (menu_index == O_LAYOUT) {
+    const char * text = about[opt];
+    if (opt == O_LAYOUT) {
         snprintf(line, sizeof(line), "%s   Whammy: right stick, or rub the back", cfg.layout
                  ? "Green L, Red Left, Yellow Up, Blue Triangle, Orange R, open X"
                  : "Green L, Red Left, Yellow Up or Triangle, Blue Circle, Orange R, open X");
         text = line;
     }
-    if (menu_index == O_DRUMKEYS)
+    if (opt == O_DRUMKEYS)
         text = cfg.drum_layout ? "Red L, Yellow D-pad, Blue Triangle, Green Circle, Kick R: snare and hi-hat on two hands"
                                : "Red Left, Yellow Up, Blue Triangle, Green Circle, Kick L, R, X or Down";
     font_draw_fit(res.ui, text, SCREEN_W / 2, 462, 22, 820, RGBA(200, 200, 200, 255), ALIGN_CENTER);
-    static const char * help[] = {"btn_left", "Change", "btn_circle", "Done"};
-    help_bar(help, 4);
+    static const char * help[] = {"btn_left", "Change", "btn_l", "Tab", "btn_circle", "Done"};
+    help_bar(help, 6);
+    gfx_end();
+}
+
+// -------------------------------------------------------------------------------------------------------- career
+
+static void career_screen(void)
+{
+    if (pressed & (BTN_CIRCLE | BTN_CROSS)) {
+        ui_sound(SND_UI_BACK);
+        go(S_MAIN);
+        menu_index = 5;
+        return;
+    }
+    gfx_begin(0, 0, 0);
+    gfx_2d();
+    draw_background(res.bg_menu, RGBA(170, 170, 170, 255));
+    banner("CAREER");
+    panel(110, 96, 740, 356);
+    int next;
+    const char * rank = career_rank(&next);
+    font_draw_shadow(res.title, rank, SCREEN_W / 2, 106, 44, RGBA(255, 215, 110, 255), ALIGN_CENTER);
+    char line[96];
+    if (next)
+        snprintf(line, sizeof(line), "%d stars  -  next title at %d", career.stars, next);
+    else
+        snprintf(line, sizeof(line), "%d stars", career.stars);
+    font_draw(res.ui, line, SCREEN_W / 2, 154, 24, RGBA(220, 215, 205, 255), ALIGN_CENTER);
+    int fav = 0;
+    for (int i = 1; i < PART_COUNT; i++)
+        if (career.part_plays[i] > career.part_plays[fav])
+            fav = i;
+    struct {
+        const char * label;
+        char value[48];
+    } rows[8];
+    rows[0].label = "Songs finished";
+    snprintf(rows[0].value, 48, "%d of %d played", career.finished, career.plays);
+    rows[1].label = "Full combos";
+    snprintf(rows[1].value, 48, "%d", career.full_combos);
+    rows[2].label = "Notes hit";
+    snprintf(rows[2].value, 48, "%lld of %lld", career.notes_hit, career.notes_total);
+    rows[3].label = "Accuracy";
+    snprintf(rows[3].value, 48, "%.1f%%", career.notes_total ? career.notes_hit * 100.0 / career.notes_total : 0.0);
+    rows[4].label = "Best streak";
+    snprintf(rows[4].value, 48, "%d", career.best_streak);
+    rows[5].label = "Best score";
+    snprintf(rows[5].value, 48, "%d", career.best_score);
+    rows[6].label = "Time on stage";
+    snprintf(rows[6].value, 48, "%lld h %02lld min", career.seconds / 3600, career.seconds / 60 % 60);
+    rows[7].label = "Plays most";
+    snprintf(rows[7].value, 48, "%s", career.plays ? part_name(fav) : "-");
+    for (int i = 0; i < 8; i++) {
+        float y = 190 + i * 31;
+        font_draw(res.ui, rows[i].label, 170, y, 28, RGBA(220, 210, 200, 255), ALIGN_LEFT);
+        font_draw(res.ui, rows[i].value, 790, y, 28, RGBA(255, 236, 190, 255), ALIGN_RIGHT);
+    }
+    static const char * help[] = {"btn_circle", "Back"};
+    help_bar(help, 2);
     gfx_end();
 }
 
@@ -2304,7 +2498,7 @@ static void calibrate_screen(void)
         audio_song_unload();
         calib_playing = false;
         go(S_MAIN);
-        menu_index = 3;
+        menu_index = 4;             // back on CALIBRATE
         return;
     }
     gfx_begin(0, 0, 0);
@@ -2359,6 +2553,7 @@ int main(void)
     srand((unsigned)(getenv("GHV_FIXED") ? 1 : time(NULL)) ^ (unsigned)plat_now_us());
     gfx_init();
     config_load();
+    career_load();
     audio_init();
     audio_set_volumes(cfg.music_vol / 10.0f, cfg.sfx_vol / 10.0f);
     res_load();
@@ -2407,6 +2602,7 @@ int main(void)
         case S_SONGS: song_list(); break;
         case S_SELECT: select_screen(); break;
         case S_PRACTICE: practice_screen(); break;
+        case S_CAREER: career_screen(); break;
         case S_PLAY: play_screen(); break;
         case S_PAUSE: pause_screen(); break;
         case S_RESUME: resume_screen(); break;

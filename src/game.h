@@ -18,6 +18,10 @@ typedef struct {
     uint8_t strip[RESULT_STRIP];    // start to end, the percent hit in each slice (255: nothing played there)
     char worst[44];                 // the named section that went worst, and how it went
     int worst_pct;
+    int played_s;               // how long the song ran
+    int misses;
+    const char * weak_pad;      // drums: the pad hit least, NULL if none
+    int weak_pct;
 } Result;
 
 enum { GAME_PLAYING, GAME_DONE, GAME_FAILED, GAME_PAUSE };

@@ -176,6 +176,16 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 - Hardware log before this: pictures 6.1 s of about 8 s. tools/rawtex.py and gfx.c load_raw cut the decoding. The vita time hasn't been measured yet: read "loaded: pictures" in log.txt.
 - library.bin: Song records keyed on the folder's time. On the Vita the listing has the time, so a known song costs no file access at all. Songs edited in place can keep the folder's time: the list menu's "Read the whole card again" drops the file.
 
+## Settings, career, drums (2026-10-31)
+- Options has tabs (L/R: GAME, CONTROLS, LOOK, SOUND; opt_tabs in main.c). New: highway camera (World Tour, Close, High), highway solid, venue brightness, screen flashes, streak messages, timing bar (under the highway, ticks by hit offset), live percent + FC, vanishing notes, wrong note sounds, rear pad whammy, whammy bends the sound, countdown on resume, Reset settings (keeps offset and last song).
+- CAREER (career.c, career.txt): lifetime totals and a title by stars. Counts real plays only: no bot, no practice.
+- Results: Square jumps to practice on the toughest named section (not in the tour).
+- A sustain let go before its last 0.12 s mutes the part until the next hit, as in YARG. Not a miss.
+- Drums: NOTE_KICK2 (flag 0x80) from .mid note 95 / .chart 32, played with Double kick on; only charts converted from now on have it. Drum pads "Five": 4-pad charts with tom/cymbal data (version 2) laid out on five (five_pads in game.c). Results name the weakest pad (10+ gems).
+- The streak lamps are half capsules: flat end on the seat, turned with the rail; light_1 is the lamp half way.
+- Drummer sheets rebaked with the cell bottom at -0.62 m: the old -0.35 cut the kit's feet. band.py and draw_band must agree. After a rebake: copy to backups/band_raw, band_ink.py, rawtex.py.
+- build-tools/ghvconv can be stale. To test a chart, put the raw folder in songs/ and let the game convert it.
+
 ## Whammy (2026-10-31)
 - audio.c: a peak-locked phase vocoder, FFT 2048, overlap 4, a semitone at the bar's bottom as YARG sets it (pitch 2^(-bar/12), only while a sustain rings). Overlap 8 measures the same on real stems at twice the cost.
 - Below about 80 Hz a note's harmonics share a lobe and move by the same Hz: the fundamental is right, the ones above up to 2/3 of a semitone out at full bar. Tracking each bin tunes them and costs real bass stems 3-4 dB, so it isn't done.

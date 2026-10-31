@@ -490,6 +490,7 @@ typedef struct {
     VEC(int32_t) forced_ticks;      // .chart: the HOPO flip
     VEC(Forced) forced;             // .mid: forced on / off ranges
     VEC(TR) taps, sp, solos;
+    VEC(TR) kick2;                  // drums: where the kick is Expert+ (.mid note 95, .chart 32)
     VEC(TR) cyms;                   // .chart drums: tick, pad (0 yellow, 1 blue, 2 green) of a cymbal
 } Track;
 
@@ -528,6 +529,7 @@ static void parsed_free(Parsed * p)
             Track * t = &p->tracks[a][b];
             FREE(t->notes);
             FREE(t->forced_ticks);
+            FREE(t->kick2);
             FREE(t->forced);
             FREE(t->taps);
             FREE(t->sp);
@@ -665,6 +667,12 @@ static bool parse_chart(char * text, Parsed * P)
                     else if (a == 6) {
                         TR r = {tick, tick + 1};
                         PUSH(t->taps, r);
+                    } else if (a == 32 && pid == PART_DRUMS) {
+                        // the kick played on green's note number
+                        RawNote n = {tick, 0, 0, order++};
+                        PUSH(t->notes, n);
+                        TR r = {tick, tick + 1};
+                        PUSH(t->kick2, r);
                     } else if (a >= 66 && a <= 68) {
                         TR r = {tick, (int32_t)a - 66};
                         PUSH(t->cyms, r);
@@ -928,7 +936,16 @@ static bool parse_mid(const uint8_t * d, size_t n, const Source * src, Parsed * 
                     RawNote rn = {pr.s, fret, pr.e - pr.s, order++};
                     PUSH(t->notes, rn);
                 }
-            if (enhanced)
+            // Expert only: 95 under its kick on 96
+            if (pid == PART_DRUMS && di == DIFF_COUNT - 1)
+                for (int i = 0; i < notes[95].n; i++) {
+                    Pair pr = notes[95].v[i];
+                    RawNote rn = {pr.s, 0, 0, order++};
+                    PUSH(t->notes, rn);
+                    TR r = {pr.s, pr.s + 1};
+                    PUSH(t->kick2, r);
+                }
+            else if (enhanced)
                 for (int i = 0; i < notes[base - 1].n; i++) {
                     Pair pr = notes[base - 1].v[i];
                     RawNote rn = {pr.s, 7, pr.e - pr.s, order++};
@@ -1779,6 +1796,8 @@ bool songconv_install(const char * src_path, const char * dest_root, const ConvO
                         o->mask = (o->mask >> 1 & 0x1f) | (o->mask & 1 ? OPEN : 0);
                         o->flags &= ~(F_HOPO | F_TAP);
                         o->len = 0;
+                        if (in_ranges(dt->kick2.v, dt->kick2.n, o->tick))
+                            o->flags |= NOTE_KICK2;
                         // cymbals unless the chart says otherwise (.chart marks the cymbals instead). A chart that
                         // doesn't tell them apart: blue's a tom
                         for (int k = 0; k < 3; k++) {

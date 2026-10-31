@@ -75,6 +75,20 @@ typedef struct {
     bool lefty;
     bool show_fps;
     bool no_band;           // no band on the venue's stage (saves its four sheets and draws)
+    int camera;             // 0 World Tour, 1 lower and nearer, 2 high and long
+    int highway_alpha;      // 0-10, how solid the highway is
+    int venue_light;        // 0-10, how bright the stage behind it is
+    int flashes;            // 0 full, 1 soft, 2 none
+    bool no_popups;         // no "50 NOTE STREAK!" and the like
+    bool timing_bar;        // where the last hits fell in the window
+    bool live_stats;        // percent hit and a full-combo mark in the song
+    bool vanish;            // notes vanish before they reach the strikeline
+    bool no_miss_sound;
+    bool no_rear_whammy;    // the rear touchpad isn't a whammy bar
+    bool no_bend;           // the whammy earns Star Power but leaves the sound alone
+    bool no_countdown;      // resume at once
+    bool double_kick;       // Expert+: the kicks charted for a second foot
+    bool five_pads;         // 4-pad charts laid out on World Tour's five
     bool sing_along;        // the mic and the lyrics on top of any instrument, when the song has vocals
     int last_part, last_diff;
     int sort;
@@ -84,5 +98,6 @@ typedef struct {
 extern Config cfg;
 void config_load(void);
 void config_save(void);
+void config_defaults(void);
 // the buttons that play each lane (and the open note) in the current layout
 uint32_t lane_buttons(int lane);

@@ -672,13 +672,15 @@ void songs_save_score(Song * s, int part, int diff, Score score)
 
 // ------------------------------------------------------------------------------------------------------- settings
 
-static void config_defaults(void)
+void config_defaults(void)
 {
     memset(&cfg, 0, sizeof(cfg));
     cfg.speed = 5;
     snprintf(cfg.highway, sizeof(cfg.highway), "classic");
     snprintf(cfg.venue, sizeof(cfg.venue), "song");
     cfg.tilt = true;
+    cfg.highway_alpha = 10;
+    cfg.venue_light = 10;
     cfg.music_vol = 10;
     cfg.sfx_vol = 8;
     cfg.crowd_vol = 5;
@@ -709,6 +711,34 @@ void config_load(void)
             snprintf(cfg.highway, sizeof(cfg.highway), "%s", v);
         else if (strcmp(k, "venue") == 0)
             snprintf(cfg.venue, sizeof(cfg.venue), "%s", v);
+        else if (strcmp(k, "camera") == 0)
+            cfg.camera = n < 0 ? 0 : n > 2 ? 2 : n;
+        else if (strcmp(k, "highway_alpha") == 0)
+            cfg.highway_alpha = n < 0 ? 0 : n > 10 ? 10 : n;
+        else if (strcmp(k, "venue_light") == 0)
+            cfg.venue_light = n < 0 ? 0 : n > 10 ? 10 : n;
+        else if (strcmp(k, "flashes") == 0)
+            cfg.flashes = n < 0 ? 0 : n > 2 ? 2 : n;
+        else if (strcmp(k, "no_popups") == 0)
+            cfg.no_popups = n != 0;
+        else if (strcmp(k, "timing_bar") == 0)
+            cfg.timing_bar = n != 0;
+        else if (strcmp(k, "live_stats") == 0)
+            cfg.live_stats = n != 0;
+        else if (strcmp(k, "vanish") == 0)
+            cfg.vanish = n != 0;
+        else if (strcmp(k, "no_miss_sound") == 0)
+            cfg.no_miss_sound = n != 0;
+        else if (strcmp(k, "no_rear_whammy") == 0)
+            cfg.no_rear_whammy = n != 0;
+        else if (strcmp(k, "no_bend") == 0)
+            cfg.no_bend = n != 0;
+        else if (strcmp(k, "no_countdown") == 0)
+            cfg.no_countdown = n != 0;
+        else if (strcmp(k, "double_kick") == 0)
+            cfg.double_kick = n != 0;
+        else if (strcmp(k, "five_pads") == 0)
+            cfg.five_pads = n != 0;
         else if (strcmp(k, "no_band") == 0)
             cfg.no_band = atoi(v) != 0;
         else if (strcmp(k, "sing_along") == 0)
@@ -760,6 +790,12 @@ void config_save(void)
                "last_song = %s\nvenue = %s\nno_band = %d\nsing_along = %d\ndrum_layout = %d\ndrum_hits = %d\n",
             cfg.speed, cfg.highway, cfg.offset_ms, cfg.layout, cfg.tilt, cfg.nofail, cfg.music_vol, cfg.sfx_vol,
             cfg.crowd_vol, cfg.lefty, cfg.show_fps, cfg.last_part, cfg.last_diff, cfg.sort, cfg.last_song, cfg.venue, cfg.no_band, cfg.sing_along, cfg.drum_layout, cfg.drum_hits);
+    fprintf(f, "camera = %d\nhighway_alpha = %d\nvenue_light = %d\nflashes = %d\n",
+            cfg.camera, cfg.highway_alpha, cfg.venue_light, cfg.flashes);
+    fprintf(f, "no_popups = %d\ntiming_bar = %d\nlive_stats = %d\nvanish = %d\n"
+               "no_miss_sound = %d\nno_rear_whammy = %d\nno_bend = %d\nno_countdown = %d\n",
+            cfg.no_popups, cfg.timing_bar, cfg.live_stats, cfg.vanish, cfg.no_miss_sound, cfg.no_rear_whammy, cfg.no_bend, cfg.no_countdown);
+    fprintf(f, "double_kick = %d\nfive_pads = %d\n", cfg.double_kick, cfg.five_pads);
     fclose(f);
     remove(path);
     rename(tmp, path);

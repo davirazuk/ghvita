@@ -13,6 +13,7 @@ enum { DIFF_EASY, DIFF_MEDIUM, DIFF_HARD, DIFF_EXPERT, DIFF_COUNT };
 #define NOTE_TOM_Y 0x10     // drums: these pads are toms here, not cymbals (the next two follow on)
 #define NOTE_TOM_B 0x20
 #define NOTE_TOM_G 0x40
+#define NOTE_KICK2 0x80     // drums: this kick is Expert+, the second foot's (2x kick)
 
 typedef struct {
     int32_t time;           // microseconds

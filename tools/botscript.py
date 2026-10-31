@@ -9,6 +9,7 @@ ap.add_argument('vhc'); ap.add_argument('part', type=int); ap.add_argument('diff
 ap.add_argument('--speed', type=int, default=5); ap.add_argument('--miss', type=int, default=0)
 ap.add_argument('--late', type=float, default=0); ap.add_argument('--overhit', type=int, default=0)
 ap.add_argument('--mash', type=int, default=0, help='a wrong fret just after every Nth note, however fast the part')
+ap.add_argument('--drop', type=int, default=0, help='let go of every Nth sustain halfway')
 ap.add_argument('--sp', action='store_true'); ap.add_argument('--shots', default='')
 ap.add_argument('--limit', type=float, default=0, help='stop after this many seconds of song')
 a = ap.parse_args()
@@ -52,7 +53,8 @@ for i, (t, ln, frets, flags, sus) in enumerate(notes):
     if a.part == 5 and frets & 0xa0:
         lanes.append(5)                     # the kick, under the pads
     for l in lanes:
-        hold(l, f, frame(t + ln / 1e6) if ln else f + 2)
+        short = a.drop and ln and sum(1 for n in notes[:i] if n[1]) % a.drop == 0
+        hold(l, f, frame(t + ln / 2e6) if short else frame(t + ln / 1e6) if ln else f + 2)
     taken += 1
     if a.overhit and i % a.overhit == 0 and i + 1 < len(notes):
         nf = frame(notes[i + 1][0] / 1e6)
