@@ -1487,7 +1487,7 @@ static void results_screen(void)
 
 // ------------------------------------------------------------------------------------------------------- options
 
-enum { O_SPEED, O_HIGHWAY, O_VENUE, O_BAND, O_SING, O_OFFSET, O_LAYOUT, O_TILT, O_NOFAIL, O_LEFTY, O_MUSIC, O_SFX, O_CROWD, O_FPS, O_COUNT };
+enum { O_SPEED, O_HIGHWAY, O_VENUE, O_BAND, O_SING, O_OFFSET, O_LAYOUT, O_DRUMKEYS, O_DRUMHITS, O_TILT, O_NOFAIL, O_LEFTY, O_MUSIC, O_SFX, O_CROWD, O_FPS, O_COUNT };
 
 static void option_text(int i, char * name, char * value, size_t n)
 {
@@ -1507,6 +1507,8 @@ static void option_text(int i, char * name, char * value, size_t n)
     case O_LAYOUT: strcpy(name, "Buttons"); snprintf(value, n, "%s", cfg.layout ? "Layout B" : "Layout A"); break;
     case O_TILT: strcpy(name, "Tilt for Star Power"); snprintf(value, n, "%s", cfg.tilt ? "On" : "Off"); break;
     case O_NOFAIL: strcpy(name, "No fail"); snprintf(value, n, "%s", cfg.nofail ? "On" : "Off"); break;
+    case O_DRUMKEYS: strcpy(name, "Drum buttons"); snprintf(value, n, "%s", cfg.drum_layout ? "Shoulders" : "Thumbs"); break;
+    case O_DRUMHITS: strcpy(name, "Drum pad sounds"); snprintf(value, n, "%s", cfg.drum_hits ? "Every hit" : "Freestyle only"); break;
     case O_LEFTY: strcpy(name, "Lefty flip"); snprintf(value, n, "%s", cfg.lefty ? "On" : "Off"); break;
     case O_MUSIC: strcpy(name, "Music volume"); snprintf(value, n, "%d", cfg.music_vol); break;
     case O_SFX: strcpy(name, "Effects volume"); snprintf(value, n, "%d", cfg.sfx_vol); break;
@@ -1553,6 +1555,8 @@ static void change_option(int i, int d)
     case O_SING: cfg.sing_along = !cfg.sing_along; break;
     case O_OFFSET: cfg.offset_ms = clampi(cfg.offset_ms + d * 5, -300, 300); break;
     case O_LAYOUT: cfg.layout = !cfg.layout; break;
+    case O_DRUMKEYS: cfg.drum_layout = !cfg.drum_layout; break;
+    case O_DRUMHITS: cfg.drum_hits = !cfg.drum_hits; break;
     case O_TILT: cfg.tilt = !cfg.tilt; break;
     case O_NOFAIL: cfg.nofail = !cfg.nofail; break;
     case O_LEFTY: cfg.lefty = !cfg.lefty; break;
@@ -1595,13 +1599,13 @@ static void options_screen(void)
     for (int i = 0; i < O_COUNT; i++) {
         char name[48], value[48];
         option_text(i, name, value, sizeof(value));
-        float y = 104 + i * 25;
+        float y = 102 + i * 22;
         bool on = i == menu_index;
         if (on)
-            gfx_sprite(atlas_get(res.hud, "wor_select"), 130, y - 3, 700, 31, WHITE);
+            gfx_sprite(atlas_get(res.hud, "wor_select"), 130, y - 3, 700, 27, WHITE);
         uint32_t c = on ? RGBA(255, 230, 150, 255) : RGBA(220, 215, 205, 255);
-        font_draw(res.ui, name, 160, y, 26, c, ALIGN_LEFT);
-        font_draw(res.ui, value, 800, y, 26, c, ALIGN_RIGHT);
+        font_draw(res.ui, name, 160, y, 24, c, ALIGN_LEFT);
+        font_draw(res.ui, value, 800, y, 24, c, ALIGN_RIGHT);
     }
     static const char * about[O_COUNT] = {
         "How fast the notes come down the highway.",
@@ -1611,6 +1615,8 @@ static void options_screen(void)
         "Sing into the mic over any instrument, when the song has vocals. Headphones help.",
         "Move the notes earlier (-) or later (+) to match the sound. Calibrate sets it for you.",
         NULL,
+        NULL,
+        "On top of the song: the kit answers every pad you hit, not just in the gaps.",
         "Tilt the Vita quickly to use Star Power (Select always works too).",
         "The song keeps going however badly it goes.",
         "Green on the right, for left-handed players.",
@@ -1627,6 +1633,9 @@ static void options_screen(void)
                  : "Green L, Red Left, Yellow Up or Triangle, Blue Circle, Orange R, open X");
         text = line;
     }
+    if (menu_index == O_DRUMKEYS)
+        text = cfg.drum_layout ? "Red L, Yellow D-pad, Blue Triangle, Green Circle, Kick R: snare and hi-hat on two hands"
+                               : "Red Left, Yellow Up, Blue Triangle, Green Circle, Kick L, R, X or Down";
     font_draw_fit(res.ui, text, SCREEN_W / 2, 462, 22, 820, RGBA(200, 200, 200, 255), ALIGN_CENTER);
     static const char * help[] = {"btn_left", "Change", "btn_circle", "Done"};
     help_bar(help, 4);

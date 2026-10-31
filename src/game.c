@@ -14,6 +14,7 @@
 #define Z_NEAR -1.3f
 #define HALF_W 2.62f            // half the highway's width (lanes are 1 wide)
 #define MAX_SUS 8
+#define MAX_ZONES 64
 #define SP_PER_QUARTER (1.0f / 32)
 
 enum { PENDING, HIT, MISSED };
@@ -37,9 +38,15 @@ typedef struct {
     double held;
     double hit_t, last_hit;             // the next stroke, the last
     int hit_frets, last_frets, cell;
+    float mic;                  // the singer's: 0 down, 1 at the mouth
     float pulse;
     bool was;
 } BandPart;
+
+typedef struct {
+    double from, to;
+    int lane;                   // -1: right across
+} Zone;
 
 static struct {
     Song * song;
@@ -50,6 +57,13 @@ static struct {
     uint8_t * got;              // lanes already pressed for a chord
     int16_t * phrase;           // the Star Power phrase a note belongs to (-1)
     bool * phrase_ok;
+    double judged_t[6];                 // when a note on each lane was last hit or missed
+    bool * roll;                        // drums: gems the hits before them carry
+    Zone rolls[MAX_ZONES], gaps[MAX_ZONES];     // where the highway marks them
+    int roll_count, gap_count;
+    double pad_t[6];                    // when each pad was last hit
+    int free_hits;                      // in this gap
+    double free_t;
     int16_t * solo;             // the solo a note belongs to (-1)
     int * solo_hit;
     int first;                  // notes before this are all judged
@@ -216,6 +230,7 @@ static void pick_venue(const Song * song)
 }
 
 static void draw_band(double beat);
+static uint32_t with_alpha(uint32_t c, float a);
 
 // where the song's structure puts the show: every chorus in the same warm colours, every verse in the same cool ones.
 // A new chorus sets the jets off, when the crowd is with you. False: the chart names no sections
@@ -418,6 +433,20 @@ static int band_strike(int frets)
     return 0;
 }
 
+// what the chart's pads are on the kit, as band_strike's bits: yellow's the hi-hat, blue a ride and green a crash,
+// unless the chart says they're toms
+static int kit_pads(const Note * n)
+{
+    int f = n->frets & 1;
+    if (n->frets & 2)
+        f |= n->flags & NOTE_TOM_Y ? 4 : 2;
+    if (n->frets & 4)
+        f |= n->flags & NOTE_TOM_B ? 4 : 8;
+    if (n->frets & 8)
+        f |= n->flags & NOTE_TOM_G ? 16 : 8;
+    return f | (n->frets & 16);
+}
+
 // the cell a member's on: the arm comes down to land on the next stroke, rebounds, and holds until the one after
 static int band_cell(int r, const BandPart * b, double beat)
 {
@@ -457,7 +486,7 @@ static bool band_playing(int r, double beat_len)
         b->pulse = 1;
         if (n->time / 1e6 >= b->hit_t && n->time / 1e6 > b->last_hit && band_strikes(r, n, b->last_hit)) {
             b->last_hit = n->time / 1e6;
-            b->last_frets = n->frets;
+            b->last_frets = r ? n->frets : kit_pads(n);
             passed = true;
         }
     }
@@ -467,7 +496,7 @@ static bool band_playing(int r, double beat_len)
         for (int i = b->next; i < p->note_count; i++)
             if (p->notes[i].time / 1e6 > b->last_hit && band_strikes(r, &p->notes[i], b->last_hit)) {
                 b->hit_t = p->notes[i].time / 1e6;
-                b->hit_frets = p->notes[i].frets;
+                b->hit_frets = r ? p->notes[i].frets : kit_pads(&p->notes[i]);
                 break;
             }
     }
@@ -493,6 +522,14 @@ static void band_strip(Tex * t, float x, float bottom, float w, float h, const f
         const float tc[4][2] = {{uv[0], v1}, {uv[2], v1}, {uv[2], v0}, {uv[0], v0}};
         gfx_quad(p, tc, c);
     }
+}
+
+static void band_frame(Tex * t, int f, float cw, float ch, float x, float bottom, float w, float h, float lean,
+                       float dip, uint32_t tint)
+{
+    float u0 = (f % 8) * cw / t->w, v0 = (f / 8) * ch / t->h;
+    const float uv[4] = {u0, v0, u0 + cw / t->w, v0 + ch / t->h};
+    band_strip(t, x, bottom, w, h, uv, lean, dip, tint);
 }
 
 static void draw_band(double beat)
@@ -549,8 +586,8 @@ static void draw_band(double beat)
             plat_log("band: member %d %s at %.2f", r, playing ? "plays" : "stops", G.t);
         bp->was = playing;
 #endif
-        if (playing)
-            bp->cell = r == 1 ? (int)(phase * 48) % 48 : band_cell(r, bp, beat);
+        if (playing && r != 1)
+            bp->cell = band_cell(r, bp, beat);
         int f = bp->cell;
         stage_point(&m[0], &m[1]);
         m[2] *= G.cam_z;
@@ -562,15 +599,27 @@ static void draw_band(double beat)
         float lean = (r ? (i & 1 ? sway : -sway) * (playing ? 1 : 0.4f) : 0) * m[2];
         uint32_t tint = col;
         if (r == me) {
-            dip += G.hit_pulse * 0.08f * m[2];
-            lean += sinf((float)G.t * 70) * G.miss_pulse * 0.12f * m[2];
+            // the kit's in the drummer's picture, and it stays where it stands
+            dip += G.hit_pulse * (r ? 0.08f : 0.015f) * m[2];
+            lean += sinf((float)G.t * 70) * G.miss_pulse * (r ? 0.12f : 0.02f) * m[2];
             if (G.miss_pulse > 0.15f)
                 tint = RGBA(255, 110, 90, 255);
         }
         bp->pulse *= 0.82f;
-        float u0 = (f % 8) * cw / t->w, v0 = (f / 8) * ch / t->h;
-        const float uv[4] = {u0, v0, u0 + cw / t->w, v0 + ch / t->h};
-        band_strip(t, m[0], bottom, w, h, uv, lean, dip, tint);
+        if (r == 1) {
+            // the singer keeps moving: 32 frames with the mic at the mouth for a line, 16 with it down for the rests,
+            // one over the other for the moment it comes up
+            float want = playing ? 1 : 0, step = want - bp->mic;
+            bp->mic += step > 0.17f ? 0.17f : step < -0.17f ? -0.17f : step;
+            int sing = (int)(phase * 32) % 32, down = 32 + (int)(phase * 16) % 16;
+            if (bp->mic < 1)
+                band_frame(t, down, cw, ch, m[0], bottom, w, h, lean, dip,
+                           with_alpha(tint, bp->mic < 0.5f ? 1 : 2 * (1 - bp->mic)));
+            if (bp->mic > 0)
+                band_frame(t, sing, cw, ch, m[0], bottom, w, h, lean, dip,
+                           with_alpha(tint, bp->mic > 0.5f ? 1 : 2 * bp->mic));
+        } else
+            band_frame(t, f, cw, ch, m[0], bottom, w, h, lean, dip, tint);
     }
 }
 
@@ -667,21 +716,32 @@ static void setup_camera(void)
 // a drum chart's chords are hits at the same moment: each gem is its own note, so a missed kick costs the kick only
 #define GAP_MIN 2.0                     // seconds between gems for freestyle
 #define GAP_AFTER 0.3
+#define PRESS_GRACE 0.13                // a press this soon after its lane's note was judged belongs to that note
+#define ROLL_GAP 0.11                   // gems this close on a pad are a roll: no thumb keeps up with them
+#define ROLL_RUN 4                      // that many in a row
+#define ROLL_HOLD 0.18                  // a roll goes on while its pad was hit this recently
+
+// songs converted before the kick had the open bit keep it in bit 7, and their charts are gone
+static uint8_t drum_frets(const Note * n)
+{
+    return n->frets & 0x80 ? (n->frets & 0x1f) | FRET_OPEN : n->frets;
+}
 
 static void split_drums(void)
 {
     const Part * p = G.part;
     int total = 0, used = 0;
     for (int i = 0; i < p->note_count; i++)
-        total += frets_count(p->notes[i].frets);
+        total += frets_count(drum_frets(&p->notes[i]));
     G.drum_notes = calloc(total + 1, sizeof(Note));
     if (!G.drum_notes)
         return;
     for (int i = 0; i < p->note_count; i++) {
         const Note * n = &p->notes[i];
-        int left = frets_count(n->frets);
+        uint8_t frets = drum_frets(n);
+        int left = frets_count(frets);
         for (int b = 0; b < 6; b++) {
-            if (!(n->frets & (1 << b)))
+            if (!(frets & (1 << b)))
                 continue;
             Note * o = &G.drum_notes[used++];
             *o = *n;
@@ -701,17 +761,48 @@ static void split_drums(void)
     G.drum_part.note_count = used;
     G.part = &G.drum_part;
     G.freestyle = 0;
-    int gaps = 0;
-    for (int i = 1; i < used; i++) {
-        double a = G.drum_notes[i - 1].time / 1e6, b = G.drum_notes[i].time / 1e6;
-        if (b - a >= GAP_MIN && gaps++ < 4)
-            plat_log("drums: gap %.2f to %.2f", a, b);
+    G.gap_count = 0;
+    for (int i = 0; i < used && G.gap_count < MAX_ZONES; i++) {
+        double a = i ? G.drum_notes[i - 1].time / 1e6 : 0, b = G.drum_notes[i].time / 1e6;
+        if (b - a >= GAP_MIN) {
+            G.gaps[G.gap_count++] = (Zone){i ? a + GAP_AFTER : 0, b - WINDOW, -1};
+            if (G.gap_count <= 4)
+                plat_log("drums: gap %.2f to %.2f", a, b);
+        }
     }
-    plat_log("drums: %d gaps for freestyle", gaps);
+    plat_log("drums: %d gaps for freestyle", G.gap_count);
+    // rolls: as YARG's lanes, the first gem is played and the rest come while the pad keeps going. Worked out from the
+    // gems, not the chart's markers: a downloaded song's chart is gone once it's converted
+    G.roll = calloc(used + 1, sizeof(bool));
+    G.roll_count = 0;
+    for (int b = 0; G.roll && b < 6; b++) {
+        int first = -1, prev = -1, run = 0;
+        for (int i = 0; i <= used; i++) {
+            if (i < used && !(G.drum_notes[i].frets & (1 << b)))
+                continue;
+            if (i < used && prev >= 0 && (G.drum_notes[i].time - G.drum_notes[prev].time) / 1e6 <= ROLL_GAP)
+                run++;
+            else {
+                if (run >= ROLL_RUN) {
+                    for (int k = first + 1; k <= prev; k++)
+                        G.roll[k] = G.drum_notes[k].frets & (1 << b);
+                    if (G.roll_count < MAX_ZONES)
+                        G.rolls[G.roll_count++] = (Zone){G.drum_notes[first].time / 1e6,
+                                                         G.drum_notes[prev].time / 1e6, b};
+                }
+                first = i;
+                run = 1;
+            }
+            prev = i;
+        }
+    }
+    plat_log("drums: %d rolls", G.roll_count);
 }
 
 static void free_song(void)
 {
+    free(G.roll);
+    G.roll = NULL;
     audio_song_unload();
     vox_free();
     G.vocal = G.sing = false;
@@ -764,6 +855,10 @@ static void reset_play(void)
     G.hit_pulse = G.miss_pulse = G.cheer = 0;
     G.solo_index = -1;
     G.section = -1;
+    for (int l = 0; l < 6; l++)
+        G.pad_t[l] = G.judged_t[l] = -100;
+    G.free_hits = 0;
+    G.free_t = -100;
     G.pyro_t = -100;
     G.cam_z = 1.04f;
     for (int i = 0; i < 6; i++)
@@ -1019,9 +1114,17 @@ static void break_streak(void)
     set_my_stem(0);
 }
 
+static void mark_judged(uint8_t frets)
+{
+    for (int l = 0; l < 6; l++)
+        if (frets & (1 << l))
+            G.judged_t[l] = G.t;
+}
+
 static void miss_note(int i)
 {
     G.state[i] = MISSED;
+    mark_judged(G.part->notes[i].frets);
     G.misses++;
     break_streak();
     G.miss_flash = 1;
@@ -1038,6 +1141,7 @@ static void hit_note(int i)
 {
     const Note * n = &G.part->notes[i];
     G.state[i] = HIT;
+    mark_judged(n->frets);
     G.hits++;
     G.streak++;
     if (G.streak > G.best_streak)
@@ -1110,20 +1214,27 @@ static void overhit(void)
 }
 
 // Left and Up for one thumb, Triangle and Circle for the other, the kick under the fingers
+// Or the snare under one finger and the kick under the other, so the snare and the hi-hat are on two hands as they are
+// on a kit: they're the chord most charts are made of
 static uint32_t drum_buttons(int lane)
 {
+    const uint32_t dpad = BTN_UP | BTN_LEFT | BTN_RIGHT | BTN_DOWN;
     static const uint32_t four[4] = {BTN_LEFT, BTN_UP, BTN_TRIANGLE, BTN_CIRCLE};
     static const uint32_t five[5] = {BTN_LEFT, BTN_UP, BTN_TRIANGLE, BTN_SQUARE, BTN_CIRCLE};
+    const uint32_t four_s[4] = {BTN_L, dpad, BTN_TRIANGLE | BTN_SQUARE, BTN_CIRCLE | BTN_CROSS};
+    const uint32_t five_s[5] = {BTN_L, dpad, BTN_TRIANGLE, BTN_SQUARE, BTN_CIRCLE | BTN_CROSS};
     if (lane == LANE_OPEN)
-        return BTN_L | BTN_R | BTN_CROSS | BTN_DOWN;
+        return cfg.drum_layout ? BTN_R : BTN_L | BTN_R | BTN_CROSS | BTN_DOWN;
     if (lane >= G.lanes)
         return 0;
+    if (cfg.drum_layout)
+        return G.lanes == 4 ? four_s[lane] : five_s[lane];
     return G.lanes == 4 ? four[lane] : five[lane];
 }
 
 // a real gap for freestyle: GAP_MIN seconds at least between gems (the rest in a beat isn't one), once the last gem
 // has rung and before the next can be hit. Up to the first gem and after the last too
-static bool in_gap(void)
+static double gap_left(void)
 {
     const Part * p = G.part;
     int lo = 0, hi = p->note_count;
@@ -1136,13 +1247,23 @@ static bool in_gap(void)
     }
     double prev = lo ? p->notes[lo - 1].time / 1e6 : -1e9;
     double next = lo < p->note_count ? p->notes[lo].time / 1e6 : 1e9;
-    return next - prev >= GAP_MIN && G.t > prev + GAP_AFTER && G.t < next - WINDOW;
+    return next - prev >= GAP_MIN && G.t > prev + GAP_AFTER && G.t < next - WINDOW ? next - WINDOW - G.t : 0;
+}
+
+static void pad_sound(int lane, float volume)
+{
+    static const int four[4] = {SND_DRUM_SNARE, SND_DRUM_HAT, SND_DRUM_TOM_HI, SND_DRUM_CRASH};
+    static const int five[5] = {SND_DRUM_SNARE, SND_DRUM_HAT, SND_DRUM_TOM_HI, SND_DRUM_CRASH, SND_DRUM_TOM_LO};
+    int snd = lane == LANE_OPEN ? SND_DRUM_KICK : G.lanes == 4 ? four[lane & 3] : five[lane % 5];
+    sound_play(res.snd[snd], volume, false);
 }
 
 static void press_lane(int lane)
 {
     const Part * p = G.part;
     uint8_t bit = lane == LANE_OPEN ? FRET_OPEN : 1 << lane;
+    if (G.drums && cfg.drum_hits)
+        pad_sound(lane, 0.5f);
     for (int i = G.first; i < p->note_count; i++) {
         const Note * n = &p->notes[i];
         double nt = n->time / 1e6;
@@ -1156,15 +1277,21 @@ static void press_lane(int lane)
             hit_note(i);
         return;
     }
+    // a finger coming down just after its chord counted, or a press just late for a note that's already cost the miss,
+    // isn't a stray one
+    if (G.t - G.judged_t[lane] < PRESS_GRACE)
+        return;
     // a stray drum hit is just a fill, and heard in a gap of the chart
     if (!G.drums)
         overhit();
-    else if (in_gap()) {
-        static const int four[4] = {SND_DRUM_SNARE, SND_DRUM_HAT, SND_DRUM_TOM_HI, SND_DRUM_CRASH};
-        static const int five[5] = {SND_DRUM_SNARE, SND_DRUM_HAT, SND_DRUM_TOM_HI, SND_DRUM_CRASH, SND_DRUM_TOM_LO};
-        int snd = lane == LANE_OPEN ? SND_DRUM_KICK : G.lanes == 4 ? four[lane & 3] : five[lane % 5];
-        sound_play(res.snd[snd], 0.9f, false);
+    else if (gap_left() > 0) {
+        pad_sound(lane, cfg.drum_hits ? 0.4f : 0.9f);
         G.freestyle++;
+        // a fill, and the crowd's with it. Hits as a drummer could play them: mashing adds nothing
+        if (G.t > 0 && G.t - G.free_t >= 0.08) {
+            G.free_hits++;
+            G.free_t = G.t;
+        }
 #ifndef __vita__
         plat_log("drums: freestyle lane %d at %.2f", lane, G.t);
 #endif
@@ -1182,6 +1309,9 @@ static void activate_sp(void)
     popup("STAR POWER!");
     sound_play(res.snd[SND_SP_DEPLOY], 0.9f, false);
     sound_play(res.snd[SND_SP_CROWD], cfg.crowd_vol * 0.06f, false);
+#ifndef __vita__
+    plat_log("sp: on at %.2f", G.t);
+#endif
 }
 
 static void judge(uint32_t pressed_lanes)
@@ -1197,9 +1327,23 @@ static void judge(uint32_t pressed_lanes)
         if (G.state[i] == PENDING) {
             if (G.t <= nt + WINDOW)
                 break;
-            miss_note(i);
+            if (G.roll && G.roll[i] && G.t - G.pad_t[__builtin_ctz(p->notes[i].frets)] < ROLL_HOLD)
+                hit_note(i);
+            else
+                miss_note(i);
         }
         G.first++;
+    }
+    // a gap's over
+    if (G.free_hits && gap_left() <= 0) {
+        int bonus = G.free_hits * 20 * multiplier();
+        char t[32];
+        snprintf(t, sizeof(t), "FREESTYLE +%d", bonus);
+        popup(t);
+        G.score += bonus;
+        if (G.free_hits >= 8)
+            G.cheer = 1;
+        G.free_hits = 0;
     }
     // a solo's end
     for (int k = 0; k < p->solo_count; k++) {
@@ -1310,10 +1454,11 @@ static void tilt(const float accel[3])
 }
 
 // both cymbals together: the hi-hat and the crash, unless the chart asks for the two just there
-static bool both_cymbals(uint32_t lanes_pressed, uint32_t held)
+static bool both_cymbals(uint32_t lanes_pressed)
 {
     const uint32_t both = 1 << 1 | 1 << 3;
-    if (!(lanes_pressed & both) || (held & both) != both)
+    // together: the second a moment after the first is just two gems played one after the other
+    if (!(lanes_pressed & both) || fabs(G.pad_t[1] - G.pad_t[3]) > 0.05)
         return false;
     const Part * p = G.part;
     uint32_t due = 0;
@@ -1329,11 +1474,11 @@ static void update_vocals(void)
     float grade, points;
     if (!vox_update(G.t, &grade, &points))
         return;
-    static const char * const words[5] = {"AWFUL", "WEAK", "OK", "STRONG", "AWESOME!"};
-    int w = grade >= 0.9f ? 4 : grade >= 0.7f ? 3 : grade >= 0.5f ? 2 : grade >= 0.25f ? 1 : 0;
+    static const char * const words[5] = {"AWFUL", "MESSY", "OK", "STRONG", "AWESOME!"};
+    int w = grade >= 1 ? 4 : grade >= 0.8f ? 3 : grade >= 0.6f ? 2 : grade >= 0.1f ? 1 : 0;
     int mult = (1 + G.vox_run / 2 > 4 ? 4 : 1 + G.vox_run / 2) * (G.vocal && G.sp_active ? 2 : 1);
     G.score += points * mult;
-    G.vox_run = grade >= 0.7f ? G.vox_run + 1 : 0;
+    G.vox_run = grade >= 0.8f ? G.vox_run + 1 : 0;
     if (!G.vocal) {
         // singing along: the instrument keeps the meter and the streak, the voice only adds its points
         char t[32];
@@ -1341,10 +1486,10 @@ static void update_vocals(void)
         popup(t);
         return;
     }
-    if (grade >= 0.5f)
+    if (grade >= 0.6f)
         G.hits++;
     // the mic has no Star Power notes: strong phrases fill the meter
-    if (grade >= 0.7f) {
+    if (grade >= 0.8f) {
         bool was_ready = G.sp >= 0.5f;
         G.sp = G.sp > 0.875f ? 1 : G.sp + 0.125f;
         if (!was_ready && G.sp >= 0.5f && !G.sp_active)
@@ -1359,7 +1504,7 @@ static void update_vocals(void)
     else
         snprintf(t, sizeof(t), "%s", words[w]);
     popup(t);
-    rock_change((grade - 0.45f) * 0.2f);
+    rock_change((grade - 0.6f) * 0.2f);
 }
 
 int game_update(const Pad * pad, uint32_t pressed)
@@ -1412,6 +1557,9 @@ int game_update(const Pad * pad, uint32_t pressed)
             activate_sp();
     }
     G.held = held;
+    for (int lane = 0; lane < 6; lane++)
+        if (lanes_pressed & (1 << lane))
+            G.pad_t[lane] = G.t;
 
     // whammy: the right stick moving, or a finger rubbing the rear touchpad (a thumb on the frets can't reach the stick).
     // Its way from where it landed is the bar, as far as the stick's from the middle
@@ -1446,7 +1594,7 @@ int game_update(const Pad * pad, uint32_t pressed)
         audio_stem_bend(G.my_stem, G.bend > 0.003f ? G.bend : 0);
 
     // Star Power: Select, a quick tilt, or on drums both cymbals at once, as in World Tour
-    if ((pressed & BTN_SELECT) || (G.drums && both_cymbals(lanes_pressed, held)))
+    if ((pressed & BTN_SELECT) || (G.drums && both_cymbals(lanes_pressed)))
         activate_sp();
     if (cfg.tilt && pad->has_motion)
         tilt(pad->accel);
@@ -1640,6 +1788,24 @@ static void draw_sustains(void)
     }
 }
 
+// the drums' marks on the board: a roll glows down its lane, a gap for freestyle right across
+static void draw_zones(void)
+{
+    float half = fabsf(lane_x(1) - lane_x(0)) * 0.46f;
+    for (int i = 0; i < G.gap_count + G.roll_count; i++) {
+        const Zone * s = i < G.gap_count ? &G.gaps[i] : &G.rolls[i - G.gap_count];
+        float z0 = (float)((s->from - G.t) * G.speed), z1 = (float)((s->to - G.t) * G.speed);
+        z0 = z0 < 0 ? 0 : z0;
+        z1 = z1 > Z_FAR ? Z_FAR : z1;
+        if (z1 <= z0)
+            continue;
+        bool wide = s->lane < 0 || s->lane == LANE_OPEN;
+        float x = wide ? 0 : lane_x(s->lane), w = wide ? HALF_W : half;
+        uint32_t c = s->lane < 0 ? RGBA(70, 255, 150, 54) : ALPHA(lane_colour[wide ? 6 : lane_art(s->lane)], 84);
+        flat(x - w, x + w, z0, z1, 0.008f, NULL, 0, 1, with_alpha(c, fade(z0)), with_alpha(c, fade(z1)));
+    }
+}
+
 static void draw_cups(bool caps)
 {
     for (int l = 0; l < G.lanes; l++) {
@@ -1795,6 +1961,29 @@ static void lcd(const char * which, long value, int cells, float right, float y,
 
 // GHWT's solo HUD: left of the highway the ROCK dome, the Star Power tubes round its top and the score and streak
 // counters under it; on the right rail the multiplier over its seat of streak lamps
+// the buttons under the lanes, as a song starts
+static void draw_keys(void)
+{
+    static const struct {
+        uint32_t button;
+        const char * name;
+    } keys[] = {{BTN_L, "btn_l"}, {BTN_R, "btn_r"}, {BTN_LEFT, "btn_left"}, {BTN_UP, "btn_up"},
+                {BTN_RIGHT, "btn_right"}, {BTN_DOWN, "btn_down"}, {BTN_TRIANGLE, "btn_triangle"},
+                {BTN_SQUARE, "btn_square"}, {BTN_CIRCLE, "btn_circle"}, {BTN_CROSS, "btn_cross"}};
+    float a = G.t < 3.5 ? 1 : (float)(4.5 - G.t), size = 34;
+    for (int lane = 0; lane < G.lanes; lane++) {
+        int src = cfg.lefty ? G.lanes - 1 - lane : lane;
+        uint32_t b = G.drums ? drum_buttons(src) : lane_buttons(src);
+        float x, y;
+        project(lane_x(lane), 0, 0, &x, &y);
+        for (size_t k = 0; k < sizeof(keys) / sizeof(keys[0]); k++)
+            if (b & keys[k].button) {
+                gfx_sprite(atlas_get(res.hud, keys[k].name), x - size / 2, y + 28, size, size, with_alpha(WHITE, a));
+                break;
+            }
+    }
+}
+
 static void draw_hud(void)
 {
     gfx_2d();
@@ -1879,11 +2068,18 @@ static void draw_hud(void)
 after_rail:;
     if (G.drums && G.t < 4.5) {
         // which thumb goes where
-        font_draw_shadow(res.ui, G.lanes == 4 ? "Left  Up  Triangle  Circle" : "Left  Up  Triangle  Square  Circle",
-                         SCREEN_W / 2, 150, 24, WHITE, ALIGN_CENTER);
-        font_draw_shadow(res.ui, G.lanes == 4 ? "Kick: L, R, X or Down   Star Power: Up + Circle, or Select"
-                                              : "Kick: L, R, X or Down   Star Power: Up + Square, or Select",
-                         SCREEN_W / 2, 178, 20, RGBA(210, 170, 255, 255), ALIGN_CENTER);
+        char hint[80];
+        snprintf(hint, sizeof(hint), "Kick: %s   Star Power: %s + %s, or Select", cfg.drum_layout ? "R" : "L, R, X or Down",
+                 cfg.drum_layout ? "D-pad" : "Up", G.lanes == 4 ? "Circle" : "Square");
+        font_draw_shadow(res.ui, hint, SCREEN_W / 2, 164, 22, RGBA(210, 170, 255, 255), ALIGN_CENTER);
+    }
+    if (G.t < 4.5 && !G.vocal)
+        draw_keys();
+    if (G.drums && G.t >= 4.5) {
+        double left = gap_left();
+        if (left > 0.4 && left < 1e6)
+            font_draw_shadow(res.ui, "FREESTYLE", SCREEN_W / 2, 124, 30,
+                             with_alpha(RGBA(120, 255, 170, 255), left < 0.8 ? (float)(left - 0.4) / 0.4f : 1), ALIGN_CENTER);
     }
     // song progress
     double len = G.song->length_ms / 1000.0;
@@ -1956,6 +2152,8 @@ void game_draw(void)
     if (!G.vocal) {
         gfx_3d(G.proj, G.view);
         draw_highway();
+        if (G.drums)
+            draw_zones();
         draw_sustains();
         draw_cups(false);
         draw_gems();

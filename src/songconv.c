@@ -490,6 +490,7 @@ typedef struct {
     VEC(int32_t) forced_ticks;      // .chart: the HOPO flip
     VEC(Forced) forced;             // .mid: forced on / off ranges
     VEC(TR) taps, sp, solos;
+    VEC(TR) cyms;                   // .chart drums: tick, pad (0 yellow, 1 blue, 2 green) of a cymbal
 } Track;
 
 typedef struct { int32_t tick, len; int pitch; char * text; } VoxIn;
@@ -499,6 +500,7 @@ typedef struct {
     int res;
     VEC(VoxIn) vox;                 // PART VOCALS
     VEC(TR) vox_phrases;
+    VEC(TR) toms[3];                // .mid drums: while yellow, blue, green are toms
     VEC(TempoIn) tempos;
     VEC(Sig) sigs;
     VEC(Name) names;
@@ -513,6 +515,8 @@ static void parsed_free(Parsed * p)
         free(p->vox.v[i].text);
     FREE(p->vox);
     FREE(p->vox_phrases);
+    for (int i = 0; i < 3; i++)
+        FREE(p->toms[i]);
     for (int i = 0; i < p->names.n; i++)
         free(p->names.v[i].text);
     FREE(p->names);
@@ -525,11 +529,13 @@ static void parsed_free(Parsed * p)
             FREE(t->taps);
             FREE(t->sp);
             FREE(t->solos);
+            FREE(t->cyms);
         }
 }
 
 static void track_reset(Track * t)
 {
+    FREE(t->cyms);
     FREE(t->notes);
     FREE(t->forced_ticks);
     FREE(t->forced);
@@ -647,7 +653,8 @@ static bool parse_chart(char * text, Parsed * P)
                     parts[np++] = tok;
                 long a, b;
                 if (np >= 3 && strcmp(parts[0], "N") == 0 && parse_int(parts[1], &a) && parse_int(parts[2], &b)) {
-                    if ((a >= 0 && a <= 4) || a == 7) {
+                    // on drums 5 is the fifth pad, not a hammer-on flip
+                    if ((a >= 0 && a <= 4) || a == 7 || (a == 5 && pid == PART_DRUMS)) {
                         RawNote n = {tick, (int)a, (int32_t)b, order++};
                         PUSH(t->notes, n);
                     } else if (a == 5)
@@ -655,6 +662,9 @@ static bool parse_chart(char * text, Parsed * P)
                     else if (a == 6) {
                         TR r = {tick, tick + 1};
                         PUSH(t->taps, r);
+                    } else if (a >= 66 && a <= 68) {
+                        TR r = {tick, (int32_t)a - 66};
+                        PUSH(t->cyms, r);
                     }
                 } else if (np >= 3 && strcmp(parts[0], "S") == 0 && strcmp(parts[1], "2") == 0 &&
                            parse_int(parts[2], &b)) {
@@ -972,6 +982,11 @@ static bool parse_mid(const uint8_t * d, size_t n, const Source * src, Parsed * 
             }
             P->tracks[pid][di] = tmp;
         }
+        for (int k = 0; pid == PART_DRUMS && k < 3; k++)
+            for (int i = 0; i < notes[110 + k].n; i++) {
+                TR r = {notes[110 + k].v[i].s, notes[110 + k].v[i].e};
+                PUSH(P->toms[k], r);
+            }
         for (int i = 0; i < 128; i++) {
             FREE(notes[i]);
             FREE(open[i]);
@@ -1097,8 +1112,9 @@ static int build_notes(const Parsed * P, Track * t, const Source * src, OutNote 
             if (c->len[f] > length)
                 length = c->len[f];
         }
-        if ((mask & OPEN) && mask != OPEN)
-            mask &= ~OPEN;          // an open note charted with frets: keep the frets
+        // an open note charted with frets: keep the frets (on drums this bit is the sixth pad)
+        if ((mask & OPEN) && mask != OPEN && !(t >= P->tracks[PART_DRUMS] && t < P->tracks[PART_DRUMS + 1]))
+            mask &= ~OPEN;
         if (length <= cutoff)
             length = 0;
         bool single = popcount(mask) == 1, natural = false;
@@ -1732,11 +1748,26 @@ bool songconv_install(const char * src_path, const char * dest_root, const ConvO
                     counts[p][d] = build_notes(&P, &P.tracks[p][d], &S, &notes[p][d]);
                     // drums use the guitar's note numbers, kick where green is: pads on the first lanes, the kick is
                     // the open bar. Every hit is struck: no sustains, no hammer-ons
+                    const Track * dt = &P.tracks[p][d];
+                    const char * pd = ini_get(&S, "pro_drums");
+                    bool pro = (pd && strchr("Tt1", *pd)) || P.toms[0].n + P.toms[1].n + P.toms[2].n + dt->cyms.n;
                     for (int i = 0; p == PART_DRUMS && i < counts[p][d]; i++) {
                         OutNote * o = &notes[p][d][i];
-                        o->mask = (o->mask >> 1 & 0x1f) | (o->mask & 1 ? 0x80 : 0);    // bit 7 is open here
+                        o->mask = (o->mask >> 1 & 0x1f) | (o->mask & 1 ? OPEN : 0);
                         o->flags &= ~(F_HOPO | F_TAP);
                         o->len = 0;
+                        // cymbals unless the chart says otherwise (.chart marks the cymbals instead). A chart that
+                        // doesn't tell them apart: blue's a tom
+                        for (int k = 0; k < 3; k++) {
+                            bool tom = P.mid ? in_ranges(P.toms[k].v, P.toms[k].n, o->tick) : dt->cyms.n > 0;
+                            for (int c = 0; !P.mid && c < dt->cyms.n; c++)
+                                if (dt->cyms.v[c].a == o->tick && dt->cyms.v[c].b == k)
+                                    tom = false;
+                            if (tom)
+                                o->flags |= NOTE_TOM_Y << k;
+                        }
+                        if (!pro)
+                            o->flags |= NOTE_TOM_B;
                     }
                 }
         char path[800];

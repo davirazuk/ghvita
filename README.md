@@ -6,7 +6,7 @@ A native rhythm game for the PS Vita in the style of Guitar Hero World Tour, wri
 
 - Guitar, bass, keys, drums and vocals, with singing along over any instrument
 - Star Power, solos, sustains and a whammy that bends the part's stem, on the right stick or the rear touchpad
-- Freestyle drum fills in the gaps of a drum part
+- Drums with kicks, two button layouts, forgiving rolls and freestyle in the gaps of the chart
 - Practice: any stretch of a song by its sections, looping, from 50% to full speed
 - A downloader for Chorus Encore and RhythmVerse, with Clone Hero folders, `.sng` packages and unencrypted Rock Band packages; downloads are turned into small Opus stems on the Vita
 - A venue that follows the song: lights by section and loudness, and a band that plays its own parts of the chart

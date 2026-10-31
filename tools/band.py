@@ -18,6 +18,7 @@ wc = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(wc)
 
 FRAMES, COLS, ROWS = 48, 8, 6
+SING = 32               # the singer's sheet: this many frames of the loop with the mic at the mouth, the rest with it down
 CELLS = {'drummer': (266, 232, 88, -0.35)}
 STAND = (170, 256, 120, -0.08)      # cell w, h, pixels per metre, the cell's bottom in metres
 SS = 4                  # supersampling of the render
@@ -67,10 +68,17 @@ def blended(clip, f, end):
     return (name, fps, 1, animp, (q * (1 - w) + b * w)[None], (P[f] * (1 - w) + P[f - span] * w)[None])
 
 
-def hold_mic(rig, rest_up=np.array([0, 1.0, 0])):
+def hold_mic(rig, sing, rest_up=np.array([0, 1.0, 0])):
     # BandAnimator.Solve for the singer: the mic is in the right hand; a left hand out of reach hangs at the side
     mic = rig.p('Bone_Mic_Microphone')
     fwd = np.array([0, 0, -1.0])
+    axis = None
+    if sing:
+        # singing: the grille (the mic's +z end) at the lips, the handle down and out in front of the chin
+        axis = rest_up * 0.7 - fwd * 0.7
+        axis /= np.linalg.norm(axis)
+        centre = rig.p('Bone_Jaw') + fwd * 0.13 - axis * 0.1
+        mic = centre - axis * 0.06
     for side in 'rl':
         sh, el, pm = rig.p('bone_bicep_' + side), rig.p('bone_forearm_' + side), rig.p('bone_palm_' + side)
         ln = np.linalg.norm(el - sh) + np.linalg.norm(pm - el)
@@ -88,6 +96,9 @@ def hold_mic(rig, rest_up=np.array([0, 1.0, 0])):
             # off the stand the mic stays IN the hand, not where the loop left it (a mic out of reach floated)
             M = rig.W[rig.ix('Bone_Mic_Microphone')].copy()
             M[:3, 3] = rig.p('bone_palm_r')
+            if sing:
+                M[:3, :3] = rotation_between(M[:3, 2], axis) @ M[:3, :3]
+                M[:3, 3] = centre
             rig.set_world(rig.ix('Bone_Mic_Microphone'), M)
             mic = rig.p('Bone_Mic_Microphone')
 
@@ -271,6 +282,8 @@ def bake(path, work, tex_dir):
     frames, centre = [], []
     for i in range(FRAMES):
         f = s0 + i * span // FRAMES
+        if role == 'vocalist':
+            f = s0 + i * span // SING if i < SING else s0 + (i - SING) * span // (FRAMES - SING)
         # the guitars and the drummer keep one pose: the chart moves them, cell by cell
         pose = blended(clip, f if role == 'vocalist' else s0 + span - BLEND, (s0, s0 + span))
         if g0 is not None:
@@ -282,9 +295,9 @@ def bake(path, work, tex_dir):
             for side, pad in STRIKES[i // HIT].items():
                 swing_stick(rig, side, pad, HIT_W[i % HIT], HIT_RAISE[i % HIT])
         if role != 'drummer' or 'bone_ik_hand_slave_l' in N:
-            wc.solve(rig, rest, role, i / FRAMES * BEATS, g0)
+            wc.solve(rig, rest, role, (f - s0) / span * BEATS, g0)
         if role == 'vocalist':
-            hold_mic(rig)
+            hold_mic(rig, i < SING)
         if g0 is not None:
             guitar_hands(rig)
         if role == 'drummer':

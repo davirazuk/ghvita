@@ -131,3 +131,15 @@ pack.py CHART_VERSION: bump when the chart output changes; repacking then redoes
 - Real-Vita check: frame rate (clocks 444/222 in songs, 333/166 in menus), audio sync (Calibrate), tilt feel, touch,
   the downloader (Wi-Fi, TLS, IME, a 7z through un7zip), Opus/MP3 stems' decode load (log "song frames").
 - The user's Clone Hero library is on the "seilaman" SSD (not connected on 2026-10-30): pack it to the card when it is.
+
+## Drums and input rules (2026-10-30)
+- Kick is FRET_OPEN (0x20). Songs converted before this have it in bit 7 and no chart left to redo: split_drums reads both through drum_frets.
+- NOTE_TOM_Y/B/G in note flags: toms from .mid notes 110-112 or .chart cymbal notes 66-68 (absent: unknown, blue counts as a tom without pro_drums). kit_pads turns them into the drummer's strikes.
+- Rolls: 4+ gems on a pad at most 0.11 s apart, found from the gems. First gem is played; the rest pass if the pad was hit within 0.18 s. Marked on the highway; gaps for freestyle too (+20 x multiplier a hit, 12/s at most).
+- Star Power on drums: both cymbals within 50 ms, and not when both are charted.
+- PRESS_GRACE 0.13 s: a press soon after its lane's note was hit or missed is never an overhit.
+- Vocals use YARG's phrase share (0.325/0.4/0.45/0.575): reaching it is full marks.
+- Singer sheet: 32 frames mic at mouth, 16 mic down; vox_singing picks, cross-faded.
+- Practice (Square on select), resume countdown, whammy (right stick or rear touch, bends the stem up to MAX_BEND).
+- test bots: tools/botscript.py knows drums; GHV_FIXED runs faster than real time, so judge the vocal bot without it.
+- Vita link failing with "segment 1 overlaps": segment 0 needs ~5.4 KB free before the next 64 KB boundary. Shrink with -Os or grow past it.

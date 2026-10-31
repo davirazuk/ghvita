@@ -22,6 +22,9 @@ for t in range(ntracks):
         notes = ns
 assert notes, 'no such part'
 LANE = ['l', 'left', 'up', 'circle', 'r', 'cross']           # layout A: G R Y B O, open
+if a.part == 5:
+    five = any(n[2] & 0x10 for n in notes)
+    LANE = ['left', 'up', 'triangle', 'square' if five else 'circle', 'circle', 'cross']
 Z_FAR = 11.0
 v = 4 + a.speed * 0.8
 first = notes[0][0] / 1e6
@@ -44,7 +47,9 @@ for i, (t, ln, frets, flags, sus) in enumerate(notes):
     if a.miss and i % a.miss == a.miss - 1:
         continue
     f = frame(t)
-    lanes = [5] if frets & 0x20 else [l for l in range(5) if frets >> l & 1]
+    lanes = [5] if frets & 0x20 and a.part != 5 else [l for l in range(5) if frets >> l & 1]
+    if a.part == 5 and frets & 0xa0:
+        lanes.append(5)                     # the kick, under the pads
     for l in lanes:
         hold(l, f, frame(t + ln / 1e6) if ln else f + 2)
     taken += 1

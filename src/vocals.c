@@ -41,6 +41,7 @@ static struct {
     float sung, total;          // of it, seconds
     double last_t;
     float tolerance;
+    float need;                 // how much of a phrase has to be in tune for full marks
     double base;
     float * marks;              // how each note went, 0..1
     float shown;                // the arrow's pitch on screen
@@ -266,11 +267,14 @@ void vox_free(void)
 void vox_start(int diff, bool autoplay)
 {
     static const float tolerance[4] = {3.0f, 2.5f, 1.75f, 1.0f};
+    // YARG's: low, but a voice always has breaths and consonants the mic can't place
+    static const float need[4] = {0.325f, 0.4f, 0.45f, 0.575f};
     mic_stop();
     V.cur = 0;
     V.sung = V.total = 0;
     V.last_t = -100;
     V.tolerance = tolerance[diff];
+    V.need = need[diff];
     V.autoplay = autoplay;
     V.mic_pitch = -1;
     V.mic_ok = true;
@@ -372,8 +376,9 @@ bool vox_update(double t, float * grade, float * points)
     V.target = want;
     if (ms <= ph->end + 40)
         return false;
-    *grade = V.total > 0 ? V.sung / V.total : 0;
-    *points = V.sung * 500;
+    float got = V.total > 0 ? V.sung / V.total / V.need : 0;
+    *grade = got > 1 ? 1 : got;
+    *points = (got >= 1 ? V.total : V.sung) * 500;
     V.sung = V.total = 0;
     V.cur++;
     return true;

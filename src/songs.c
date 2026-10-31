@@ -346,7 +346,8 @@ static int by_artist(const void * a, const void * b)
 
 void songs_sort(int mode)
 {
-    qsort(songs, count, sizeof(Song), mode == SORT_ARTIST ? by_artist : by_title);
+    if (count)
+        qsort(songs, count, sizeof(Song), mode == SORT_ARTIST ? by_artist : by_title);
 }
 
 void songs_save_score(Song * s, int part, int diff, Score score)
@@ -415,6 +416,10 @@ void config_load(void)
             cfg.offset_ms = n;
         else if (strcmp(k, "layout") == 0)
             cfg.layout = n;
+        else if (strcmp(k, "drum_layout") == 0)
+            cfg.drum_layout = n;
+        else if (strcmp(k, "drum_hits") == 0)
+            cfg.drum_hits = n != 0;
         else if (strcmp(k, "tilt") == 0)
             cfg.tilt = n;
         else if (strcmp(k, "nofail") == 0)
@@ -451,9 +456,9 @@ void config_save(void)
         return;
     fprintf(f, "speed = %d\nhighway = %s\noffset_ms = %d\nlayout = %d\ntilt = %d\nnofail = %d\nmusic_vol = %d\n"
                "sfx_vol = %d\ncrowd_vol = %d\nlefty = %d\nshow_fps = %d\nlast_part = %d\nlast_diff = %d\nsort = %d\n"
-               "last_song = %s\nvenue = %s\nno_band = %d\nsing_along = %d\n",
+               "last_song = %s\nvenue = %s\nno_band = %d\nsing_along = %d\ndrum_layout = %d\ndrum_hits = %d\n",
             cfg.speed, cfg.highway, cfg.offset_ms, cfg.layout, cfg.tilt, cfg.nofail, cfg.music_vol, cfg.sfx_vol,
-            cfg.crowd_vol, cfg.lefty, cfg.show_fps, cfg.last_part, cfg.last_diff, cfg.sort, cfg.last_song, cfg.venue, cfg.no_band, cfg.sing_along);
+            cfg.crowd_vol, cfg.lefty, cfg.show_fps, cfg.last_part, cfg.last_diff, cfg.sort, cfg.last_song, cfg.venue, cfg.no_band, cfg.sing_along, cfg.drum_layout, cfg.drum_hits);
     fclose(f);
     remove(path);
     rename(tmp, path);

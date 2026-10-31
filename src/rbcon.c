@@ -332,6 +332,7 @@ static bool unpack_song(Con * c, const Entry * mogg, const char * dta, size_t dt
                 artist, album, genre, year, author[0] ? author : "Rock Band");
         if (preview[0] >= 0)
             fprintf(f, "preview_start_time = %d\n", (int)preview[0]);
+        fprintf(f, "pro_drums = True\n");
         static const char * const keys[5] = {"diff_guitar", "diff_bass", "diff_keys", "diff_drums", "diff_vocals"};
         for (int p = 0; p < 5; p++)
             if (tier[p] >= 0)
