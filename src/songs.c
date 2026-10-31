@@ -5,6 +5,7 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
+#include <time.h>
 #include "songs.h"
 #include "dl.h"
 #include "songconv.h"
@@ -115,7 +116,8 @@ static bool load_song(const char * folder)
             const char * which = k + 5;
             int p = strcmp(which, "guitar") == 0 ? PART_GUITAR : strcmp(which, "bass") == 0 ? PART_BASS
                   : strcmp(which, "rhythm") == 0 ? PART_RHYTHM : strcmp(which, "guitar_coop") == 0 ? PART_COOP
-                  : strcmp(which, "keys") == 0 ? PART_KEYS : -1;
+                  : strcmp(which, "keys") == 0 ? PART_KEYS : strcmp(which, "drums") == 0 ? PART_DRUMS
+                  : strcmp(which, "vocals") == 0 ? PART_VOCALS : -1;
             if (p >= 0)
                 s->diff[p] = atoi(v);
         }
@@ -177,13 +179,16 @@ static void scan_dir(const char * dir, int depth)
             char out[400], err[160];
             if (songconv_install(path, dir, NULL, out, sizeof(out), err, sizeof(err))) {
                 remove(path);
-                if (load_song(out))
+                if (load_song(out)) {
+                    songs[count - 1].added = (long)st.st_mtime;
                     continue;
+                }
             }
             plat_log("songs: can't add %s: %s", path, err);
             continue;
         }
         if (load_song(path)) {
+            songs[count - 1].added = (long)st.st_mtime;
             if (scan_progress && count % 25 == 0)
                 scan_progress(count, NULL);
         } else if (songconv_is_raw(path)) {
@@ -192,8 +197,10 @@ static void scan_dir(const char * dir, int depth)
                 scan_progress(count, names[i]);
             ConvOptions opt = {.in_place = true};
             char out[400], err[160];
-            if (songconv_install(path, dir, &opt, out, sizeof(out), err, sizeof(err)) && load_song(path))
+            if (songconv_install(path, dir, &opt, out, sizeof(out), err, sizeof(err)) && load_song(path)) {
+                songs[count - 1].added = (long)st.st_mtime;
                 continue;
+            }
             plat_log("songs: can't add %s: %s", path, err);
         } else if (depth < 2)
             scan_dir(path, depth + 1);
@@ -228,6 +235,7 @@ static void load_scores(void)
         for (int i = 0; i < count; i++) {
             if (strcmp(base_name(songs[i].folder), line) == 0) {
                 Score * b = &songs[i].best[part][diff];
+                songs[i].plays++;
                 if (score > b->score) {
                     b->score = score;
                     b->stars = stars;
@@ -241,6 +249,37 @@ static void load_scores(void)
     fclose(f);
 }
 
+// favourites: a line for each song's folder
+static void load_favs(void)
+{
+    char path[400], line[300];
+    snprintf(path, sizeof(path), "%sfavourites.txt", plat_data_dir());
+    FILE * f = fopen(path, "r");
+    if (!f)
+        return;
+    while (fgets(line, sizeof(line), f)) {
+        line[strcspn(line, "\r\n")] = 0;
+        for (int i = 0; i < count; i++)
+            if (strcmp(base_name(songs[i].folder), line) == 0)
+                songs[i].fav = true;
+    }
+    fclose(f);
+}
+
+void songs_set_fav(Song * s, bool fav)
+{
+    s->fav = fav;
+    char path[400];
+    snprintf(path, sizeof(path), "%sfavourites.txt", plat_data_dir());
+    FILE * f = fopen(path, "w");
+    if (!f)
+        return;
+    for (int i = 0; i < count; i++)
+        if (songs[i].fav)
+            fprintf(f, "%s\n", base_name(songs[i].folder));
+    fclose(f);
+}
+
 int songs_scan(void (*progress)(int found, const char * converting))
 {
     scan_progress = progress;
@@ -249,6 +288,7 @@ int songs_scan(void (*progress)(int found, const char * converting))
     snprintf(dir, sizeof(dir), "%ssongs", plat_data_dir());
     scan_dir(dir, 0);
     load_scores();
+    load_favs();
     songs_sort(cfg.sort);
     plat_log("songs: %d", count);
     return count;
@@ -272,6 +312,7 @@ int songs_add(const char * folder)
     }
     if (!load_song(folder))
         return -1;
+    songs[count - 1].added = (long)time(NULL);
     songs_sort(cfg.sort);
     plat_log("songs: added %s (%d now)", folder, count);
     return songs_find(folder);
@@ -344,10 +385,111 @@ static int by_artist(const void * a, const void * b)
     return c ? c : strcmp(x->sort_name, y->sort_name);
 }
 
+static int by_album(const void * a, const void * b)
+{
+    const Song * x = a, * y = b;
+    int c = strcasecmp(x->album, y->album);
+    return c ? c : by_artist(a, b);
+}
+
+static int by_year(const void * a, const void * b)
+{
+    const Song * x = a, * y = b;
+    int c = atoi(x->year) - atoi(y->year);
+    return c ? c : by_artist(a, b);
+}
+
+static int by_genre(const void * a, const void * b)
+{
+    const Song * x = a, * y = b;
+    int c = strcasecmp(x->genre, y->genre);
+    return c ? c : by_artist(a, b);
+}
+
+static int by_charter(const void * a, const void * b)
+{
+    const Song * x = a, * y = b;
+    int c = strcasecmp(x->charter, y->charter);
+    return c ? c : by_artist(a, b);
+}
+
+// how hard the part you last played is, easiest first
+static int by_hard(const void * a, const void * b)
+{
+    const Song * x = a, * y = b;
+    int c = x->diff[cfg.last_part] - y->diff[cfg.last_part];
+    return c ? c : by_artist(a, b);
+}
+
+static int by_length(const void * a, const void * b)
+{
+    const Song * x = a, * y = b;
+    int c = x->length_ms - y->length_ms;
+    return c ? c : by_artist(a, b);
+}
+
+// the newest first
+static int by_new(const void * a, const void * b)
+{
+    const Song * x = a, * y = b;
+    return x->added != y->added ? (x->added < y->added ? 1 : -1) : by_artist(a, b);
+}
+
+// the most played first
+static int by_plays(const void * a, const void * b)
+{
+    const Song * x = a, * y = b;
+    int c = y->plays - x->plays;
+    return c ? c : by_artist(a, b);
+}
+
 void songs_sort(int mode)
 {
+    static int (* const cmp[SORT_COUNT])(const void *, const void *) = {
+        by_title, by_artist, by_album, by_year, by_genre, by_charter, by_hard, by_length, by_new, by_plays,
+    };
     if (count)
-        qsort(songs, count, sizeof(Song), mode == SORT_ARTIST ? by_artist : by_title);
+        qsort(songs, count, sizeof(Song), cmp[mode >= 0 && mode < SORT_COUNT ? mode : SORT_ARTIST]);
+}
+
+const char * sort_name(int mode)
+{
+    static const char * const names[SORT_COUNT] = {"Title", "Artist", "Album", "Year", "Genre", "Charter", "How hard", "Length",
+                                                   "Newest", "Most played"};
+    return names[mode >= 0 && mode < SORT_COUNT ? mode : SORT_ARTIST];
+}
+
+void songs_group(const Song * s, int mode, char * out, size_t size)
+{
+    const char * key = mode == SORT_TITLE ? s->sort_name : mode == SORT_ARTIST ? s->sort_artist : NULL;
+    int n;
+    switch (mode) {
+    case SORT_ALBUM: snprintf(out, size, "%s", s->album[0] ? s->album : "No album"); return;
+    case SORT_GENRE: snprintf(out, size, "%s", s->genre[0] ? s->genre : "No genre"); return;
+    case SORT_CHARTER: snprintf(out, size, "%s", s->charter[0] ? s->charter : "Unknown charter"); return;
+    case SORT_YEAR:
+        n = atoi(s->year);
+        if (n)
+            snprintf(out, size, "%d0s", n / 10);
+        else
+            snprintf(out, size, "No year");
+        return;
+    case SORT_HARD:
+        n = s->diff[cfg.last_part];
+        if (n >= 0)
+            snprintf(out, size, "Tier %d", n);
+        else
+            snprintf(out, size, "Untiered");
+        return;
+    case SORT_LENGTH: snprintf(out, size, "%d min", s->length_ms / 60000); return;
+    case SORT_NEW: snprintf(out, size, "%s", ""); return;
+    case SORT_PLAYS: snprintf(out, size, "%d plays", s->plays); return;
+    }
+    unsigned char c = key && key[0] ? (unsigned char)key[0] : '#';
+    if (c >= 'a' && c <= 'z')
+        snprintf(out, size, "%c", c - 32);
+    else
+        snprintf(out, size, c >= 0x80 ? "Other" : "#");
 }
 
 void songs_save_score(Song * s, int part, int diff, Score score)

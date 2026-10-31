@@ -15,6 +15,7 @@
 #define HALF_W 2.62f            // half the highway's width (lanes are 1 wide)
 #define MAX_SUS 8
 #define MAX_ZONES 64
+#define MAX_ROLLS 512
 #define SP_PER_QUARTER (1.0f / 32)
 
 enum { PENDING, HIT, MISSED };
@@ -58,10 +59,12 @@ static struct {
     int16_t * phrase;           // the Star Power phrase a note belongs to (-1)
     bool * phrase_ok;
     double judged_t[6];                 // when a note on each lane was last hit or missed
-    bool * roll;                        // drums: gems the hits before them carry
-    Zone rolls[MAX_ZONES], gaps[MAX_ZONES];     // where the highway marks them
+    uint8_t * roll;                     // gems the hits before them carry: drum rolls, and tremolos
+    Zone rolls[MAX_ROLLS], gaps[MAX_ZONES];     // where the highway marks them
     int roll_count, gap_count;
     double pad_t[6];                    // when each pad was last hit
+    double slip_t;                      // the last stray press
+    bool run_told;                      // the first tremolo says what to do
     int free_hits;                      // in this gap
     double free_t;
     int16_t * solo;             // the solo a note belongs to (-1)
@@ -968,6 +971,12 @@ static void setup_camera(void)
 #define ROLL_GAP 0.11                   // gems this close on a pad are a roll: no thumb keeps up with them
 #define ROLL_RUN 4                      // that many in a row
 #define ROLL_HOLD 0.18                  // a roll goes on while its pad was hit this recently
+#define SPAM_GAP 0.12                   // the same frets again this soon: no thumb keeps up, it's a tremolo
+#define SPAM_RUN 4                      // that many in a row
+#define SPAM_HOLD 0.2                   // a tremolo goes on while its frets were hit this recently
+#define SPAM_AFTER 0.3                  // hits this soon after a tremolo are still the tremolo
+#define EARLY_GRACE 0.18                // a press this soon before its lane's note is that note, mistimed
+#define SLIP_RUN 1.0                    // one stray press is a finger slipping, a second this soon is mashing
 
 // songs converted before the kick had the open bit keep it in bit 7, and their charts are gone
 static uint8_t drum_frets(const Note * n)
@@ -1021,8 +1030,7 @@ static void split_drums(void)
     plat_log("drums: %d gaps for freestyle", G.gap_count);
     // rolls: as YARG's lanes, the first gem is played and the rest come while the pad keeps going. Worked out from the
     // gems, not the chart's markers: a downloaded song's chart is gone once it's converted
-    G.roll = calloc(used + 1, sizeof(bool));
-    G.roll_count = 0;
+    G.roll = calloc(used + 1, 1);
     for (int b = 0; G.roll && b < 6; b++) {
         int first = -1, prev = -1, run = 0;
         for (int i = 0; i <= used; i++) {
@@ -1033,8 +1041,9 @@ static void split_drums(void)
             else {
                 if (run >= ROLL_RUN) {
                     for (int k = first + 1; k <= prev; k++)
-                        G.roll[k] = G.drum_notes[k].frets & (1 << b);
-                    if (G.roll_count < MAX_ZONES)
+                        if (G.drum_notes[k].frets & (1 << b))
+                            G.roll[k] = 1;
+                    if (G.roll_count < MAX_ROLLS)
                         G.rolls[G.roll_count++] = (Zone){G.drum_notes[first].time / 1e6,
                                                          G.drum_notes[prev].time / 1e6, b};
                 }
@@ -1047,10 +1056,34 @@ static void split_drums(void)
     plat_log("drums: %d rolls", G.roll_count);
 }
 
+// What no thumb can play: the same frets over and over, faster than a button goes. As Rock Band's tremolo lanes, the first
+// gem is played and the rest pass while the frets keep being hit at a pace a thumb can keep. It goes by what the chart
+// asks of the fingers, so nothing else in a song changes, and every gem here can still be played one by one
+static void find_tremolos(void)
+{
+    const Part * p = G.part;
+    G.roll = calloc(p->note_count + 1, 1);
+    for (int i = 0, last; G.roll && i < p->note_count; i = last + 1) {
+        const Note * n = p->notes;
+        last = i;
+        while (last + 1 < p->note_count && n[last + 1].frets == n[i].frets &&
+               (n[last + 1].time - n[last].time) / 1e6 <= SPAM_GAP)
+            last++;
+        if (last - i + 1 < SPAM_RUN)
+            continue;
+        memset(G.roll + i + 1, 1, last - i);
+        for (int l = 0; l < 6 && G.roll_count < MAX_ROLLS; l++)
+            if (n[i].frets & (1 << l))
+                G.rolls[G.roll_count++] = (Zone){n[i].time / 1e6, n[last].time / 1e6, l};
+    }
+    plat_log("tremolos: %d lanes", G.roll_count);
+}
+
 static void free_song(void)
 {
     free(G.roll);
     G.roll = NULL;
+    G.roll_count = G.gap_count = 0;
     audio_song_unload();
     vox_free();
     G.vocal = G.sing = false;
@@ -1107,6 +1140,8 @@ static void reset_play(void)
     G.section = -1;
     for (int l = 0; l < 6; l++)
         G.pad_t[l] = G.judged_t[l] = -100;
+    G.slip_t = -100;
+    G.run_told = false;
     G.free_hits = 0;
     G.free_t = -100;
     G.pyro_t = -100;
@@ -1194,6 +1229,8 @@ bool game_start(Song * song, int part, int diff)
     G.lanes = LANES;
     if (part == PART_DRUMS)
         split_drums();
+    else if (!G.vocal)
+        find_tremolos();
     G.song = song;
     G.part_id = part;
     G.diff = diff;
@@ -1401,8 +1438,8 @@ static void miss_note(int i)
     G.miss_flash = 1;
     G.miss_pulse = 1;
     static const float loss[4] = {0.025f, 0.03f, 0.04f, 0.05f};
-    // drums have many more gems to the bar
-    rock_change(-loss[G.diff] * (G.drums ? 0.5f : 1));
+    // drums have many more gems to the bar, and a tremolo a dozen to the second
+    rock_change(-loss[G.diff] * (G.roll && G.roll[i] ? 0.25f : G.drums ? 0.5f : 1));
     if (G.phrase[i] >= 0 && G.phrase_ok[G.phrase[i]]) {
         G.phrase_ok[G.phrase[i]] = false;
     }
@@ -1456,7 +1493,7 @@ static void hit_note(int i)
                 G.sus[k].end = (n->time + (double)n->len) / 1e6;
                 G.sus[k].frets = n->frets;
                 G.sus[k].sp = ph >= 0 && G.phrase_ok[ph];
-                G.sus[k].last_q = chart_quarters(G.chart, G.t);
+                G.sus[k].last_q = chart_quarters(G.chart, fmax(G.t, n->time / 1e6));
                 break;
             }
         }
@@ -1479,11 +1516,20 @@ static void overhit(void)
     }
     if (!near)
         return;
+    // pressing a fret is the strum here, so a finger on its way to the next fret can land on the wrong one. One slip costs
+    // a little and the streak goes on; a second soon after is mashing, and that's an overhit
+    bool again = G.t - G.slip_t < SLIP_RUN;
+    G.slip_t = G.t;
+    sound_play(res.snd[SND_OVERSTRUM1 + rand() % 4], again ? 0.5f : 0.25f, false);
+    if (!again) {
+        rock_change(-0.01f);
+        G.miss_flash = 0.3f;
+        return;
+    }
     G.overhits++;
     break_streak();
     rock_change(-0.02f);
     G.miss_flash = 0.7f;
-    sound_play(res.snd[SND_OVERSTRUM1 + rand() % 4], 0.5f, false);
 }
 
 // Left and Up for one thumb, Triangle and Circle for the other, the kick under the fingers
@@ -1549,7 +1595,8 @@ static void pad_sound(int lane, const Note * n, float volume)
     sound_play(res.snd[snd + turn++ % takes], volume, false);
 }
 
-static void press_lane(int lane)
+// the note a press plays, if there's one in reach
+static bool press_note(int lane)
 {
     const Part * p = G.part;
     uint8_t bit = lane == LANE_OPEN ? FRET_OPEN : 1 << lane;
@@ -1562,7 +1609,7 @@ static void press_lane(int lane)
             continue;
         // on a fast run a hit nearer the next gem on this pad is that gem: the one skipped goes as the miss it was, not
         // one further down the run, and the flame and the sound land on what was played
-        if (G.drums && G.t - nt > NEXT_LATE) {
+        if (!G.got[i] && G.t - nt > NEXT_LATE) {
             int k = i + 1;
             while (k < p->note_count && !(p->notes[k].frets & bit))
                 k++;
@@ -1580,8 +1627,39 @@ static void press_lane(int lane)
             G.off_sq += off * off;
             G.off_n++;
         }
-        return;
+        return true;
     }
+    return false;
+}
+
+// a press just before its note is that note mistimed, and missing it is the cost: not a stray one as well
+static bool press_early(int lane)
+{
+    const Part * p = G.part;
+    uint8_t bit = lane == LANE_OPEN ? FRET_OPEN : 1 << lane;
+    for (int i = G.first; i < p->note_count && p->notes[i].time / 1e6 <= G.t + EARLY_GRACE; i++)
+        if (G.state[i] == PENDING && (p->notes[i].frets & bit))
+            return true;
+    return false;
+}
+
+// still hammering at a tremolo that's just changed to other frets
+static bool after_tremolo(int lane)
+{
+    if (!G.roll)
+        return false;
+    const Part * p = G.part;
+    uint8_t bit = lane == LANE_OPEN ? FRET_OPEN : 1 << lane;
+    for (int i = G.first - 1; i >= 0 && G.t - p->notes[i].time / 1e6 < SPAM_AFTER; i--)
+        if (G.roll[i] && (p->notes[i].frets & bit))
+            return true;
+    return false;
+}
+
+static void press_lane(int lane)
+{
+    if (press_note(lane))
+        return;
     bool gap = G.drums && gap_left() > 0;
     if (G.drums && (gap || cfg.drum_hits))
         pad_sound(lane, NULL, gap ? 0.9f : 0.5f);
@@ -1590,9 +1668,10 @@ static void press_lane(int lane)
     if (G.t - G.judged_t[lane] < PRESS_GRACE)
         return;
     // a stray drum hit is just a fill, and heard in a gap of the chart
-    if (!G.drums)
-        overhit();
-    else if (gap) {
+    if (!G.drums) {
+        if (!press_early(lane) && !after_tremolo(lane))
+            overhit();
+    } else if (gap) {
         G.freestyle++;
         // a fill, and the crowd's with it. Hits as a drummer could play them: mashing adds nothing
         if (G.t > 0 && G.t - G.free_t >= 0.08) {
@@ -1603,6 +1682,54 @@ static void press_lane(int lane)
         plat_log("drums: freestyle lane %d at %.2f", lane, G.t);
 #endif
     }
+}
+
+// Letting go onto a lower fret plays a pull-off, as on a guitar: hold green, tap red, and the greens play themselves.
+// Only hammer-ons and tapped notes, and a hammer-on only while the streak's alive, as in the games
+static void pull_off(void)
+{
+    const Part * p = G.part;
+    uint32_t down = G.held & 0x1f;
+    if (!down)
+        return;
+    for (int i = G.first; i < p->note_count; i++) {
+        const Note * n = &p->notes[i];
+        double nt = n->time / 1e6;
+        if (nt > G.t + WINDOW)
+            return;
+        if (G.state[i] != PENDING || nt < G.t - WINDOW)
+            continue;
+        bool open = n->frets & FRET_OPEN;
+        if (open || !(n->flags & NOTE_TAP || (n->flags & NOTE_HOPO && G.streak > 0)))
+            return;
+        // frets below the note's may stay down, none above it
+        if ((down & n->frets) != n->frets || __builtin_clz(down) != __builtin_clz((uint32_t)n->frets))
+            return;
+        hit_note(i);
+        double off = G.t - nt;
+        G.off_sum += off;
+        G.off_sq += off * off;
+        G.off_n++;
+        return;
+    }
+}
+
+// is a roll or a tremolo still being kept going, for this gem? Every fret of it down or just hit, and one just hit
+static bool run_going(int i)
+{
+    int frets = G.part->notes[i].frets;
+    if (G.drums)
+        return G.t - G.pad_t[__builtin_ctz(frets)] < ROLL_HOLD;
+    bool struck = false;
+    for (int l = 0; l < 6; l++) {
+        if (!(frets & (1 << l)))
+            continue;
+        double since = G.t - G.pad_t[l];
+        if (since >= SPAM_HOLD && !(G.held & (1 << l)))
+            return false;
+        struck |= since < SPAM_HOLD;
+    }
+    return struck;
 }
 
 static void activate_sp(void)
@@ -1622,12 +1749,25 @@ static void activate_sp(void)
 #endif
 }
 
-static void judge(uint32_t pressed_lanes)
+static void judge(uint32_t pressed_lanes, uint32_t let_go)
 {
     const Part * p = G.part;
     for (int lane = 0; lane < 6; lane++)
         if (pressed_lanes & (1 << lane))
             press_lane(lane);
+    if (let_go && !G.drums && !G.autoplay)
+        pull_off();
+    // rolls and tremolos go by as they're kept going, each gem on the line
+    for (int i = G.first; G.roll && i < p->note_count && p->notes[i].time / 1e6 <= G.t; i++) {
+        if (G.state[i] != PENDING || !G.roll[i] || (!G.drums && G.state[i - 1] == PENDING))
+            continue;
+        if (run_going(i))
+            hit_note(i);
+        if (!G.drums && !G.run_told) {
+            G.run_told = true;
+            popup("KEEP HITTING IT!");
+        }
+    }
     // notes whose window has passed
     while (G.first < p->note_count) {
         int i = G.first;
@@ -1635,7 +1775,7 @@ static void judge(uint32_t pressed_lanes)
         if (G.state[i] == PENDING) {
             if (G.t <= nt + WINDOW)
                 break;
-            if (G.roll && G.roll[i] && G.t - G.pad_t[__builtin_ctz(p->notes[i].frets)] < ROLL_HOLD)
+            if (G.roll && G.roll[i] && run_going(i))
                 hit_note(i);
             else
                 miss_note(i);
@@ -1864,6 +2004,7 @@ int game_update(const Pad * pad, uint32_t pressed)
         if (G.sp >= 0.5f && !G.sp_active)
             activate_sp();
     }
+    uint32_t let_go = G.held & ~held;
     G.held = held;
     for (int lane = 0; lane < 6; lane++)
         if (lanes_pressed & (1 << lane))
@@ -1910,7 +2051,7 @@ int game_update(const Pad * pad, uint32_t pressed)
     if (G.sing)
         update_vocals();
     if (!G.vocal) {
-        judge(lanes_pressed);
+        judge(lanes_pressed, let_go);
         update_sustains();
     }
 
@@ -2465,7 +2606,7 @@ void game_draw(void)
     if (!G.vocal) {
         gfx_3d(G.proj, G.view);
         draw_highway();
-        if (G.drums)
+        if (G.roll_count || G.gap_count)
             draw_zones();
         draw_sustains();
         draw_cups(false);

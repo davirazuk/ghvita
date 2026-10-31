@@ -29,8 +29,14 @@ static Pad pad;
 static uint32_t pressed, repeat;    // repeat: pressed, plus held directions repeating
 static bool autoplay;
 
-// the song list
-static int sel, top;
+// the song list: sel is the song in the library; the view is what's shown of it, searched and filtered
+static int sel, top, pos;
+static int * view;
+static int view_n, view_cap;
+static bool view_stale = true;
+static char find_text[64];
+enum { SHOW_ALL, SHOW_FAVS, SHOW_NEW, SHOW_PART };   // then SHOW_PART + each part
+static int show;
 static double sel_t;
 static Tex * art;
 static int art_for = -1, preview_for = -1;
@@ -100,6 +106,38 @@ static void draw_stars(int stars, float x, float y, float size)
         const char * n = stars >= 6 ? "hud_star_gold" : i < stars ? "hud_star_on" : "hud_star_off";
         gfx_sprite(atlas_get(res.hud, n), x + i * size * 0.92f, y, size, size, WHITE);
     }
+}
+
+// what a chart has, four to the row, each with its difficulty as six bars; the y under it
+static float draw_parts(const int8_t * tier, float x, float y)
+{
+    float px = x;
+    for (int p = 0; p < PART_COUNT; p++) {
+        if (tier[p] < 0)
+            continue;
+        if (px > x + 3 * 76) {
+            px = x;
+            y += 27;
+        }
+        font_draw_fit(res.ui, part_name(p), px, y, 14, 72, RGBA(235, 235, 235, 255), ALIGN_LEFT);
+        for (int d = 0; d < 6; d++)
+            gfx_rect(px + d * 11, y + 17, 8, 5, d < tier[p] ? RGBA(255, 190, 60, 255) : RGBA(70, 70, 70, 255));
+        px += 76;
+    }
+    return y + 27;
+}
+
+// a song's cover, or the game's logo where it has none
+static void draw_cover(Tex * t, float x, float y, float size)
+{
+    if (t) {
+        gfx_sprite(&(Sprite){t, 0, 0, 1, 1, t->w, t->h}, x, y, size, size, WHITE);
+        return;
+    }
+    gfx_rect(x, y, size, size, RGBA(20, 20, 24, 255));
+    if (res.logo)
+        gfx_sprite(&(Sprite){res.logo, 0, 0, 1, 1, 512, 370}, x + size * 0.1f, y + size * 0.21f, size * 0.8f, size * 0.58f,
+                   RGBA(255, 255, 255, 70));
 }
 
 // a panel of GHWT's stitched leather
@@ -329,6 +367,7 @@ static int dl_top;
 static char dl_query[DL_SITES][128];
 static bool dl_started, dl_typing;
 static char dl_typed[128];
+static bool kb_library;             // the keyboard's searching the song list, not the sites
 static Tex * dl_art;
 static char dl_art_id[80];          // the result the cover is for
 static double dl_sel_t;
@@ -433,10 +472,15 @@ static void kb_update(void)
         l = strlen(t);
         while (l && t[l - 1] == ' ')
             t[--l] = 0;
+        ui_sound(SND_UI_SELECT);
+        if (kb_library) {
+            snprintf(find_text, sizeof(find_text), "%s", t);
+            view_stale = true;
+            return;
+        }
         snprintf(dl_query[dl_site], sizeof(dl_query[0]), "%s", t);
         plat_log("search: typed \"%s\"", t);
         dl_new_search();
-        ui_sound(SND_UI_SELECT);
     }
 }
 
@@ -521,6 +565,7 @@ static void download_screen(void)
         snprintf(title, sizeof(title), "Search %s", dl_site == DL_CHORUS ? "Chorus Encore" : "RhythmVerse");
         snprintf(dl_typed, sizeof(dl_typed), "%s", dl_query[dl_site]);
         dl_typing = true;
+        kb_library = false;
         ui_sound(SND_UI_SELECT);
     }
     if (pressed & BTN_CIRCLE) {
@@ -633,10 +678,7 @@ static void download_screen(void)
     // the chosen one
     if (has) {
         panel(608, 124, 340, 370);
-        if (dl_art && strcmp(dl_art_id, cur.id) == 0)
-            gfx_sprite(&(Sprite){dl_art, 0, 0, 1, 1, dl_art->w, dl_art->h}, 716, 138, 124, 124, WHITE);
-        else
-            gfx_rect(716, 138, 124, 124, RGBA(20, 20, 24, 255));
+        draw_cover(dl_art && strcmp(dl_art_id, cur.id) == 0 ? dl_art : NULL, 716, 138, 124);
         float y = 270;
         font_draw_fit(res.ui, cur.name, 630, y, 24, 300, RGBA(255, 220, 160, 255), ALIGN_LEFT);
         y += 26;
@@ -664,20 +706,7 @@ static void download_screen(void)
         }
         // what's in the chart, with how hard: known before it's downloaded
         if (cur.any_parts) {
-            float px = 630, py = y;
-            for (int p = 0; p < PART_COUNT; p++) {
-                if (cur.parts[p] < 0)
-                    continue;
-                font_draw_fit(res.ui, part_name(p), px, py, 14, 72, RGBA(235, 235, 235, 255), ALIGN_LEFT);
-                for (int d = 0; d < 6; d++)
-                    gfx_rect(px + d * 11, py + 17, 8, 5, d < cur.parts[p] ? RGBA(255, 190, 60, 255) : RGBA(70, 70, 70, 255));
-                px += 76;
-                if (px > 860) {
-                    px = 630;
-                    py += 27;
-                }
-            }
-            y = py + (px > 630 ? 27 : 0);
+            y = draw_parts(cur.parts, 630, y);
         }
         // why it failed, why it can't be had, or that there's one already
         char msg[120] = "";
@@ -740,6 +769,7 @@ static void take_downloads(void)
     int k = songs_find(keep);
     sel = k >= 0 ? k : 0;
     art_for = -1;
+    view_stale = true;
     dl_marked = -1;
     if (added == 1)
         snprintf(t, sizeof(t), "Added %s", name);
@@ -800,72 +830,266 @@ static int nearest_diff(int part, int want)
     return want;
 }
 
-static bool del_ask;
+static bool del_ask, list_menu;
+static int list_row;
+static double group_t;              // a jump just happened: its heading shows for a moment
+
+static bool has_text(const char * in, const char * word, size_t n)
+{
+    for (; *in; in++)
+        if (strncasecmp(in, word, n) == 0)
+            return true;
+    return false;
+}
+
+// every word found somewhere in what's known of the song
+static bool song_matches(const Song * s, const char * text)
+{
+    while (*text) {
+        while (*text == ' ')
+            text++;
+        size_t n = strcspn(text, " ");
+        if (n && !has_text(s->name, text, n) && !has_text(s->artist, text, n) && !has_text(s->album, text, n) &&
+            !has_text(s->genre, text, n) && !has_text(s->charter, text, n) && !has_text(s->year, text, n))
+            return false;
+        text += n;
+    }
+    return true;
+}
+
+static bool song_shown(const Song * s)
+{
+    if ((show == SHOW_FAVS && !s->fav) || (show == SHOW_NEW && s->plays) ||
+        (show >= SHOW_PART && !(s->parts & (1 << (show - SHOW_PART)))))
+        return false;
+    return song_matches(s, find_text);
+}
+
+// the list again, staying on the song it was on, or as near as the list allows
+static void view_build(void)
+{
+    int n = songs_count();
+    if (n > view_cap) {
+        view_cap = n + 256;
+        view = realloc(view, view_cap * sizeof(int));
+    }
+    view_n = 0;
+    int near = 0;
+    for (int i = 0; i < n; i++)
+        if (song_shown(songs_get(i))) {
+            if (i <= sel)
+                near = view_n;
+            view[view_n++] = i;
+        }
+    pos = near;
+    view_stale = false;
+    if (view_n && view[pos] != sel) {
+        sel = view[pos];
+        sel_t = now_s;
+    }
+}
+
+static const char * show_name(void)
+{
+    static char t[32];
+    if (show == SHOW_FAVS)
+        return "Favourites";
+    if (show == SHOW_NEW)
+        return "Not played yet";
+    if (show >= SHOW_PART) {
+        snprintf(t, sizeof(t), "Has %s", part_name(show - SHOW_PART));
+        return t;
+    }
+    return "All songs";
+}
+
+static void change_sort(int d)
+{
+    Song * cur = songs_get(sel);
+    char keep[256];
+    snprintf(keep, sizeof(keep), "%s", cur ? cur->folder : "");
+    cfg.sort = (cfg.sort + d + SORT_COUNT) % SORT_COUNT;
+    songs_sort(cfg.sort);
+    int k = songs_find(keep);
+    sel = k >= 0 ? k : 0;
+    art_for = preview_for = -1;
+    view_stale = true;
+    config_save();
+}
+
+// the next song under another heading
+static void jump_group(int dir)
+{
+    char from[64], g[64];
+    songs_group(songs_get(view[pos]), cfg.sort, from, sizeof(from));
+    int p = pos;
+    while (p + dir >= 0 && p + dir < view_n) {
+        p += dir;
+        songs_group(songs_get(view[p]), cfg.sort, g, sizeof(g));
+        if (strcmp(g, from) == 0)
+            continue;
+        // going back: to the top of the heading before
+        while (dir < 0 && p > 0) {
+            char up[64];
+            songs_group(songs_get(view[p - 1]), cfg.sort, up, sizeof(up));
+            if (strcmp(up, g) != 0)
+                break;
+            p--;
+        }
+        break;
+    }
+    pos = p;
+    group_t = now_s;
+}
+
+// Select: what to sort by, what to show, this song
+static void list_menu_update(void)
+{
+    enum { ROWS = 4 };
+    Song * s = songs_get(sel);
+    if (repeat & BTN_UP)
+        list_row = (list_row + ROWS - 1) % ROWS;
+    if (repeat & BTN_DOWN)
+        list_row = (list_row + 1) % ROWS;
+    int d = repeat & BTN_LEFT ? -1 : repeat & BTN_RIGHT ? 1 : 0;
+    if (repeat & (BTN_UP | BTN_DOWN | BTN_LEFT | BTN_RIGHT))
+        ui_sound(SND_UI_MOVE);
+    if (d && list_row == 0)
+        change_sort(d);
+    if (d && list_row == 1) {
+        show = (show + d + SHOW_PART + PART_COUNT) % (SHOW_PART + PART_COUNT);
+        view_stale = true;
+    }
+    if (pressed & BTN_CROSS) {
+        ui_sound(SND_UI_SELECT);
+        if (list_row == 0)
+            change_sort(1);
+        else if (list_row == 1) {
+            show = (show + 1) % (SHOW_PART + PART_COUNT);
+            view_stale = true;
+        } else if (list_row == 2 && s) {
+            songs_set_fav(s, !s->fav);
+            if (show == SHOW_FAVS)
+                view_stale = true;
+        } else if (list_row == 3 && s) {
+            del_ask = true;
+            list_menu = false;
+        }
+    }
+    if (pressed & (BTN_CIRCLE | BTN_SELECT)) {
+        ui_sound(SND_UI_BACK);
+        list_menu = false;
+    }
+    pressed = repeat = 0;
+}
+
+static void list_menu_draw(const Song * s)
+{
+    gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(0, 0, 0, 170));
+    panel(200, 130, 560, 280);
+    char rows[4][64];
+    snprintf(rows[0], sizeof(rows[0]), "Sort by   %s", sort_name(cfg.sort));
+    snprintf(rows[1], sizeof(rows[1]), "Show   %s", show_name());
+    snprintf(rows[2], sizeof(rows[2]), "%s", s && s->fav ? "Take out of favourites" : "Add to favourites");
+    snprintf(rows[3], sizeof(rows[3]), "Delete this song");
+    for (int i = 0; i < 4; i++) {
+        float y = 168 + i * 54;
+        if (i == list_row)
+            gfx_sprite(atlas_get(res.hud, "wor_select"), 224, y - 6, 512, 48, WHITE);
+        font_draw_fit(res.ui, rows[i], SCREEN_W / 2, y + 2, 30, 460, i == list_row ? RGBA(255, 230, 150, 255)
+                                                                                   : RGBA(220, 215, 205, 255), ALIGN_CENTER);
+    }
+}
 
 static void song_list(void)
 {
-    int n = songs_count();
+    if (view_stale)
+        view_build();
+    int n = view_n;
     const int rows = 7;
+    if (dl_typing) {
+        // searching the library: the same keyboard as the downloader's
+        kb_update();
+        pressed = repeat = 0;
+        if (view_stale)
+            view_build();
+        n = view_n;
+    }
+    if (list_menu)
+        list_menu_update();
+    if (view_stale)
+        view_build();
+    n = view_n;
     if (del_ask) {
         if (pressed & BTN_CROSS) {
             stop_preview();
             art_for = -1;
             songs_delete(sel);
-            if (sel >= songs_count())
-                sel = songs_count() - 1;
-            if (sel < 0)
-                sel = 0;
+            sel = sel >= songs_count() ? songs_count() - 1 : sel;
+            sel = sel < 0 ? 0 : sel;
+            view_stale = true;
             del_ask = false;
             ui_sound(SND_UI_SELECT);
         } else if (pressed & BTN_CIRCLE)
             del_ask = false;
         pressed = repeat = 0;
+        if (view_stale)
+            view_build();
+        n = view_n;
     }
-    if ((pressed & BTN_SELECT) && songs_get(sel)) {
-        del_ask = true;
+    if (pressed & BTN_SELECT) {
+        list_menu = true;
+        list_row = 0;
         pressed = repeat = 0;
+        ui_sound(SND_UI_SELECT);
     }
-    int old = sel;
-    if (repeat & BTN_UP)
-        sel--;
-    if (repeat & BTN_DOWN)
-        sel++;
-    if (repeat & BTN_L)
-        sel -= rows;
-    if (repeat & BTN_R)
-        sel += rows;
-    if (pressed & BTN_SQUARE)
-        sel = rand() % n;
-    if (sel < 0)
-        sel = (repeat & (BTN_UP)) && old == 0 ? n - 1 : 0;
-    if (sel >= n)
-        sel = (repeat & (BTN_DOWN)) && old == n - 1 ? 0 : n - 1;
-    if (sel != old) {
+    if (pressed & BTN_TRIANGLE) {
+        snprintf(dl_typed, sizeof(dl_typed), "%s", find_text);
+        dl_typing = true;
+        kb_library = true;
+        pressed = repeat = 0;
+        ui_sound(SND_UI_SELECT);
+    }
+    int old = pos;
+    if (n) {
+        if (repeat & BTN_UP)
+            pos--;
+        if (repeat & BTN_DOWN)
+            pos++;
+        if (repeat & BTN_LEFT)
+            pos -= rows;
+        if (repeat & BTN_RIGHT)
+            pos += rows;
+        if (repeat & (BTN_L | BTN_R))
+            jump_group(repeat & BTN_L ? -1 : 1);
+        if (pressed & BTN_SQUARE)
+            pos = rand() % n;
+        if (pos < 0)
+            pos = (repeat & BTN_UP) && old == 0 ? n - 1 : 0;
+        if (pos >= n)
+            pos = (repeat & BTN_DOWN) && old == n - 1 ? 0 : n - 1;
+        sel = view[pos];
+    }
+    if (pos != old) {
         ui_sound(SND_UI_MOVE);
         sel_t = now_s;
     }
-    if (pressed & BTN_TRIANGLE) {
-        Song * cur = songs_get(sel);
-        char keep[256];
-        snprintf(keep, sizeof(keep), "%s", cur ? cur->folder : "");
-        cfg.sort = (cfg.sort + 1) % SORT_COUNT;
-        songs_sort(cfg.sort);
-        for (int i = 0; i < n; i++)
-            if (strcmp(songs_get(i)->folder, keep) == 0)
-                sel = i;
-        stop_preview();
-        art_for = -1;
-        ui_sound(SND_UI_SELECT);
-        config_save();
-    }
-    if (sel < top)
-        top = sel;
-    if (sel >= top + rows)
-        top = sel - rows + 1;
-    Song * s = songs_get(sel);
+    if (pos < top)
+        top = pos;
+    if (pos >= top + rows)
+        top = pos - rows + 1;
+    if (top > 0 && top + rows > n)
+        top = n > rows ? n - rows : 0;
+    Song * s = n ? songs_get(sel) : NULL;
     if (pressed & BTN_CIRCLE) {
-        stop_preview();
+        // back out of a search first
         ui_sound(SND_UI_BACK);
+        if (find_text[0]) {
+            find_text[0] = 0;
+            view_stale = true;
+            return;
+        }
+        stop_preview();
         go(S_MAIN);
         return;
     }
@@ -890,9 +1114,14 @@ static void song_list(void)
     // the cover once the choice settles, then the preview
     if (s && art_for != sel && now_s - sel_t > 0.12) {
         tex_free(art);
+        art = NULL;
         char path[400];
         snprintf(path, sizeof(path), "%s/album.jpg", s->folder);
-        art = tex_load(path, TEX_MIPMAP);
+        FILE * f = fopen(path, "rb");
+        if (f) {
+            fclose(f);
+            art = tex_load(path, TEX_MIPMAP);
+        }
         art_for = sel;
     }
     if (s && preview_for != sel && now_s - sel_t > 0.5) {
@@ -911,33 +1140,53 @@ static void song_list(void)
     draw_background(res.bg_menu, WHITE);
     banner("QUICKPLAY");
     char t[160];
-    snprintf(t, sizeof(t), "%d / %d   sorted by %s", sel + 1, n, cfg.sort == SORT_ARTIST ? "artist" : "title");
-    font_draw_shadow(res.ui, t, SCREEN_W - 24, 30, 24, RGBA(230, 230, 230, 255), ALIGN_RIGHT);
+    if (find_text[0])
+        snprintf(t, sizeof(t), "\"%s\"   %d of %d", find_text, n, songs_count());
+    else if (show != SHOW_ALL)
+        snprintf(t, sizeof(t), "%s   %d of %d", show_name(), n ? pos + 1 : 0, n);
+    else
+        snprintf(t, sizeof(t), "%d / %d   by %s", n ? pos + 1 : 0, n, sort_name(cfg.sort));
+    font_draw_fit(res.ui, t, SCREEN_W - 24, 30, 24, 420, RGBA(230, 230, 230, 255), ALIGN_RIGHT);
     // the list
     for (int r = 0; r < rows && top + r < n; r++) {
-        int i = top + r;
+        int i = view[top + r];
         Song * x = songs_get(i);
         float y = 104 + r * 56;
-        bool on = i == sel;
+        bool on = top + r == pos;
         gfx_sprite(atlas_get(res.hud, on ? "wor_select" : "wor_row"), 14, y, 580, 54, WHITE);
         char up[128];
         upper(up, sizeof(up), x->name);
         font_draw_fit(res.ui, up, 40, y + 4, 26, 520, on ? RGBA(255, 236, 170, 255) : RGBA(235, 235, 235, 255),
                       ALIGN_LEFT);
-        font_draw_fit(res.ui, x->artist, 42, y + 28, 20, 500, on ? RGBA(255, 210, 140, 255) : RGBA(170, 170, 175, 255),
+        font_draw_fit(res.ui, x->artist, 42, y + 28, 20, 410, on ? RGBA(255, 210, 140, 255) : RGBA(170, 170, 175, 255),
                       ALIGN_LEFT);
         const Score * b = &x->best[first_part(x)][cfg.last_diff];
         if (b->stars)
             draw_stars(b->stars, 470, y + 30, 18);
+        if (x->fav)
+            gfx_sprite(atlas_get(res.hud, "hud_star_gold"), 20, y + 16, 20, 20, WHITE);
+    }
+    if (!n) {
+        font_draw_shadow(res.ui, find_text[0] ? "No song matches that" : "No songs here", 304, 240, 30,
+                         RGBA(240, 235, 225, 255), ALIGN_CENTER);
+        font_draw(res.ui, find_text[0] ? "Circle clears the search" : "Select changes what's shown", 304, 282, 22,
+                  RGBA(190, 190, 190, 255), ALIGN_CENTER);
+    }
+    // the heading a jump landed on
+    if (s && now_s - group_t < 0.9) {
+        char g[64];
+        songs_group(s, cfg.sort, g, sizeof(g));
+        float a = now_s - group_t < 0.6 ? 1 : (float)((0.9 - (now_s - group_t)) / 0.3);
+        if (g[0]) {
+            gfx_rect(160, 236, 300, 84, fade_alpha(RGBA(0, 0, 0, 215), a));
+            font_draw_fit(res.title, g, 310, 250, 56, 280, fade_alpha(RGBA(255, 225, 150, 255), a), ALIGN_CENTER);
+        }
     }
     // the details
     if (s) {
         panel(608, 96, 340, 396);
-        if (art && art_for == sel)
-            gfx_sprite(&(Sprite){art, 0, 0, 1, 1, art->w, art->h}, 678, 118, 200, 200, WHITE);
-        else
-            gfx_rect(678, 118, 200, 200, RGBA(20, 20, 24, 255));
-        float y = 326;
+        draw_cover(art_for == sel ? art : NULL, 698, 112, 160);
+        float y = 280;
         font_draw_fit(res.ui, s->artist, 630, y, 24, 300, RGBA(255, 220, 160, 255), ALIGN_LEFT);
         y += 26;
         if (s->album[0]) {
@@ -957,36 +1206,30 @@ static void song_list(void)
             font_draw_fit(res.ui, t, 630, y, 18, 300, RGBA(170, 170, 170, 255), ALIGN_LEFT);
             y += 22;
         }
-        // the parts it has, with the chart's difficulty tier as dots
-        float px = 630;
-        for (int p = 0; p < PART_COUNT; p++) {
-            if (!(s->parts & (1 << p)))
-                continue;
-            font_draw(res.ui, part_name(p), px, y + 4, 18, RGBA(230, 230, 230, 255), ALIGN_LEFT);
-            for (int d = 0; d < 6; d++)
-                gfx_rect(px + 4 + d * 11, y + 26, 8, 8,
-                         d < s->diff[p] ? RGBA(255, 190, 60, 255) : RGBA(70, 70, 70, 255));
-            px += 100;
-            if (px > 900) {
-                px = 630;
-                y += 40;
-            }
-        }
+        // the parts it has, with the chart's difficulty tier as bars
+        int8_t tier[PART_COUNT];
+        for (int p = 0; p < PART_COUNT; p++)
+            tier[p] = s->parts & (1 << p) ? (s->diff[p] < 0 ? 0 : s->diff[p]) : -1;
+        draw_parts(tier, 630, y + 4);
         const Score * b = &s->best[first_part(s)][cfg.last_diff];
         if (b->score) {
-            snprintf(t, sizeof(t), "Best %d  %d%%%s", b->score, b->percent, b->fc ? "  FC" : "");
+            snprintf(t, sizeof(t), "Best %d   %d%%%s", b->score, b->percent, b->fc ? "   FC" : "");
             font_draw(res.ui, t, 630, 456, 20, RGBA(255, 230, 160, 255), ALIGN_LEFT);
         }
     }
-    static const char * help[] = {"btn_cross", "Play", "btn_circle", "Back", "btn_triangle", "Sort", "btn_square",
-                                  "Random", "btn_l", "Page", "btn_start", "Options", "btn_select", "Delete"};
+    static const char * help[] = {"btn_cross", "Play", "btn_circle", "Back", "btn_triangle", "Search", "btn_square",
+                                  "Random", "btn_l", "Jump", "btn_select", "Menu", "btn_start", "Options"};
     help_bar(help, 14);
-    if (del_ask) {
+    if (list_menu)
+        list_menu_draw(s);
+    if (del_ask && s) {
         gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(0, 0, 0, 200));
         font_draw(res.ui, "Delete this song from the card?", SCREEN_W / 2, 200, 34, WHITE, ALIGN_CENTER);
-        font_draw_fit(res.ui, songs_get(sel)->name, SCREEN_W / 2, 250, 30, 800, RGBA(255, 220, 140, 255), ALIGN_CENTER);
+        font_draw_fit(res.ui, s->name, SCREEN_W / 2, 250, 30, 800, RGBA(255, 220, 140, 255), ALIGN_CENTER);
         font_draw(res.ui, "Cross delete   Circle keep", SCREEN_W / 2, 310, 26, RGBA(220, 220, 230, 255), ALIGN_CENTER);
     }
+    if (dl_typing)
+        kb_draw();
     gfx_end();
 }
 
@@ -1604,18 +1847,30 @@ static void options_screen(void)
     gfx_2d();
     draw_background(res.bg_menu, RGBA(170, 170, 170, 255));
     banner("OPTIONS");
-    panel(110, 96, 740, 400);
-    for (int i = 0; i < O_COUNT; i++) {
+    panel(110, 96, 740, 356);
+    enum { ROWS = 9 };
+    static int opt_top;
+    if (menu_index < opt_top)
+        opt_top = menu_index;
+    if (menu_index >= opt_top + ROWS)
+        opt_top = menu_index - ROWS + 1;
+    for (int r = 0; r < ROWS; r++) {
+        int i = opt_top + r;
         char name[48], value[48];
         option_text(i, name, value, sizeof(value));
-        float y = 102 + i * 22;
+        float y = 116 + r * 36;
         bool on = i == menu_index;
         if (on)
-            gfx_sprite(atlas_get(res.hud, "wor_select"), 130, y - 3, 700, 27, WHITE);
+            gfx_sprite(atlas_get(res.hud, "wor_select"), 130, y - 3, 700, 38, WHITE);
         uint32_t c = on ? RGBA(255, 230, 150, 255) : RGBA(220, 215, 205, 255);
-        font_draw(res.ui, name, 160, y, 24, c, ALIGN_LEFT);
-        font_draw(res.ui, value, 800, y, 24, c, ALIGN_RIGHT);
+        font_draw(res.ui, name, 160, y + 1, 28, c, ALIGN_LEFT);
+        font_draw_fit(res.ui, value, 800, y + 1, 28, 380, c, ALIGN_RIGHT);
     }
+    // there's more above or below
+    if (opt_top > 0)
+        font_draw(res.ui, "...", SCREEN_W / 2, 96, 22, RGBA(220, 215, 205, 255), ALIGN_CENTER);
+    if (opt_top + ROWS < O_COUNT)
+        font_draw(res.ui, "...", SCREEN_W / 2, 434, 22, RGBA(220, 215, 205, 255), ALIGN_CENTER);
     static const char * about[O_COUNT] = {
         "How fast the notes come down the highway.",
         "The highway's look, from Guitar Hero 2, 3, World Tour and Metallica.",

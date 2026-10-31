@@ -25,9 +25,13 @@ typedef struct {
     int8_t part_stem[PART_COUNT];           // index into stems, -1 none
     char source[48];                        // where the downloader got it ("chorus:<md5>"), else empty
     Score best[PART_COUNT][DIFF_COUNT];
+    long added;                             // when it came onto the card
+    int plays;
+    bool fav;
 } Song;
 
-enum { SORT_TITLE, SORT_ARTIST, SORT_COUNT };
+enum { SORT_TITLE, SORT_ARTIST, SORT_ALBUM, SORT_YEAR, SORT_GENRE, SORT_CHARTER, SORT_HARD, SORT_LENGTH, SORT_NEW, SORT_PLAYS,
+       SORT_COUNT };
 
 // progress (or NULL) every 25 songs found, and before each new Clone Hero song (a folder or a .sng dropped in songs/)
 // is converted, with its name
@@ -42,6 +46,10 @@ int songs_count(void);
 void songs_delete(int index);
 Song * songs_get(int index);
 void songs_sort(int mode);
+const char * sort_name(int mode);
+// what a song is listed under in a sort: its first letter, decade, genre...; L and R jump between these
+void songs_group(const Song * s, int mode, char * out, size_t size);
+void songs_set_fav(Song * s, bool fav);
 void songs_save_score(Song * s, int part, int diff, Score score);
 const char * part_name(int part);
 const char * diff_name(int diff);
