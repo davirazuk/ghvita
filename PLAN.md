@@ -143,3 +143,11 @@ pack.py CHART_VERSION: bump when the chart output changes; repacking then redoes
 - Practice (Square on select), resume countdown, whammy (right stick or rear touch, bends the stem up to MAX_BEND).
 - test bots: tools/botscript.py knows drums; GHV_FIXED runs faster than real time, so judge the vocal bot without it.
 - Vita link failing with "segment 1 overlaps": segment 0 needs ~5.4 KB free before the next 64 KB boundary. Shrink with -Os or grow past it.
+
+## The show (2026-10-30)
+
+The venue is a picture, and the show is drawn over it in `draw_stage`: screens, haze, the band, the rig's beams, pyro, the crowd, confetti. `assets/stage.png` holds what they need (`tools/mkstage.py`). `member_spot` brings the venues' marks to where they can be seen: some are off the screen or behind the rock meter. The band's sheets get their ink line from `tools/band_ink.py`, run on the sheets as `tools/band.py` made them.
+
+Every other four bars the camera closes in on one of the band, keeping them where they are on the screen, and a solo goes to whoever's playing it.
+
+Clocks: a song loads onto eco clocks and a real late frame sends it to full. Changing them mid-song costs a late frame by itself, which is why the old governor never stayed on eco.

@@ -127,6 +127,12 @@ static struct {
     int section, section_pal;           // the chart's section now, and its colours
     double pyro_t;                      // when the jets along the stage last went off
     float cam_x, cam_y, cam_z;          // the camera's drift
+    float cam_tx, cam_ty, cam_tz;       // where it's gliding, before the drift
+    int focus;                          // the member it's closing in on (-1: the whole stage)
+    float key_col[3];                   // the lights' colour at full strength
+    Tex * art;                          // the song's cover, for the stage's screens
+    double party_t;                     // when the confetti last came down
+    bool end_party;
 } G;
 
 static struct {
@@ -227,12 +233,46 @@ static void pick_venue(const Song * song)
             pick_band(song, h);
     }
     for (int i = 0; i < 3; i++)
-        G.stage_col[i] = G.light_col[i] = 0.8f;
+        G.stage_col[i] = G.light_col[i] = G.key_col[i] = 0.8f;
     G.show_t = -1e9;
 }
 
 static void draw_band(double beat);
 static uint32_t with_alpha(uint32_t c, float a);
+static uint32_t col3(const float c[3], float a);
+static void sprite_rot(const Sprite * s, float x, float y, float w, float h, float px, float py, float angle,
+                       uint32_t col);
+
+static void party(void)
+{
+    if (G.t - G.party_t > 1.5)
+        G.party_t = G.t;
+}
+
+// where a member really stands, in the venue picture's pixels: x, y of the feet, pixels per metre. The venues' own marks
+// can be off the screen or behind the rock meter, so they're brought in to where they're seen. The singer's is behind
+// the highway: beside the kit they can be seen
+static void member_spot(int r, float m[3])
+{
+    m[0] = G.marks[r][0];
+    m[1] = G.marks[r][1];
+    m[2] = G.marks[r][2];
+    if (r == 1) {
+        m[0] = G.marks[0][0] - G.marks[0][2] * 1.35f;
+        m[1] = G.marks[0][1] + 24;
+        m[2] = G.marks[0][2] * 1.1f;
+    }
+    if (r < 2)
+        return;
+    m[0] = r == 3 ? fmaxf(m[0] + 34, 244) : fminf(m[0], 850);
+    m[1] = fminf(m[1], 318);
+    m[2] = fminf(m[2], 118) * 1.1f;
+}
+
+static int member_me(void)
+{
+    return G.part_id == PART_DRUMS ? 0 : G.part_id == PART_VOCALS ? 1 : G.part_id == PART_BASS ? 3 : 2;
+}
 
 // where the song's structure puts the show: every chorus in the same warm colours, every verse in the same cool ones.
 // A new chorus sets the jets off, when the crowd is with you. False: the chart names no sections
@@ -259,8 +299,10 @@ static bool update_section(void)
         bool big = strstr(low, "chorus") || strstr(low, "solo") || strstr(low, "outro");
         static const int cool[] = {1, 3, 4}, warm[] = {0, 2, 5};
         G.section_pal = (big ? warm : cool)[h % 3];
-        if (strstr(low, "chorus") && G.rock >= 0.5f)
+        if (strstr(low, "chorus") && G.rock >= 0.5f) {
             G.pyro_t = G.t;
+            party();
+        }
     }
     return true;
 }
@@ -293,11 +335,163 @@ static void draw_pyro(void)
     gfx_blend(BLEND_ADD);
     for (int r = 2; r <= 3; r++)
         for (int side = -1; side <= 1; side += 2) {
-            float x = G.marks[r][0] + side * G.marks[r][2] * 0.75f + (r == 3 ? 34 : 0), y = G.marks[r][1], w = 64 * G.marks[r][2] / 110;
+            float m[3];
+            member_spot(r, m);
+            float x = m[0] + side * m[2] * 0.75f, y = m[1], w = 64 * m[2] / 110;
             stage_point(&x, &y);
             gfx_sprite_uv(flame, x - w / 2, y - w * 2.6f, w, w * 2.6f, u0, v0, u0 + 0.25f, v0 + 0.25f, WHITE);
         }
     gfx_blend(BLEND_ALPHA);
+}
+
+// the rig over the stage: a truss of moving lamps, whose beams dance through the song's patterns, one always on whoever
+// the camera's on
+static void draw_rig(double beat, float pulse)
+{
+    enum { LAMPS = 6 };
+    const Sprite * truss = atlas_get(res.stage, "truss"), * lamp = atlas_get(res.stage, "lamp");
+    const Sprite * beam = atlas_get(res.stage, "beam");
+    float lamp_x[LAMPS], lamp_y[LAMPS];
+    for (int i = -1; i < 5; i++) {
+        float x = i * 256.0f, y = 6;
+        stage_point(&x, &y);
+        gfx_sprite(truss, x, y, 256 * G.cam_z, 30 * G.cam_z, col3(G.stage_col, 1));
+    }
+    for (int i = 0; i < LAMPS; i++) {
+        lamp_x[i] = 90 + i * 156.0f;
+        lamp_y[i] = 24;
+        stage_point(&lamp_x[i], &lamp_y[i]);
+    }
+    float tx = 480, ty = 300;
+    if (G.focus >= 0) {
+        float m[3];
+        member_spot(G.focus, m);
+        tx = m[0];
+        ty = m[1];
+        stage_point(&tx, &ty);
+    }
+    int spot = (int)((tx - 12) / 156 + 0.5f);
+    spot = spot < 0 ? 0 : spot >= LAMPS ? LAMPS - 1 : spot;
+    int pattern = (int)floor(beat / 16) & 3;
+    float swing = sinf((float)beat * 3.14159265f / 4), level = 0.2f + 0.26f * G.band_loud + 0.26f * pulse * G.band_loud;
+    if (G.rock < 0.33f && !G.sp_active)
+        level *= 0.6f;
+    if (G.sp_active)
+        level = 0.42f + 0.3f * pulse;
+    gfx_blend(BLEND_ADD);
+    for (int i = 0; i < LAMPS; i++) {
+        float from = (i - 2.5f) * 0.17f, angle;
+        if (pattern == 1)
+            angle = (i & 1 ? 0.34f : -0.34f) * swing;
+        else if (pattern == 2)
+            angle = -from * 1.6f + 0.18f * swing;
+        else if (pattern == 3)
+            angle = atan2f(-(480 - lamp_x[i]), 300) + 0.12f * swing * (i & 1 ? 1 : -1);
+        else
+            angle = from + 0.3f * swing;
+        float a = level;
+        if (G.focus >= 0 && i == spot) {
+            angle = atan2f(-(tx - lamp_x[i]), ty - lamp_y[i]);
+            a = 0.5f + 0.3f * pulse;
+        }
+        sprite_rot(beam, lamp_x[i], lamp_y[i], 200 * G.cam_z, 450 * G.cam_z, beam->w / 2.0f, 0, angle,
+                   col3(G.key_col, a));
+    }
+    gfx_blend(BLEND_ALPHA);
+    for (int i = 0; i < LAMPS; i++)
+        gfx_sprite(lamp, lamp_x[i] - 15 * G.cam_z, lamp_y[i] - 18 * G.cam_z, 30 * G.cam_z, 36 * G.cam_z,
+                   col3(G.key_col, 1));
+}
+
+// the air the lights go through
+static void draw_haze(void)
+{
+    const Sprite * haze = atlas_get(res.stage, "haze");
+    float t = (float)G.t, a = 0.1f + 0.1f * G.band_loud;
+    gfx_blend(BLEND_ADD);
+    gfx_sprite(haze, -260 + sinf(t * 0.11f) * 170, 130, 1480, 170, col3(G.key_col, a));
+    gfx_sprite(haze, -240 - sinf(t * 0.07f + 2) * 200, 215, 1440, 130, col3(G.key_col, a * 0.8f));
+    gfx_blend(BLEND_ALPHA);
+}
+
+// two screens hanging from the truss with the song's cover, or the music's bars where it has none
+static void draw_screens(float pulse)
+{
+    const Sprite * dot = atlas_get(res.stage, "dot");
+    for (int side = 0; side < 2; side++) {
+        // nearer than the stage, so the camera's moves only nudge them and they stay on the screen
+        float w = 88, x = (side ? 860 : 12) + G.cam_x * 0.25f, y = 30 + G.cam_y * 0.25f;
+        gfx_blend(BLEND_ADD);
+        gfx_sprite(dot, x - w * 0.5f, y - w * 0.5f, w * 2, w * 2, col3(G.key_col, 0.14f + 0.14f * pulse));
+        gfx_blend(BLEND_ALPHA);
+        gfx_rect(x + w * 0.15f, y - 30, 3, 32, RGBA(30, 28, 38, 255));
+        gfx_rect(x + w * 0.85f, y - 30, 3, 32, RGBA(30, 28, 38, 255));
+        gfx_rect(x - 5, y - 5, w + 10, w + 10, RGBA(14, 9, 24, 255));
+        if (G.art) {
+            const Sprite art = sprite_whole(G.art);
+            int v = 190 + (int)(65 * pulse);
+            gfx_sprite(&art, x, y, w, w, RGBA(v, v, v, 255));
+            continue;
+        }
+        for (int i = 0; i < 8; i++) {
+            float wob = 0.5f + 0.5f * sinf((float)G.t * (3 + i * 1.3f) + i * 2.1f + side);
+            float h = w * (0.12f + 0.84f * wob * (0.25f + 0.75f * G.band_loud));
+            gfx_rect(x + w * (i + 0.12f) / 8, y + w - h, w * 0.76f / 8, h, col3(G.key_col, 1));
+        }
+    }
+}
+
+// the crowd down front, seen from behind: everyone keeps their own time, and the better it goes the higher they jump and
+// the more hands go up
+static void draw_crowd(double beat)
+{
+    float lit[3], pi = 3.14159265f;
+    for (int i = 0; i < 3; i++)
+        lit[i] = 0.25f + G.stage_col[i] * 0.45f + G.key_col[i] * 0.35f;
+    uint32_t col = col3(lit, 1);
+    float mood = G.rock < 0.33f ? 0.15f : 0.45f + G.rock * 0.8f;
+    for (int row = 0; row < 2; row++) {
+        int count = row ? 11 : 15;
+        float scale = row ? 1.3f : 1, base = row ? 582 : 548;
+        for (int i = 0; i < count; i++) {
+            uint32_t h = (uint32_t)(i * 2654435761u + row * 40503u);
+            int kind = (h >> 8) % 4;
+            if ((float)((h >> 12) % 100) / 100 < mood - (row ? 0.3f : 0))
+                kind += 4;
+            char name[8];
+            snprintf(name, sizeof(name), "fan_%d", kind);
+            const Sprite * s = atlas_get(res.stage, name);
+            float phase = (float)((h >> 16) & 7) / 8;
+            float hop = fabsf(sinf(pi * ((float)beat + phase * 0.35f))) * (3 + 19 * mood * (0.3f + 0.7f * G.band_loud));
+            float w = s->w * scale, hh = s->h * scale;
+            float x = (i + 0.5f) * (980.0f / count) - 10 - w / 2 + (float)((h >> 20) % 24) - 12;
+            gfx_sprite(s, x, base - hh - hop * scale, w, hh, col);
+        }
+    }
+}
+
+// confetti and stars, on Star Power, a chorus, a big streak and the last chord
+static void draw_party(void)
+{
+    double since = G.t - G.party_t;
+    if (since < 0 || since > 3)
+        return;
+    static const uint32_t cols[5] = {RGBA(255, 214, 90, 255), RGBA(255, 96, 190, 255), RGBA(100, 225, 255, 255),
+                                     RGBA(176, 120, 255, 255), RGBA(255, 255, 255, 255)};
+    const Sprite * star = atlas_get(res.stage, "star"), * bit = atlas_get(res.stage, "confetti");
+    uint32_t seed = (uint32_t)(G.party_t * 16);
+    float fade_out = since > 2.3 ? (float)(3 - since) / 0.7f : 1;
+    for (int i = 0; i < 56; i++) {
+        uint32_t h = (seed + i) * 2654435761u;
+        float tau = (float)since - (float)(h >> 8 & 63) / 100;
+        if (tau < 0)
+            continue;
+        float x = (float)(h >> 14 & 1023) * 0.95f + sinf(tau * 3 + i) * 24;
+        float y = -24 + tau * (170 + (h >> 24 & 127));
+        float size = i % 3 == 0 ? 22 : 15;
+        sprite_rot(i % 3 == 0 ? star : bit, x, y, size, size, (i % 3 == 0 ? star : bit)->w / 2.0f,
+                   (i % 3 == 0 ? star : bit)->h / 2.0f, tau * (2.5f + i % 5) + i, with_alpha(cols[i % 5], fade_out));
+    }
 }
 
 // GHWT's moods: a key colour and a wash colour (StageLights.Palettes in YargLook)
@@ -384,11 +578,41 @@ static void draw_stage(void)
         G.stage_col[i] += (stage[i] - G.stage_col[i]) * k;
         G.light_col[i] += (lights[i] - G.light_col[i]) * k;
     }
-    // a slow drift over the stage, in a little on the big parts
-    float zoom = 1.04f + 0.012f * G.band_loud;
-    G.cam_z += (zoom - G.cam_z) * k * 0.1f;
-    G.cam_x = sinf((float)G.t * 0.23f) * 13;
-    G.cam_y = sinf((float)G.t * 0.17f + 1) * 6;
+    for (int i = 0; i < 3; i++)
+        G.key_col[i] += (key[i] - G.key_col[i]) * k;
+    // the camera: the whole stage, and every other four bars closing in on one of the band as a director would, whoever
+    // has the solo first. They stay where they are on the screen and grow, so nobody slides behind the highway
+    static const int turns[4] = {2, 1, 3, 0};
+    int slot = (int)floor(beat / 16);
+    G.focus = -1;
+    if (solo)
+        G.focus = member_me();
+    else if (!G.sp_active && G.t > 0 && (slot & 1))
+        G.focus = turns[(slot / 2) & 3];
+    if (G.focus >= 0 && !G.band[G.focus])
+        G.focus = -1;
+    float zoom = 1.04f + 0.012f * G.band_loud, aim_x = 0, aim_y = 0;
+    if (G.focus >= 0) {
+        float m[3];
+        member_spot(G.focus, m);
+        zoom = 1.2f;
+        aim_x = (480 - m[0]) * (zoom - 1);
+        aim_y = (272 - (m[1] - m[2])) * (zoom - 1);
+        float rx = 480 * (zoom - 1) - 14, ry = 272 * (zoom - 1) - 8;
+        aim_x = aim_x > rx ? rx : aim_x < -rx ? -rx : aim_x;
+        aim_y = aim_y > ry ? ry : aim_y < -ry ? -ry : aim_y;
+    }
+    float glide = 1 - expf((float)-dt * 1.4f);
+    G.cam_tz += (zoom - G.cam_tz) * glide;
+    G.cam_tx += (aim_x - G.cam_tx) * glide;
+    G.cam_ty += (aim_y - G.cam_ty) * glide;
+    G.cam_z = G.cam_tz;
+    G.cam_x = G.cam_tx + sinf((float)G.t * 0.23f) * 13;
+    G.cam_y = G.cam_ty + sinf((float)G.t * 0.17f + 1) * 6;
+    if (G.t > G.last_note_end && G.t > 0 && !G.end_party) {
+        G.end_party = true;
+        party();
+    }
     stage_layer(G.venue, col3(G.stage_col, 1));
     // a whole screen of blending: not when it would add nothing
     if (G.venue_lights && fmaxf(G.light_col[0], fmaxf(G.light_col[1], G.light_col[2])) > 0.02f) {
@@ -396,8 +620,13 @@ static void draw_stage(void)
         stage_layer(G.venue_lights, col3(G.light_col, 1));
         gfx_blend(BLEND_ALPHA);
     }
+    draw_screens(pulse);
+    draw_haze();
     draw_band(beat);
+    draw_rig(beat, pulse);
     draw_pyro();
+    draw_crowd(beat);
+    draw_party();
 }
 
 // The band on its marks: 48 frames over 4 beats (tools/band.py), locked to the song's beat; a tempo outside the 70-150
@@ -559,25 +788,34 @@ static void draw_band(double beat)
     float slump = G.rock < 0.33f ? (0.33f - G.rock) * 0.5f : 0;   // losing the crowd, they sag
     // and the last chord rings with everybody in the air
     float hop = G.sp_active || G.cheer > 0.25f || (G.t > G.last_note_end && G.band_loud > 0.03f) ? on_beat * 0.3f : 0;
-    int me = G.part_id == PART_DRUMS ? 0 : G.part_id == PART_VOCALS ? 1 : G.part_id == PART_BASS ? 3 : 2;
+    int me = member_me();
     float lit[3];
     for (int i = 0; i < 3; i++)
         lit[i] = 0.2f + G.stage_col[i] * 1.05f;
     uint32_t col = col3(lit, 1);
+    // their shadows on the floor, and a pool of light under whoever the camera's on
+    const Sprite * dot = atlas_get(res.stage, "dot");
+    for (int r = 0; r < 4; r++) {
+        if (!G.band[r])
+            continue;
+        float m[3];
+        member_spot(r, m);
+        stage_point(&m[0], &m[1]);
+        float w = m[2] * G.cam_z * (r ? 1.25f : 2.6f), h = w * 0.26f;
+        if (r == G.focus) {
+            gfx_blend(BLEND_ADD);
+            gfx_sprite(dot, m[0] - w * 0.9f, m[1] - h * 0.9f, w * 1.8f, h * 1.8f, col3(G.key_col, 0.6f));
+            gfx_blend(BLEND_ALPHA);
+        }
+        gfx_sprite(dot, m[0] - w / 2, m[1] - h / 2, w, h, RGBA(6, 3, 12, 190));
+    }
     for (int i = 0; i < 4; i++) {
         int r = order[i];
         Tex * t = G.band[r];
         if (!t)
             continue;
-        float m[3] = {G.marks[r][0], G.marks[r][1], G.marks[r][2]};
-        // the singer's mark is behind the highway: beside the kit they can be seen
-        if (r == 3)
-            m[0] += 34;         // clear of the rock meter
-        if (r == 1) {
-            m[0] = G.marks[0][0] - G.marks[0][2] * 1.35f;
-            m[1] = G.marks[0][1] + 24;
-            m[2] = G.marks[0][2] * 1.1f;
-        }
+        float m[3];
+        member_spot(r, m);
         // cell size, pixels per metre and the cell's bottom edge in metres, as in tools/band.py
         float cw = r == 0 ? 266 : 170, ch = r == 0 ? 232 : 256, ppm = r == 0 ? 88 : 120, y0 = r == 0 ? -0.35f : -0.08f;
         // each plays when their part does (no music, no playing), and between parts holds still
@@ -622,6 +860,13 @@ static void draw_band(double beat)
                            with_alpha(tint, bp->mic > 0.5f ? 1 : 2 * bp->mic));
         } else
             band_frame(t, f, cw, ch, m[0], bottom, w, h, lean, dip, tint);
+        // Star Power: they burn with it
+        if (G.sp_active) {
+            gfx_blend(BLEND_ADD);
+            band_frame(t, r == 1 ? (int)(phase * 32) % 32 : f, cw, ch, m[0], bottom, w, h, lean, dip,
+                       RGBA(90, 150, 255, 70 + (int)(90 * on_beat)));
+            gfx_blend(BLEND_ALPHA);
+        }
     }
 }
 
@@ -865,7 +1110,11 @@ static void reset_play(void)
     G.free_hits = 0;
     G.free_t = -100;
     G.pyro_t = -100;
-    G.cam_z = 1.04f;
+    G.party_t = -100;
+    G.end_party = false;
+    G.cam_z = G.cam_tz = 1.04f;
+    G.cam_tx = G.cam_ty = 0;
+    G.focus = -1;
     for (int i = 0; i < 6; i++)
         G.flame_t[i] = -100;
     G.held = 0;
@@ -999,6 +1248,17 @@ bool game_start(Song * song, int part, int diff)
     G.speed = 4.0 + cfg.speed * 0.8;
     G.highway = res_highway(cfg.highway);
     pick_venue(song);
+    tex_free(G.art);
+    G.art = NULL;
+    if (G.venue) {
+        char art[320];
+        snprintf(art, sizeof(art), "%s/album.jpg", song->folder);
+        FILE * f = fopen(art, "rb");
+        if (f) {
+            fclose(f);
+            G.art = tex_load(art, TEX_MIPMAP);
+        }
+    }
     G.crowd_voice = -1;
     setup_camera();
     plat_set_perf(1);
@@ -1169,6 +1429,8 @@ static void hit_note(int i)
         snprintf(t, sizeof(t), "%d NOTE STREAK!", G.streak);
         popup(t);
         G.cheer = 1;
+        if (G.streak % 100 == 0)
+            party();
     }
     if (G.solo[i] >= 0)
         G.solo_hit[G.solo[i]]++;
@@ -1351,6 +1613,7 @@ static void activate_sp(void)
     G.sp_last_q = chart_quarters(G.chart, G.t);
     G.sp_flash = 1;
     G.pyro_t = G.t;
+    party();
     popup("STAR POWER!");
     sound_play(res.snd[SND_SP_DEPLOY], 0.9f, false);
     sound_play(res.snd[SND_SP_CROWD], cfg.crowd_vol * 0.06f, false);

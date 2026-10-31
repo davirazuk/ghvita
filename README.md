@@ -9,11 +9,11 @@ A native rhythm game for the PS Vita in the style of Guitar Hero World Tour, wri
 - Drums with kicks, two button layouts, forgiving rolls and freestyle in the gaps of the chart
 - Practice: any stretch of a song by its sections, looping, from 50% to full speed
 - A downloader for Chorus Encore and RhythmVerse, with Clone Hero folders, `.sng` packages and unencrypted Rock Band packages; downloads are turned into small Opus stems on the Vita
-- A venue that follows the song: lights by section and loudness, and a band that plays its own parts of the chart
+- A venue that follows the song: lights by section and loudness, moving beams, a crowd that jumps with how you're doing, screens with the cover, a camera that closes in on the band, and a band that plays its own parts of the chart
 
 ## What isn't here
 
-This repository holds the code only. The art and sound in `assets/` and the LiveArea images in `vita/sce_sys/` are made from your own copies of the games, and songs are yours to bring. `tools/mkassets.py`, `tools/venues.py` and `tools/band.py` build them, and `tools/mkdrums.py` cuts the drum kit from a YARG install.
+This repository holds the code only. The art and sound in `assets/` and the LiveArea images in `vita/sce_sys/` are made from your own copies of the games, and songs are yours to bring. `tools/mkassets.py`, `tools/venues.py`, `tools/band.py` and `tools/band_ink.py` build them, `tools/mkstage.py` draws the stage's rig and crowd, and `tools/mkdrums.py` cuts the drum kit from a YARG install.
 
 ## Building
 

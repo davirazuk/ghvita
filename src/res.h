@@ -23,6 +23,7 @@ enum {
 typedef struct {
     Atlas * game;
     Atlas * hud;
+    Atlas * stage;                      // what the venue adds to its picture (tools/mkstage.py)
     Font * ui;
     Font * title;
     Tex * bg_title, * bg_menu, * bg_results, * bg_stage, * logo, * vignette;

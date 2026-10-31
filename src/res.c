@@ -153,6 +153,9 @@ void res_load(void)
     snprintf(a, sizeof(a), "%shud.png", dir);
     snprintf(b, sizeof(b), "%shud.txt", dir);
     res.hud = atlas_load(a, b, TEX_MIPMAP);
+    snprintf(a, sizeof(a), "%sstage.png", dir);
+    snprintf(b, sizeof(b), "%sstage.txt", dir);
+    res.stage = atlas_load(a, b, TEX_MIPMAP);
     res_loading(0.82f, "LOADING");
     res.bg_menu = load_tex("bg_menu.jpg", 0);
     res.bg_results = load_tex("bg_results.jpg", 0);
