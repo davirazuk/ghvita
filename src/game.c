@@ -206,13 +206,20 @@ static void pick_band(const Song * song, uint32_t h)
     (void)song;
 }
 
+static const char * forced_venue;
+
+void game_force_venue(const char * zone)
+{
+    forced_venue = zone;
+}
+
 // the song's venue: each song always plays the same one (like YargLook's pick), or as the options say
 static void pick_venue(const Song * song)
 {
     G.venue = G.venue_lights = NULL;
     G.venue_title = NULL;
     G.marks = NULL;
-    if (!res.venue_count || strcmp(cfg.venue, "classic") == 0)
+    if (!res.venue_count || (!forced_venue && strcmp(cfg.venue, "classic") == 0))
         return;
     const char * zone = NULL;
     uint32_t h = 2166136261u;
@@ -221,7 +228,9 @@ static void pick_venue(const Song * song)
     h = (h ^ '|') * 16777619u;
     for (const char * c = song->name; *c; c++)
         h = (h ^ (uint8_t)*c) * 16777619u;
-    if (strcmp(cfg.venue, "song") == 0) {
+    if (forced_venue)
+        zone = forced_venue;
+    else if (strcmp(cfg.venue, "song") == 0) {
         zone = res.venue_zones[h % res.venue_count];
     } else if (strcmp(cfg.venue, "random") == 0)
         zone = res.venue_zones[rand() % res.venue_count];
@@ -1379,6 +1388,39 @@ Result game_result(void)
     r.sp_total = G.part ? G.part->sp_count : 0;
     r.failed = G.failed;
     r.fc = !G.failed && r.notes_total > 0 && G.best_streak == r.notes_total;     // no miss and no overhit
+    memset(r.strip, 255, sizeof(r.strip));
+    const Part * p = G.part;
+    if (!p || G.vocal || p->note_count < 2 || !G.state)
+        return r;
+    // where the notes went, start to end (notes the song never reached aren't counted)
+    int got[RESULT_STRIP] = {0}, all[RESULT_STRIP] = {0};
+    double first = p->notes[0].time, span = p->notes[p->note_count - 1].time - first;
+    for (int i = 0; span > 0 && i < p->note_count; i++) {
+        if (G.state[i] == PENDING)
+            continue;
+        int b = (int)((p->notes[i].time - first) / span * (RESULT_STRIP - 1));
+        all[b]++;
+        got[b] += G.state[i] == HIT;
+    }
+    for (int b = 0; b < RESULT_STRIP; b++)
+        if (all[b])
+            r.strip[b] = (uint8_t)(got[b] * 100 / all[b]);
+    // and the song's own sections: a tool's "ugc_section_20" says nothing, so those don't count
+    const Chart * c = G.chart;
+    r.worst_pct = 101;
+    for (int k = 0, i = 0; k < c->section_count; k++) {
+        double end = k + 1 < c->section_count ? c->sections[k + 1].time : 1e15;
+        int n = 0, hit = 0;
+        for (; i < p->note_count && p->notes[i].time < end; i++)
+            if (G.state[i] != PENDING && p->notes[i].time >= c->sections[k].time) {
+                n++;
+                hit += G.state[i] == HIT;
+            }
+        if (n >= 8 && strncasecmp(c->sections[k].name, "ugc", 3) && hit * 100 / n < r.worst_pct) {
+            r.worst_pct = hit * 100 / n;
+            snprintf(r.worst, sizeof(r.worst), "%s", c->sections[k].name);
+        }
+    }
     return r;
 }
 

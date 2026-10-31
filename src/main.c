@@ -12,12 +12,13 @@
 #include "res.h"
 #include "audio.h"
 #include "songs.h"
+#include "tour.h"
 #include "chart.h"
 #include "game.h"
 #include "vocals.h"
 #include "dl.h"
 
-enum { S_TITLE, S_MAIN, S_SONGS, S_SELECT, S_PRACTICE, S_PLAY, S_PAUSE, S_RESUME, S_RESULTS, S_OPTIONS, S_CALIBRATE, S_EMPTY,
+enum { S_TITLE, S_MAIN, S_TOUR, S_SONGS, S_SELECT, S_PRACTICE, S_PLAY, S_PAUSE, S_RESUME, S_RESULTS, S_OPTIONS, S_CALIBRATE, S_EMPTY,
        S_DOWNLOAD };
 
 static int screen = S_TITLE;
@@ -269,10 +270,12 @@ static void title_screen(void)
 
 // ----------------------------------------------------------------------------------------------------- main menu
 
+static void tour_enter(void);
+
 static void main_menu(void)
 {
-    static const char * items[] = {"QUICKPLAY", "DOWNLOAD SONGS", "OPTIONS", "CALIBRATE", "EXIT"};
-    const int n = 5;
+    static const char * items[] = {"QUICKPLAY", "WORLD TOUR", "DOWNLOAD SONGS", "OPTIONS", "CALIBRATE", "EXIT"};
+    const int n = 6;
     if (repeat & BTN_UP) {
         menu_index = (menu_index + n - 1) % n;
         ui_sound(SND_UI_MOVE);
@@ -290,11 +293,13 @@ static void main_menu(void)
         if (which == 0)
             go(songs_count() ? S_SONGS : S_EMPTY);
         else if (which == 1)
+            tour_enter();
+        else if (which == 2)
             go(S_DOWNLOAD);
-        else if (which == 2) {
+        else if (which == 3) {
             options_from = S_MAIN;
             go(S_OPTIONS);
-        } else if (which == 3) {
+        } else if (which == 4) {
             calib_count = 0;
             calib_playing = false;
             go(S_CALIBRATE);
@@ -310,10 +315,10 @@ static void main_menu(void)
         gfx_sprite(&(Sprite){res.logo, 0, 0, 1, 1, 512, 370}, 500, 60, 420, 303, WHITE);
     panel(40, 108, 420, 340);
     for (int i = 0; i < n; i++) {
-        float y = 134 + i * 58;
+        float y = 126 + i * 50;
         if (i == menu_index)
-            gfx_sprite(atlas_get(res.hud, "wor_select"), 50, y - 6, 400, 54, WHITE);
-        font_draw_shadow(res.title, items[i], 80, y, 42, i == menu_index ? RGBA(255, 230, 150, 255)
+            gfx_sprite(atlas_get(res.hud, "wor_select"), 50, y - 5, 400, 50, WHITE);
+        font_draw_shadow(res.title, items[i], 80, y, 38, i == menu_index ? RGBA(255, 230, 150, 255)
                                                                            : RGBA(200, 190, 180, 255), ALIGN_LEFT);
     }
     char t[200], now[160];
@@ -830,6 +835,33 @@ static int nearest_diff(int part, int want)
     return want;
 }
 
+// the part and difficulty screen for a song
+static void open_select(const Song * s)
+{
+    read_diffs(s);
+    sel_part = first_part(s);
+    for (int p = 0; !sel_diffs[sel_part] && p < PART_COUNT; p++)
+        if (sel_diffs[p])
+            sel_part = p;
+    want_diff = cfg.last_diff;
+    sel_diff = nearest_diff(sel_part, want_diff);
+    go(S_SELECT);
+}
+
+static void load_art(const Song * s)
+{
+    tex_free(art);
+    art = NULL;
+    char path[400];
+    snprintf(path, sizeof(path), "%s/album.jpg", s->folder);
+    FILE * f = fopen(path, "rb");
+    if (f) {
+        fclose(f);
+        art = tex_load(path, TEX_MIPMAP);
+    }
+    art_for = sel;
+}
+
 static bool del_ask, list_menu;
 static int list_row;
 static double group_t;              // a jump just happened: its heading shows for a moment
@@ -1101,28 +1133,12 @@ static void song_list(void)
     }
     if ((pressed & BTN_CROSS) && s) {
         ui_sound(SND_UI_SELECT);
-        read_diffs(s);
-        sel_part = first_part(s);
-        for (int p = 0; !sel_diffs[sel_part] && p < PART_COUNT; p++)
-            if (sel_diffs[p])
-                sel_part = p;
-        want_diff = cfg.last_diff;
-        sel_diff = nearest_diff(sel_part, want_diff);
-        go(S_SELECT);
+        open_select(s);
         return;
     }
     // the cover once the choice settles, then the preview
     if (s && art_for != sel && now_s - sel_t > 0.12) {
-        tex_free(art);
-        art = NULL;
-        char path[400];
-        snprintf(path, sizeof(path), "%s/album.jpg", s->folder);
-        FILE * f = fopen(path, "rb");
-        if (f) {
-            fclose(f);
-            art = tex_load(path, TEX_MIPMAP);
-        }
-        art_for = sel;
+        load_art(s);
     }
     if (s && preview_for != sel && now_s - sel_t > 0.5) {
         stop_preview();
@@ -1236,6 +1252,14 @@ static void song_list(void)
 // -------------------------------------------------------------------------------------------- part and difficulty
 
 static bool select_starting;        // ✕ was pressed: that frame says LOADING, the next one loads the song
+static bool tour_on;                // the song comes from the tour: it counts there, and that's where it goes back to
+
+static int from_list(void)
+{
+    return tour_on ? S_TOUR : S_SONGS;
+}
+
+static int tour_leg, tour_gig, tour_slot;
 
 static void draw_select(const Song * s, bool loading)
 {
@@ -1263,6 +1287,12 @@ static void draw_select(const Song * s, bool loading)
         if (b->stars)
             draw_stars(b->stars, 520, y + 4, 24);
     }
+    if (tour_on) {
+        char t2[80];
+        snprintf(t2, sizeof(t2), "%s%s", tour_slot == TOUR_ENCORE ? "Encore at " : "Live at ",
+                 res_venue_title(tour_zone(tour_leg, tour_gig)));
+        font_draw_fit(res.ui, t2, SCREEN_W / 2, 84, 24, 560, RGBA(255, 200, 120, 255), ALIGN_CENTER);
+    }
     if (loading)
         font_draw_shadow(res.title, "LOADING", SCREEN_W / 2, 488, 36, RGBA(255, 220, 120, 255), ALIGN_CENTER);
     else {
@@ -1287,22 +1317,28 @@ static struct {
 static int pr_count, pr_from, pr_to, pr_top, pr_focus, pr_speed = 100;
 static bool practicing, practice_starting;
 
+// "verse_1" reads "Verse 1"
+static void section_title(char * name)
+{
+    for (char * c = name; *c; c++)
+        if (*c == '_')
+            *c = ' ';
+    if (name[0] >= 'a' && name[0] <= 'z')
+        name[0] -= 32;
+}
+
 static void pr_add(double t, const char * name)
 {
     if (pr_count == PR_MAX)
         return;
     pr[pr_count].t = t;
     pr[pr_count].notes = 0;
-    // "verse_1" reads "Verse 1"; a charting tool's "ugc_section_20_40" says nothing
+    // a charting tool's "ugc_section_20_40" says nothing
     if (!strncasecmp(name, "ugc", 3))
         snprintf(pr[pr_count].name, sizeof(pr[0].name), "Section %d", pr_count + 1);
     else
         snprintf(pr[pr_count].name, sizeof(pr[0].name), "%s", name);
-    for (char * c = pr[pr_count].name; *c; c++)
-        if (*c == '_')
-            *c = ' ';
-    if (pr[pr_count].name[0] >= 'a' && pr[pr_count].name[0] <= 'z')
-        pr[pr_count].name[0] -= 32;
+    section_title(pr[pr_count].name);
     pr_count++;
 }
 
@@ -1490,7 +1526,7 @@ static void select_screen(void)
     }
     if (pressed & BTN_CIRCLE) {
         ui_sound(SND_UI_BACK);
-        go(S_SONGS);
+        go(from_list());
         return;
     }
     if (pressed & BTN_SQUARE) {
@@ -1516,10 +1552,15 @@ static void select_screen(void)
 // --------------------------------------------------------------------------------------------- the song and pause
 
 static void results_screen(void);
+static void tour_played(void);
+static void tour_next(void);
 
 static void finish_song(int how)
 {
     result = game_result();
+    section_title(result.worst);
+    if (tour_on && !result.failed)
+        tour_played();
     plat_log("result: %s, score %d, %d stars, %d/%d notes, best streak %d, %d/%d phrases, %d overhits%s; hits %+d ms "
              "on average, spread %d", how == GAME_DONE ? "done" : "failed", result.score, result.stars,
              result.notes_hit, result.notes_total, result.best_streak, result.sp_hit, result.sp_total, result.overhits,
@@ -1599,7 +1640,7 @@ static void pause_screen(void)
             return;
         } else {
             game_stop();
-            go(practicing ? S_PRACTICE : S_SONGS);
+            go(practicing ? S_PRACTICE : from_list());
             practicing = false;
             sel_t = now_s;
             return;
@@ -1664,8 +1705,10 @@ static void results_screen(void)
     Song * s = songs_get(sel);
     if (pressed & (BTN_CROSS | BTN_CIRCLE)) {
         ui_sound(SND_UI_SELECT);
-        go(S_SONGS);
+        go(from_list());
         sel_t = now_s;
+        if (tour_on)
+            tour_next();
         return;
     }
     if ((pressed & BTN_TRIANGLE) && s) {
@@ -1681,24 +1724,25 @@ static void results_screen(void)
     draw_background(res.bg_results, WHITE);
     gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(0, 0, 0, 90));
     panel(40, 30, 880, 470);
-    font_draw_fit(res.title, result.failed ? "SONG FAILED" : s ? s->name : "", SCREEN_W / 2, 50, 54, 820,
+    font_draw_fit(res.title, result.failed ? "SONG FAILED" : s ? s->name : "", SCREEN_W / 2, 48, 52, 820,
                   result.failed ? RGBA(255, 90, 70, 255) : RGBA(255, 220, 140, 255), ALIGN_CENTER);
     if (s) {
         // failed, the big line doesn't name the song
         char who[200];
         snprintf(who, sizeof(who), "%s  -  %s", s->name, s->artist);
-        font_draw_fit(res.ui, result.failed ? who : s->artist, SCREEN_W / 2, 110, 28, 820, RGBA(230, 230, 230, 255),
+        font_draw_fit(res.ui, result.failed ? who : s->artist, SCREEN_W / 2, 104, 26, 820, RGBA(230, 230, 230, 255),
                       ALIGN_CENTER);
     }
+    draw_cover(art_for == sel ? art : NULL, 84, 150, 200);
     char t[96];
     snprintf(t, sizeof(t), "%s  %s", part_name(result.part), diff_name(result.diff));
-    font_draw(res.ui, t, SCREEN_W / 2, 142, 22, RGBA(190, 190, 190, 255), ALIGN_CENTER);
+    font_draw_fit(res.ui, t, 184, 358, 22, 200, RGBA(190, 190, 190, 255), ALIGN_CENTER);
     if (!result.failed) {
         float a = (float)((now_s - screen_t) / 1.2);
         int shown = (int)(a * result.stars + 0.999f);
         if (shown > result.stars)
             shown = result.stars;
-        draw_stars(shown >= 6 || (result.stars >= 6 && a >= 1) ? 6 : shown, SCREEN_W / 2 - 150, 176, 64);
+        draw_stars(shown >= 6 || (result.stars >= 6 && a >= 1) ? 6 : shown, 460, 136, 56);
     }
     int pct = result.notes_total ? result.notes_hit * 100 / result.notes_total : 0;
     struct {
@@ -1724,16 +1768,237 @@ static void results_screen(void)
         snprintf(rows[5].value, sizeof(rows[5].value), "%d ms %s", abs(result.off_ms),
                  result.off_ms > 0 ? "late" : "early");
     for (int i = 0; i < 6; i++) {
-        float y = 252 + i * 33;
-        font_draw_shadow(res.ui, rows[i].label, 300, y, 30, RGBA(220, 210, 200, 255), ALIGN_LEFT);
-        font_draw_shadow(res.ui, rows[i].value, 660, y, 30, RGBA(255, 236, 190, 255), ALIGN_RIGHT);
+        float y = 200 + i * 31;
+        font_draw_shadow(res.ui, rows[i].label, 330, y, 28, RGBA(220, 210, 200, 255), ALIGN_LEFT);
+        font_draw_shadow(res.ui, rows[i].value, 870, y, 28, RGBA(255, 236, 190, 255), ALIGN_RIGHT);
     }
+    bool strip = false;
+    for (int i = 0; i < RESULT_STRIP; i++)
+        strip |= result.strip[i] != 255;
     if (result.fc)
-        font_draw_shadow(res.title, "FULL COMBO!", SCREEN_W / 2, 452, 40, RGBA(255, 210, 60, 255), ALIGN_CENTER);
-    else if (result_best)
-        font_draw_shadow(res.title, "NEW BEST!", SCREEN_W / 2, 452, 40, RGBA(120, 220, 255, 255), ALIGN_CENTER);
+        font_draw_shadow(res.title, "FULL COMBO!", SCREEN_W / 2, 392, 56, RGBA(255, 210, 60, 255), ALIGN_CENTER);
+    else if (strip) {
+        // the song start to end: green all hit, down to red; it fills in as the stars come
+        const float x = 84, w = 792, cell = w / RESULT_STRIP;
+        float a = (float)((now_s - screen_t) / 1.2);
+        int shown = a >= 1 ? RESULT_STRIP : (int)(a * RESULT_STRIP);
+        gfx_rect(x - 3, 397, w + 6, 30, RGBA(0, 0, 0, 200));
+        for (int i = 0; i < shown; i++) {
+            int v = result.strip[i];
+            if (v == 255)
+                continue;
+            uint32_t c = v >= 100 ? RGBA(70, 200, 90, 255) : v >= 85 ? RGBA(170, 205, 70, 255)
+                         : v >= 60 ? RGBA(240, 170, 50, 255) : RGBA(225, 60, 45, 255);
+            gfx_rect(x + i * cell + 0.5f, 400, cell - 1, 24, c);
+        }
+        char line[120];
+        if (result.worst[0] && result.worst_pct < 100)
+            snprintf(line, sizeof(line), "Toughest part: %s, %d%%", result.worst, result.worst_pct);
+        else
+            snprintf(line, sizeof(line), "Start to end, where the notes went");
+        font_draw_fit(res.ui, line, x, 432, 24, 560, RGBA(220, 210, 200, 255), ALIGN_LEFT);
+    }
+    if (result_best)
+        font_draw_shadow(res.title, "NEW BEST!", 870, 148, 36, RGBA(120, 220, 255, 255), ALIGN_RIGHT);
     static const char * help[] = {"btn_cross", "Continue", "btn_triangle", "Retry"};
     help_bar(help, 4);
+    gfx_end();
+}
+
+// ---------------------------------------------------------------------------------------------------- World Tour
+
+static int tour_ids[TOUR_SET];
+static bool tour_in_set;            // the cursor's in the setlist, not on the gigs
+static double tour_moved;           // when the gig changed: the venue's picture comes up once it settles
+static int tour_shown = -1;
+static Tex * tour_stage;
+
+static void tour_look(void)
+{
+    tour_setlist(tour_leg, tour_gig, cfg.last_part, tour_ids);
+    tour_moved = now_s;
+}
+
+static int first_unplayed(void)
+{
+    for (int i = 0; i < TOUR_SET; i++)
+        if (!tour_slot_stars(tour_leg, tour_gig, i) && tour_ids[i] >= 0)
+            return i;
+    return 0;
+}
+
+static void tour_enter(void)
+{
+    if (!songs_count()) {
+        go(S_EMPTY);
+        return;
+    }
+    tour_on = true;
+    tour_in_set = false;
+    // the furthest leg that's open, at the first gig left to play
+    tour_leg = 0;
+    while (tour_leg + 1 < TOUR_LEGS && tour_leg_open(tour_leg + 1))
+        tour_leg++;
+    tour_gig = 0;
+    while (tour_gig + 1 < TOUR_GIGS && tour_gig_done(tour_leg, tour_gig))
+        tour_gig++;
+    tour_shown = -1;
+    tour_look();
+    game_force_venue(tour_zone(tour_leg, tour_gig));
+    go(S_TOUR);
+}
+
+// a song went by: what it changed is said on the next screen
+static void tour_played(void)
+{
+    bool opened = tour_leg + 1 < TOUR_LEGS && tour_leg_open(tour_leg + 1);
+    tour_record(tour_leg, tour_gig, tour_slot, result.stars > 0 ? result.stars : 1);
+    if (tour_leg + 1 < TOUR_LEGS && !opened && tour_leg_open(tour_leg + 1)) {
+        char t[96];
+        snprintf(t, sizeof(t), "On to the next leg: %s", tour_leg_name(tour_leg + 1));
+        say(t);
+    } else if (tour_gig_done(tour_leg, tour_gig))
+        say("Gig played!");
+    else if (tour_songs_done(tour_leg, tour_gig) == TOUR_ENCORE && tour_slot != TOUR_ENCORE)
+        say("The crowd wants more: ENCORE!");
+}
+
+// back from a song: the next one on the setlist, or the gigs once it's all played
+static void tour_next(void)
+{
+    tour_look();
+    tour_moved = -10;
+    if (tour_gig_done(tour_leg, tour_gig))
+        tour_in_set = false;
+    else
+        tour_slot = first_unplayed();
+}
+
+static void tour_screen(void)
+{
+    bool leg_open = tour_leg_open(tour_leg);
+    bool encore_open = true;
+    for (int i = 0; i < TOUR_ENCORE; i++)
+        encore_open &= tour_slot_stars(tour_leg, tour_gig, i) > 0;
+    if (pressed & BTN_CIRCLE) {
+        ui_sound(SND_UI_BACK);
+        if (tour_in_set)
+            tour_in_set = false;
+        else {
+            tour_on = false;
+            game_force_venue(NULL);
+            go(S_MAIN);
+            return;
+        }
+    }
+    int dir = repeat & BTN_UP ? -1 : repeat & BTN_DOWN ? 1 : 0;
+    if (dir && tour_in_set) {
+        tour_slot = (tour_slot + dir + TOUR_SET) % TOUR_SET;
+        ui_sound(SND_UI_MOVE);
+    } else if (dir) {
+        tour_gig = (tour_gig + dir + TOUR_GIGS) % TOUR_GIGS;
+        tour_look();
+        ui_sound(SND_UI_MOVE);
+    }
+    int leg_dir = pressed & BTN_L ? -1 : pressed & BTN_R ? 1 : 0;
+    if (leg_dir && !tour_in_set && tour_leg + leg_dir >= 0 && tour_leg + leg_dir < TOUR_LEGS) {
+        tour_leg += leg_dir;
+        tour_gig = 0;
+        tour_look();
+        ui_sound(SND_UI_MOVE);
+        leg_open = tour_leg_open(tour_leg);
+    }
+    if (pressed & BTN_CROSS) {
+        if (!leg_open)
+            ui_sound(SND_UI_BACK);
+        else if (!tour_in_set) {
+            ui_sound(SND_UI_SELECT);
+            tour_in_set = true;
+            tour_slot = first_unplayed();
+        } else if (tour_ids[tour_slot] >= 0 && (tour_slot != TOUR_ENCORE || encore_open)) {
+            ui_sound(SND_UI_SELECT);
+            sel = tour_ids[tour_slot];
+            view_stale = true;
+            game_force_venue(tour_zone(tour_leg, tour_gig));
+            load_art(songs_get(sel));
+            open_select(songs_get(sel));
+            return;
+        } else
+            ui_sound(SND_UI_BACK);
+    }
+    // the venue, once the cursor stops on it (the same pictures the gig will play on)
+    int here = tour_leg * TOUR_GIGS + tour_gig;
+    if (tour_shown != here && now_s - tour_moved > 0.15) {
+        Tex * lights;
+        tour_stage = NULL;
+        if (leg_open)
+            res_venue(tour_zone(tour_leg, tour_gig), &tour_stage, &lights);
+        tour_shown = here;
+    }
+    gfx_begin(0, 0, 0);
+    gfx_2d();
+    if (tour_stage && tour_shown == here)
+        gfx_sprite(&(Sprite){tour_stage, 0, 0, 1, 1, tour_stage->w, tour_stage->h}, 0, 0, SCREEN_W, SCREEN_H,
+                   RGBA(140, 140, 140, 255));
+    else
+        draw_background(res.bg_menu, RGBA(120, 120, 120, 255));
+    banner("WORLD TOUR");
+    char t[120];
+    snprintf(t, sizeof(t), "%d", tour_stars());
+    font_draw_shadow(res.title, t, 886, 14, 44, RGBA(255, 236, 190, 255), ALIGN_RIGHT);
+    gfx_sprite(atlas_get(res.hud, "hud_star_on"), 892, 14, 42, 42, WHITE);
+    font_draw_shadow(res.ui, tour_rank(), 932, 60, 24, RGBA(230, 225, 215, 255), ALIGN_RIGHT);
+    // the leg and its gigs
+    panel(20, 92, 396, 404);
+    snprintf(t, sizeof(t), "%s  %d of %d", tour_leg_name(tour_leg), tour_leg + 1, TOUR_LEGS);
+    font_draw_fit(res.title, t, 218, 112, 32, 340, RGBA(255, 220, 140, 255), ALIGN_CENTER);
+    for (int g = 0; g < TOUR_GIGS; g++) {
+        float y = 158 + g * 54;
+        bool on = g == tour_gig;
+        if (on)
+            gfx_sprite(atlas_get(res.hud, "wor_select"), 30, y - 6, 376, 50, tour_in_set ? RGBA(150, 150, 150, 255) : WHITE);
+        const char * title = res_venue_title(tour_zone(tour_leg, g));
+        font_draw_fit(res.ui, leg_open ? title : "???", 56, y + 2, 28, 250,
+                      on ? RGBA(255, 230, 150, 255) : leg_open ? RGBA(205, 200, 195, 255) : RGBA(100, 95, 90, 255),
+                      ALIGN_LEFT);
+        int have = tour_gig_stars(tour_leg, g);
+        if (leg_open && tour_songs_done(tour_leg, g)) {
+            snprintf(t, sizeof(t), "%d", have);
+            font_draw_shadow(res.ui, t, 362, y + 3, 26, RGBA(255, 236, 190, 255), ALIGN_RIGHT);
+            gfx_sprite(atlas_get(res.hud, tour_gig_done(tour_leg, g) ? "hud_star_gold" : "hud_star_on"), 364, y + 2, 26,
+                       26, WHITE);
+        }
+    }
+    // the setlist
+    panel(432, 92, 508, 404);
+    if (leg_open) {
+        font_draw_fit(res.title, res_venue_title(tour_zone(tour_leg, tour_gig)), 686, 112, 34, 450,
+                      RGBA(255, 220, 140, 255), ALIGN_CENTER);
+        for (int i = 0; i < TOUR_SET; i++) {
+            float y = 162 + i * 78;
+            bool on = tour_in_set && i == tour_slot, locked = i == TOUR_ENCORE && !encore_open;
+            if (on)
+                gfx_sprite(atlas_get(res.hud, "wor_select"), 444, y - 8, 484, 74, WHITE);
+            const Song * s = tour_ids[i] >= 0 ? songs_get(tour_ids[i]) : NULL;
+            uint32_t c = locked ? RGBA(120, 115, 110, 255) : on ? RGBA(255, 230, 150, 255) : RGBA(225, 220, 212, 255);
+            if (i == TOUR_ENCORE)
+                font_draw(res.ui, "ENCORE", 900, y - 2, 18, RGBA(255, 200, 120, 255), ALIGN_RIGHT);
+            font_draw_fit(res.ui, locked ? "???" : s ? s->name : "(no longer on the card)", 466, y, 28, 330, c,
+                          ALIGN_LEFT);
+            if (s && !locked)
+                font_draw_fit(res.ui, s->artist, 466, y + 30, 20, 330, on ? RGBA(255, 240, 215, 255) : RGBA(175, 170, 165, 255),
+                              ALIGN_LEFT);
+            int st = tour_slot_stars(tour_leg, tour_gig, i);
+            if (st)
+                draw_stars(st, 800, y + 28, 22);
+        }
+    } else {
+        snprintf(t, sizeof(t), "Play %d gigs of %s", TOUR_TO_OPEN, tour_leg_name(tour_leg - 1));
+        font_draw_fit(res.ui, t, 686, 260, 28, 450, RGBA(220, 215, 205, 255), ALIGN_CENTER);
+        font_draw_fit(res.ui, "to open this leg of the tour", 686, 298, 24, 450, RGBA(190, 185, 180, 255), ALIGN_CENTER);
+    }
+    static const char * help[] = {"btn_cross", "Pick", "btn_circle", "Back", "btn_l", "Leg"};
+    help_bar(help, 6);
     gfx_end();
 }
 
@@ -2016,6 +2281,7 @@ int main(void)
     audio_set_volumes(cfg.music_vol / 10.0f, cfg.sfx_vol / 10.0f);
     res_load();
     songs_scan(scan_progress);
+    tour_load();
     for (int i = 0; i < songs_count(); i++)
         if (strcmp(songs_get(i)->folder, cfg.last_song) == 0)
             sel = i;
@@ -2055,6 +2321,7 @@ int main(void)
         switch (screen) {
         case S_TITLE: title_screen(); break;
         case S_MAIN: main_menu(); break;
+        case S_TOUR: tour_screen(); break;
         case S_SONGS: song_list(); break;
         case S_SELECT: select_screen(); break;
         case S_PRACTICE: practice_screen(); break;

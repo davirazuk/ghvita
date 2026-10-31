@@ -5,6 +5,8 @@
 #include "songs.h"
 #include "plat.h"
 
+#define RESULT_STRIP 64
+
 typedef struct {
     int part, diff;
     int score, stars;
@@ -13,11 +15,16 @@ typedef struct {
     bool failed, fc;
     bool timed;                 // enough hits to tell: on average off_ms late (early if negative), spread_ms either way
     int off_ms, spread_ms;
+    uint8_t strip[RESULT_STRIP];    // start to end, the percent hit in each slice (255: nothing played there)
+    char worst[44];                 // the named section that went worst, and how it went
+    int worst_pct;
 } Result;
 
 enum { GAME_PLAYING, GAME_DONE, GAME_FAILED, GAME_PAUSE };
 
 bool game_start(Song * song, int part, int diff);
+// the venue the next songs play in (the tour's), NULL to leave it to the options
+void game_force_venue(const char * zone);
 // the next game_start is practice: from..to seconds over and over at speed (0.5..1), and nothing counts
 void game_practice(double from, double to, float speed);
 // one frame; pressed = buttons that went down this frame
