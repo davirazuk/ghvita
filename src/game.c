@@ -1119,6 +1119,7 @@ static void free_song(void)
 }
 
 static void set_my_stem(float volume);
+static bool stem_is_the_song(void);
 
 static void reset_play(void)
 {
@@ -1284,13 +1285,16 @@ bool game_start(Song * song, int part, int diff)
         free_song();
         return false;
     }
-    G.my_stem = song->part_stem[part];
+    // a lone stem is the whole song, whatever it's called: a miss or the whammy would take all of it
+    G.my_stem = song->stem_count > 1 ? song->part_stem[part] : -1;
     // drums often come as a few stems: a miss quiets all of them
     G.drum_stem_count = 0;
     for (int i = 0; G.drums && i < song->stem_count; i++)
         if (!strncmp(song->stems[i], "drums", 5))
             G.drum_stems[G.drum_stem_count++] = i;
-    G.vox_stem = song->part_stem[PART_VOCALS];
+    if (G.drum_stem_count == song->stem_count)
+        G.drum_stem_count = 0;
+    G.vox_stem = song->stem_count > 1 ? song->part_stem[PART_VOCALS] : -1;
     G.speed = 4.0 + cfg.speed * 0.8;
     G.highway = res_highway(cfg.highway);
     pick_venue(song);
@@ -1452,8 +1456,22 @@ static void rock_change(float d)
     set_crowd();
 }
 
+// Customs often leave the backing near silent and put the band in the part's stem: past the first seconds, a stem with
+// nearly everything in it stays up and unbent. Only the player's part is ever muted, so a guitar solo isn't caught
+static bool stem_is_the_song(void)
+{
+    int mine[MAX_STEMS + 1], n = 0;
+    if (G.my_stem >= 0)
+        mine[n++] = G.my_stem;
+    for (int i = 0; i < G.drum_stem_count; i++)
+        mine[n++] = G.drum_stems[i];
+    return n && G.t > 3 && audio_stems_share(mine, n) > 0.85f;
+}
+
 static void set_my_stem(float volume)
 {
+    if (volume < 1 && stem_is_the_song())
+        volume = 1;
     if (G.my_stem >= 0)
         audio_stem_volume(G.my_stem, volume);
     for (int i = 0; i < G.drum_stem_count; i++)
@@ -2056,7 +2074,8 @@ int game_update(const Pad * pad, uint32_t pressed)
 
     // whammy: the right stick moving, or a finger rubbing the rear touchpad (a thumb on the frets can't reach the stick).
     // Its way from where it landed is the bar, as far as the stick's from the middle
-    float dw = fabsf(pad->rx - G.last_rx) + fabsf(pad->ry - G.last_ry), bar = hypotf(pad->rx, pad->ry);
+    float dw = fabsf(pad->rx - G.last_rx) + fabsf(pad->ry - G.last_ry), bar = (hypotf(pad->rx, pad->ry) - 0.2f) / 0.7f;
+    bar = bar < 0 ? 0 : bar;            // a stick at rest isn't quite in the middle
     G.last_rx = pad->rx;
     G.last_ry = pad->ry;
     if (pad->back_on) {
@@ -2082,9 +2101,9 @@ int game_update(const Pad * pad, uint32_t pressed)
     bool ringing = false;
     for (int k = 0; k < MAX_SUS; k++)
         ringing |= G.sus[k].note >= 0;
-    G.bend += ((ringing ? (bar > 1 ? 1 : bar) : 0) - G.bend) * 0.3f;
+    G.bend += ((ringing ? (bar > 1 ? 1 : bar) : 0) - G.bend) * 0.5f;
     if (!G.drums)
-        audio_stem_bend(G.my_stem, G.bend > 0.003f ? G.bend : 0);
+        audio_stem_bend(G.my_stem, G.bend > 0.003f && !stem_is_the_song() ? G.bend : 0);
 
     // Star Power: Select, a quick tilt, or on drums both cymbals at once, as in World Tour
     if ((pressed & BTN_SELECT) || (G.drums && both_cymbals(lanes_pressed)))

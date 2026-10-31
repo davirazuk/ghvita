@@ -14,7 +14,16 @@
 #define MAX_VOICES 24
 #define HISTORY 32
 #define WORKERS 2                       // decode threads (on the Vita, cores 2 and 1): a stem goes to stem % WORKERS
-#define MAX_BEND 600                    // the whammy's furthest, in frames behind the read position
+// the whammy, the pitch shifter YARG has from BASS_FX: an FFT of 2048 and a semitone with the bar all the way down
+#define BEND_FFT 2048
+#ifndef BEND_OVERLAP
+#define BEND_OVERLAP 4                  // YARG's 8 would take a third of the Vita's audio core
+#endif
+#define BEND_HOP (BEND_FFT / BEND_OVERLAP)
+#define BEND_BINS 768                   // to 18 kHz: nothing a guitar stem has above that is missed in a bend
+#define BEND_SEMITONES 1.0f
+#define BEND_EASE 0.0014f               // per frame: the bar's 60 steps a second become a slope (15 ms)
+#define MAX_BEND BEND_FFT               // frames kept behind the read position, to start from
 
 typedef struct {
     Decoder * dec;
@@ -23,7 +32,8 @@ typedef struct {
     volatile uint32_t wpos, rpos;       // frames written by the decoder / read by the mixer
     volatile uint32_t skip;             // frames the mixer had to go without: the decoder drops them to stay in step
     float vol_target, vol;
-    float bend_target, bend;            // the whammy: frames behind the read position
+    float bend_target, bend;            // the whammy: how far the bar is down, 0..1
+    float power;                        // how loud it's been, the mute not counted
 } Stream;
 
 struct Sound {
@@ -90,6 +100,249 @@ float audio_level(void)
     return mix_level;
 }
 
+// Phase vocoder: each frame of the stem goes to frequencies, they're moved down, and the phases are carried on from what
+// each frequency was doing the frame before. Frames come from ahead of the read position, so what comes out is complete
+// the moment it's played: nothing else has to wait for the bent stem, as YARG's stems do
+static struct {
+    const Stream * st;
+    uint32_t next;                      // the ring position the next sample out belongs to
+    int have;                           // of out, used
+    bool fresh;                         // the next frame starts the phases
+    int warm;                           // hops until what comes out is whole
+    float wet;                          // how much of it is heard
+    float out[2][BEND_HOP], ola[2][BEND_FFT];
+    float last[2][BEND_BINS * 2], sent[2][BEND_BINS * 2];     // the last frame's bins, as they came in and went out
+} bender;
+static float bend_win[BEND_FFT], fft_cos[BEND_FFT / 2], fft_sin[BEND_FFT / 2];
+static uint16_t fft_rev[BEND_FFT / 2];
+
+static void bend_init(void)
+{
+    const int half = BEND_FFT / 2;
+    int bits = 0;
+    while (1 << bits < half)
+        bits++;
+    for (int i = 0; i < BEND_FFT; i++)
+        bend_win[i] = 0.5f - 0.5f * cosf(2 * (float)M_PI * i / BEND_FFT);
+    for (int i = 0; i < half; i++) {
+        fft_cos[i] = cosf(2 * (float)M_PI * i / BEND_FFT);
+        fft_sin[i] = sinf(2 * (float)M_PI * i / BEND_FFT);
+        int r = 0;
+        for (int b = 0; b < bits; b++)
+            if (i & (1 << b))
+                r |= 1 << (bits - 1 - b);
+        fft_rev[i] = (uint16_t)r;
+    }
+}
+
+// half-size complex FFT, in place on pairs; sign -1 forward, 1 back
+static void fft_complex(float * z, int sign)
+{
+    const int n = BEND_FFT / 2;
+    for (int i = 0; i < n; i++) {
+        int j = fft_rev[i];
+        if (j > i) {
+            float a = z[i * 2], b = z[i * 2 + 1];
+            z[i * 2] = z[j * 2];
+            z[i * 2 + 1] = z[j * 2 + 1];
+            z[j * 2] = a;
+            z[j * 2 + 1] = b;
+        }
+    }
+    for (int size = 2; size <= n; size *= 2) {
+        int h = size / 2, step = BEND_FFT / size;
+        for (int i = 0; i < n; i += size)
+            for (int k = 0; k < h; k++) {
+                float wr = fft_cos[k * step], wi = sign * fft_sin[k * step];
+                float * a = z + (i + k) * 2, * b = a + h * 2;
+                float tr = b[0] * wr - b[1] * wi, ti = b[0] * wi + b[1] * wr;
+                b[0] = a[0] - tr;
+                b[1] = a[1] - ti;
+                a[0] += tr;
+                a[1] += ti;
+            }
+    }
+}
+
+// x[BEND_FFT] of samples becomes the bins 0..BEND_FFT/2 as re, im pairs (x needs room for two more)
+static void rfft(float * x)
+{
+    const int n = BEND_FFT / 2;
+    fft_complex(x, -1);
+    x[n * 2] = x[0] - x[1];
+    x[n * 2 + 1] = 0;
+    x[0] += x[1];
+    x[1] = 0;
+    for (int k = 1; k <= n / 2; k++) {
+        float * a = x + k * 2, * b = x + (n - k) * 2;
+        float er = (a[0] + b[0]) * 0.5f, ei = (a[1] - b[1]) * 0.5f;
+        float or_ = (a[1] + b[1]) * 0.5f, oi = (b[0] - a[0]) * 0.5f;
+        float wr = fft_cos[k], wi = -fft_sin[k];
+        float tr = or_ * wr - oi * wi, ti = or_ * wi + oi * wr;
+        a[0] = er + tr;
+        a[1] = ei + ti;
+        b[0] = er - tr;
+        b[1] = ti - ei;
+    }
+}
+
+static void irfft(float * x)
+{
+    const int n = BEND_FFT / 2;
+    float x0 = x[0], xn = x[n * 2];
+    x[0] = (x0 + xn) * 0.5f;
+    x[1] = (x0 - xn) * 0.5f;
+    for (int k = 1; k <= n / 2; k++) {
+        float * a = x + k * 2, * b = x + (n - k) * 2;
+        float er = (a[0] + b[0]) * 0.5f, ei = (a[1] - b[1]) * 0.5f;
+        float tr = (a[0] - b[0]) * 0.5f, ti = (a[1] + b[1]) * 0.5f;
+        float wr = fft_cos[k], wi = fft_sin[k];
+        float or_ = tr * wr - ti * wi, oi = tr * wi + ti * wr;
+        a[0] = er - oi;
+        a[1] = ei + or_;
+        b[0] = er + oi;
+        b[1] = or_ - ei;
+    }
+    fft_complex(x, 1);
+}
+
+static inline float wrap_pi(float d)
+{
+    int q = (int)(d / (float)M_PI);
+    q += q >= 0 ? q & 1 : -(q & 1);
+    return d - (float)M_PI * q;
+}
+
+static inline float fast_atan2(float y, float x)
+{
+    float ax = fabsf(x), ay = fabsf(y);
+    if (ax == 0 && ay == 0)
+        return 0;
+    bool swap = ay > ax;
+    float a = swap ? ax / ay : ay / ax, a2 = a * a;
+    float r = a * (0.99997726f + a2 * (-0.33262347f + a2 * (0.19354346f + a2 * (-0.11643287f + a2 * (0.05265332f - 0.0117212f * a2)))));
+    if (swap)
+        r = (float)M_PI_2 - r;
+    if (x < 0)
+        r = (float)M_PI - r;
+    return y < 0 ? -r : r;
+}
+
+// x in -pi..pi
+static inline void fast_sincos(float x, float * s, float * c)
+{
+    bool flip = false;
+    if (x > (float)M_PI_2) {
+        x = (float)M_PI - x;
+        flip = true;
+    } else if (x < -(float)M_PI_2) {
+        x = -(float)M_PI - x;
+        flip = true;
+    }
+    float x2 = x * x;
+    *s = x * (1 + x2 * (-0.16666667f + x2 * (0.0083333f + x2 * (-0.00019841f + x2 * 2.7526e-6f))));
+    float co = 1 + x2 * (-0.5f + x2 * (0.041666667f + x2 * (-0.0013888889f + x2 * 2.4801e-5f)));
+    *c = flip ? -co : co;
+}
+
+// the frame of the stem that starts at at, a hop further on in out. Each peak's whole lobe moves as one, so a note stays as
+// loud and as solid as it was: the phases of its bins aren't left to drift apart (Laroche & Dolson's peak shifting)
+static void bend_frame(const Stream * st, uint32_t at, float ratio)
+{
+    static float x[BEND_FFT + 2], power[BEND_BINS], y[BEND_BINS * 2];
+    static int peak[BEND_BINS / 2 + 1];
+    const float per = BEND_OVERLAP / (2 * (float)M_PI);
+    uint32_t have = st->wpos - at;      // the end of a song, or a decoder behind: silence, as what isn't there
+    for (int c = 0; c < 2; c++) {
+        for (int j = 0; j < BEND_FFT; j++)
+            x[j] = (uint32_t)j < have || have > 0x80000000u ? st->ring[((at + j) % RING_FRAMES) * 2 + c] * bend_win[j] : 0;
+        rfft(x);
+        float * last = bender.last[c], * sent = bender.sent[c];
+        if (bender.fresh)
+            memcpy(y, x, sizeof(y));
+        else {
+            for (int k = 0; k < BEND_BINS; k++)
+                power[k] = x[k * 2] * x[k * 2] + x[k * 2 + 1] * x[k * 2 + 1];
+            int peaks = 0;
+            for (int k = 2; k < BEND_BINS - 2; k++)
+                if (power[k] > power[k - 1] && power[k] >= power[k + 1] && power[k] > power[k - 2] && power[k] >= power[k + 2]) {
+                    peak[peaks++] = k;
+                    k += 2;
+                }
+            memset(y, 0, sizeof(y));
+            for (int i = 0, from = 0; i < peaks; i++) {
+                int p = peak[i], to = i + 1 < peaks ? (p + peak[i + 1] + 1) / 2 : BEND_BINS;
+                // what the peak really is, from how far its phase went since the last frame, and where that goes
+                float ph = fast_atan2(x[p * 2 + 1], x[p * 2]);
+                float d = wrap_pi(ph - fast_atan2(last[p * 2 + 1], last[p * 2]) - p / per);
+                float f = (p + d * per) * ratio;
+                int shift = (int)floorf(f - p + 0.5f), q = p + shift;
+                // on from the phase its new bin went out with: rot takes the lobe there
+                float rot = 0;
+                if (q >= 0 && q < BEND_BINS)
+                    rot = wrap_pi(fast_atan2(sent[q * 2 + 1], sent[q * 2]) + wrap_pi(f / per) - ph);
+                float sn, cs;
+                fast_sincos(rot, &sn, &cs);
+                for (int k = from; k < to; k++) {
+                    int o = k + shift;
+                    if (o >= 0 && o < BEND_BINS) {
+                        y[o * 2] += x[k * 2] * cs - x[k * 2 + 1] * sn;
+                        y[o * 2 + 1] += x[k * 2] * sn + x[k * 2 + 1] * cs;
+                    }
+                }
+                from = to;
+            }
+        }
+        memcpy(last, x, sizeof(bender.last[c]));
+        memcpy(sent, y, sizeof(bender.sent[c]));
+        memcpy(x, y, sizeof(y));
+        memset(x + BEND_BINS * 2, 0, (BEND_FFT + 2 - BEND_BINS * 2) * sizeof(float));
+        irfft(x);
+        float * ola = bender.ola[c];
+        const float gain = 2.0f / BEND_FFT / (0.375f * BEND_OVERLAP);
+        for (int j = 0; j < BEND_FFT; j++)
+            ola[j] += x[j] * bend_win[j] * gain;
+        memcpy(bender.out[c], ola, sizeof(bender.out[c]));
+        memmove(ola, ola + BEND_HOP, (BEND_FFT - BEND_HOP) * sizeof(float));
+        memset(ola + BEND_FFT - BEND_HOP, 0, BEND_HOP * sizeof(float));
+    }
+    bender.fresh = false;
+}
+
+// The stem at the bar's pitch. A bend starts by filling the overlap, a frame to a hop so no buffer pays for all of them, and
+// meanwhile the stem plays as it is; it slides over, in time and in phase, and back the same way
+static void mix_bent(Stream * st, uint32_t r, float * dst, int take, float v, float dv)
+{
+    float bend = st->bend;
+    for (int i = 0; i < take; i++) {
+        uint32_t at = r + i;
+        if (bender.st != st || bender.next != at) {
+            bender.st = st;
+            bender.fresh = true;
+            bender.warm = BEND_OVERLAP - 1;
+            bender.wet = 0;
+            bender.have = BEND_HOP;
+            memset(bender.ola, 0, sizeof(bender.ola));
+        }
+        if (bender.have == BEND_HOP) {
+            bend_frame(st, at, powf(2, -bend * BEND_SEMITONES / 12));
+            bender.have = 0;
+            if (bender.warm)
+                bender.warm--;
+        }
+        bend += (st->bend_target - bend) * BEND_EASE;
+        float want = bender.warm ? 0 : bend * 32 > 1 ? 1 : bend * 32;
+        bender.wet += (want - bender.wet) * 0.003f;
+        const int16_t * smp = &st->ring[(at % RING_FRAMES) * 2];
+        dst[i * 2] += (smp[0] + (bender.out[0][bender.have] - smp[0]) * bender.wet) * v;
+        dst[i * 2 + 1] += (smp[1] + (bender.out[1][bender.have] - smp[1]) * bender.wet) * v;
+        bender.have++;
+        bender.next = at + 1;
+        v += dv;
+    }
+    st->bend = bend;
+}
+
 static void mix(int16_t * out, int frames)
 {
     static float acc[MAX_MIX * 2];
@@ -134,22 +387,12 @@ static void mix(int16_t * out, int frames)
             float dv = take > 0 ? (v1 - v0) / take : 0;
             float v = v0;
             uint32_t r = st->rpos;
-            if (st->bend > 0 || st->bend_target > 0) {
-                // the whammy reads the stem through a delay that moves: the pitch goes with the bar and comes back, and
-                // the stem never leaves the song
-                float b = st->bend, db = take > 0 ? (st->bend_target - b) / take : 0;
-                for (int i = 0; i < take; i++) {
-                    float at = i - b;
-                    int k = (int)floorf(at);
-                    float f = at - k;
-                    const int16_t * s0 = &st->ring[((r + k) % RING_FRAMES) * 2];
-                    const int16_t * s1 = &st->ring[((r + k + 1) % RING_FRAMES) * 2];
-                    dst[(offset + i) * 2] += (s0[0] + (s1[0] - s0[0]) * f) * v;
-                    dst[(offset + i) * 2 + 1] += (s0[1] + (s1[1] - s0[1]) * f) * v;
-                    v += dv;
-                    b += db;
-                }
-                st->bend = st->bend_target;
+            for (int i = 0; i < take; i += 16) {
+                const int16_t * smp = &st->ring[((r + i) % RING_FRAMES) * 2];
+                st->power += (float)smp[0] * smp[0] + (float)smp[1] * smp[1];
+            }
+            if (st->bend > 0.0005f || st->bend_target > 0) {
+                mix_bent(st, r, dst + offset * 2, take, v, dv);
             } else
                 for (int i = 0; i < take; i++) {
                     const int16_t * smp = &st->ring[((r + i) % RING_FRAMES) * 2];
@@ -284,6 +527,7 @@ static int decode_thread(void * arg)
 
 void audio_init(void)
 {
+    bend_init();
     for (int i = 0; i < MAX_STEMS; i++)
         streams[i].ring = malloc(RING_FRAMES * 2 * sizeof(int16_t));
     plat_thread("decode", decode_thread, (void *)0, 2);
@@ -327,7 +571,7 @@ static bool song_load(const char * dir, const char * const * stems, int count)
         st->eof = !st->open;
         st->wpos = st->rpos = st->skip = 0;
         st->vol = st->vol_target = 1;
-        st->bend = st->bend_target = 0;
+        st->bend = st->bend_target = st->power = 0;
     }
     stream_count = count < MAX_STEMS ? count : MAX_STEMS;
     unlock_decoders();
@@ -490,7 +734,18 @@ bool audio_song_active(void)
 void audio_stem_bend(int stem, float amount)
 {
     if (stem >= 0 && stem < MAX_STEMS)
-        streams[stem].bend_target = amount * MAX_BEND;
+        streams[stem].bend_target = amount;
+}
+
+float audio_stems_share(const int * stems, int count)
+{
+    float mine = 0, all = 0;
+    for (int i = 0; i < count; i++)
+        if (stems[i] >= 0 && stems[i] < stream_count)
+            mine += streams[stems[i]].power;
+    for (int i = 0; i < stream_count; i++)
+        all += streams[i].power;
+    return all > 0 ? mine / all : 0;
 }
 
 void audio_stem_volume(int stem, float volume)

@@ -26,8 +26,10 @@ bool audio_song_finished(void);
 bool audio_song_active(void);
 // a stem's volume, 0..1 (eased over a few milliseconds)
 void audio_stem_volume(int stem, float volume);
-// the whammy: how far the bar is pushed on a stem, 0..1; moving it bends the pitch, and it comes back as it stops
+// the whammy: how far the bar is down on a stem, 0..1; the stem stays that much lower, up to a semitone, until it comes up
 void audio_stem_bend(int stem, float amount);
+// how much of what's been heard so far came out of these stems, 0..1
+float audio_stems_share(const int * stems, int count);
 // the whole song's volume, eased over seconds (previews fade in and out)
 void audio_song_fade(float volume, float seconds);
 void audio_set_volumes(float music, float effects);
