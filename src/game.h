@@ -36,6 +36,8 @@ int game_update(const Pad * pad, uint32_t pressed);
 void game_draw(void);
 void game_pause(bool pause);
 void game_log_whammy(void);
+// how far through the song, and the percent hit so far (-1: nothing yet), for the pause screen
+void game_status(int * song_pct, int * notes_pct);
 void game_restart(void);
 void game_stop(void);
 Result game_result(void);

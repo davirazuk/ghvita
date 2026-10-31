@@ -87,6 +87,7 @@ typedef struct {
     bool no_rear_whammy;    // the rear touchpad isn't a whammy bar
     bool no_bend;           // the whammy earns Star Power but leaves the sound alone
     bool no_countdown;      // resume at once
+    bool easy_sustains;     // one fret of a chord keeps its sustain ringing
     bool double_kick;       // Expert+: the kicks charted for a second foot
     bool five_pads;         // 4-pad charts laid out on World Tour's five
     bool sing_along;        // the mic and the lyrics on top of any instrument, when the song has vocals

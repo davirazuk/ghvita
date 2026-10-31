@@ -1048,9 +1048,21 @@ static void jump_group(int dir)
 // Select: what to sort by, what to show, this song
 static void scan_progress(int found, const char * converting);
 
+// songs played one after another, each with its results, like a set at a gig
+enum { SETLIST_MAX = 20 };
+static int setlist[SETLIST_MAX], setlist_n, setlist_at = -1;
+
+static int setlist_find(int song)
+{
+    for (int i = 0; i < setlist_n; i++)
+        if (setlist[i] == song)
+            return i;
+    return -1;
+}
+
 static void list_menu_update(void)
 {
-    enum { ROWS = 5 };
+    enum { ROWS = 8 };
     Song * s = songs_get(sel);
     if (repeat & BTN_UP)
         list_row = (list_row + ROWS - 1) % ROWS;
@@ -1078,6 +1090,7 @@ static void list_menu_update(void)
                 view_stale = true;
         } else if (list_row == 3 && s) {
             del_ask = true;
+            setlist_n = 0;              // songs are by number: a gone one moves the rest
             list_menu = false;
         } else if (list_row == 4) {
             // songs changed by hand on a PC can keep their folder's time: this reads them all
@@ -1087,8 +1100,25 @@ static void list_menu_update(void)
             songs_forget();
             songs_scan(scan_progress);
             view_stale = true;
+            setlist_n = 0;
             list_menu = false;
-        }
+        } else if (list_row == 5 && s) {
+            int at = setlist_find(sel);
+            if (at >= 0) {
+                memmove(setlist + at, setlist + at + 1, (setlist_n - at - 1) * sizeof(setlist[0]));
+                setlist_n--;
+            } else if (setlist_n < SETLIST_MAX)
+                setlist[setlist_n++] = sel;
+        } else if (list_row == 6 && setlist_n) {
+            setlist_at = 0;
+            sel = setlist[0];
+            list_menu = false;
+            stop_preview();
+            open_select(songs_get(sel));
+            pressed = repeat = 0;
+            return;
+        } else if (list_row == 7)
+            setlist_n = 0;
     }
     if (pressed & (BTN_CIRCLE | BTN_SELECT)) {
         ui_sound(SND_UI_BACK);
@@ -1100,18 +1130,21 @@ static void list_menu_update(void)
 static void list_menu_draw(const Song * s)
 {
     gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(0, 0, 0, 170));
-    panel(200, 104, 560, 336);
-    char rows[5][64];
+    panel(200, 84, 560, 384);
+    char rows[8][64];
     snprintf(rows[0], sizeof(rows[0]), "Sort by   %s", sort_name(cfg.sort));
     snprintf(rows[1], sizeof(rows[1]), "Show   %s", show_name());
     snprintf(rows[2], sizeof(rows[2]), "%s", s && s->fav ? "Take out of favourites" : "Add to favourites");
     snprintf(rows[3], sizeof(rows[3]), "Delete this song");
     snprintf(rows[4], sizeof(rows[4]), "Read the whole card again");
-    for (int i = 0; i < 5; i++) {
-        float y = 142 + i * 54;
+    snprintf(rows[5], sizeof(rows[5]), "%s", setlist_find(sel) >= 0 ? "Take out of the setlist" : "Add to the setlist");
+    snprintf(rows[6], sizeof(rows[6]), "Play the setlist (%d %s)", setlist_n, setlist_n == 1 ? "song" : "songs");
+    snprintf(rows[7], sizeof(rows[7]), "Clear the setlist");
+    for (int i = 0; i < 8; i++) {
+        float y = 102 + i * 44;
         if (i == list_row)
-            gfx_sprite(atlas_get(res.hud, "wor_select"), 224, y - 6, 512, 48, WHITE);
-        font_draw_fit(res.ui, rows[i], SCREEN_W / 2, y + 2, 30, 460, i == list_row ? RGBA(255, 230, 150, 255)
+            gfx_sprite(atlas_get(res.hud, "wor_select"), 224, y - 4, 512, 42, WHITE);
+        font_draw_fit(res.ui, rows[i], SCREEN_W / 2, y + 2, 28, 460, i == list_row ? RGBA(255, 230, 150, 255)
                                                                                    : RGBA(220, 215, 205, 255), ALIGN_CENTER);
     }
 }
@@ -1130,8 +1163,11 @@ static void song_list(void)
             view_build();
         n = view_n;
     }
-    if (list_menu)
+    if (list_menu) {
         list_menu_update();
+        if (screen != S_SONGS)
+            return;             // the setlist's started: this list has no say in the song now
+    }
     if (view_stale)
         view_build();
     n = view_n;
@@ -1727,6 +1763,7 @@ static void pause_screen(void)
             return;
         } else {
             game_stop();
+            setlist_at = -1;
             go(practicing ? S_PRACTICE : from_list());
             practicing = false;
             sel_t = now_s;
@@ -1755,6 +1792,14 @@ static void pause_screen(void)
                                                                                     : RGBA(210, 200, 190, 255),
                          ALIGN_CENTER);
     }
+    int song_pct, notes_pct;
+    game_status(&song_pct, &notes_pct);
+    char line[64];
+    if (notes_pct >= 0)
+        snprintf(line, sizeof(line), "%d%% through   %d%% of notes", song_pct, notes_pct);
+    else
+        snprintf(line, sizeof(line), "%d%% through", song_pct);
+    font_draw_shadow(res.ui, line, SCREEN_W / 2, 418, 22, RGBA(225, 215, 200, 255), ALIGN_CENTER);
     gfx_end();
 }
 
@@ -1794,7 +1839,7 @@ static void resume_screen(void)
 // straight from the results to the part that went worst
 static bool results_can_practice(void)
 {
-    return !tour_on && !practicing && result.worst[0] && result.worst_pct < 100;
+    return !tour_on && setlist_at < 0 && !practicing && result.worst[0] && result.worst_pct < 100;
 }
 
 static void results_screen(void)
@@ -1802,6 +1847,23 @@ static void results_screen(void)
     Song * s = songs_get(sel);
     if (pressed & (BTN_CROSS | BTN_CIRCLE)) {
         ui_sound(SND_UI_SELECT);
+        // on to the next of the setlist, on the same part and difficulty when it has them
+        if (setlist_at >= 0 && setlist_at + 1 < setlist_n) {
+            sel = setlist[++setlist_at];
+            Song * next = songs_get(sel);
+            if (next) {
+                open_select(next);
+                // straight in when it has this part at this difficulty; otherwise the choice is the player's
+                if (sel_diffs[result.part] & (1 << result.diff)) {
+                    sel_part = result.part;
+                    sel_diff = result.diff;
+                    select_starting = true;
+                }
+            } else
+                go(from_list());
+            return;
+        }
+        setlist_at = -1;
         go(from_list());
         sel_t = now_s;
         if (tour_on)
@@ -2118,13 +2180,13 @@ static void tour_screen(void)
 
 enum { O_SPEED, O_HIGHWAY, O_VENUE, O_BAND, O_SING, O_OFFSET, O_LAYOUT, O_DRUMKEYS, O_DRUMHITS, O_TILT, O_NOFAIL, O_LEFTY, O_MUSIC, O_SFX, O_CROWD, O_FPS,
        O_CAMERA, O_HWALPHA, O_VLIGHT, O_FLASH, O_POPUPS, O_TIMING, O_LIVE, O_VANISH, O_MISSSND, O_REAR, O_BEND, O_COUNTDOWN,
-       O_RESET, O_FIVEPADS, O_DOUBLEKICK, O_COUNT };
+       O_RESET, O_FIVEPADS, O_DOUBLEKICK, O_EASYSUS, O_COUNT };
 
 // the options by subject, L and R between them
 enum { OPT_TABS = 4, OPT_TAB_MAX = 11 };
 static const char * opt_tab_names[OPT_TABS] = {"GAME", "CONTROLS", "LOOK", "SOUND"};
 static const int opt_tabs[OPT_TABS][OPT_TAB_MAX + 1] = {
-    {O_SPEED, O_OFFSET, O_NOFAIL, O_VANISH, O_COUNTDOWN, O_SING, O_RESET, -1},
+    {O_SPEED, O_OFFSET, O_NOFAIL, O_EASYSUS, O_VANISH, O_COUNTDOWN, O_SING, O_RESET, -1},
     {O_LAYOUT, O_DRUMKEYS, O_FIVEPADS, O_DOUBLEKICK, O_LEFTY, O_TILT, O_REAR, -1},
     {O_HIGHWAY, O_HWALPHA, O_CAMERA, O_VENUE, O_VLIGHT, O_BAND, O_FLASH, O_POPUPS, O_TIMING, O_LIVE, O_FPS, -1},
     {O_MUSIC, O_SFX, O_CROWD, O_DRUMHITS, O_MISSSND, O_BEND, -1},
@@ -2188,6 +2250,7 @@ static void option_text(int i, char * name, char * value, size_t n)
     case O_BEND: strcpy(name, "Whammy bends the sound"); snprintf(value, n, "%s", cfg.no_bend ? "Off" : "On"); break;
     case O_COUNTDOWN: strcpy(name, "Countdown on resume"); snprintf(value, n, "%s", cfg.no_countdown ? "Off" : "On"); break;
     case O_FIVEPADS: strcpy(name, "Drum pads"); snprintf(value, n, "%s", cfg.five_pads ? "Five, as World Tour" : "As charted"); break;
+    case O_EASYSUS: strcpy(name, "Easy chord sustains"); snprintf(value, n, "%s", cfg.easy_sustains ? "On" : "Off"); break;
     case O_DOUBLEKICK: strcpy(name, "Double kick"); snprintf(value, n, "%s", cfg.double_kick ? "On" : "Off"); break;
     case O_RESET: strcpy(name, "Reset settings"); snprintf(value, n, "%s", opt_reset_armed ? "Press X again" : ""); break;
     }
@@ -2254,6 +2317,7 @@ static void change_option(int i, int d)
     case O_COUNTDOWN: cfg.no_countdown = !cfg.no_countdown; break;
     case O_FIVEPADS: cfg.five_pads = !cfg.five_pads; break;
     case O_DOUBLEKICK: cfg.double_kick = !cfg.double_kick; break;
+    case O_EASYSUS: cfg.easy_sustains = !cfg.easy_sustains; break;
     }
     audio_set_volumes(cfg.music_vol / 10.0f, cfg.sfx_vol / 10.0f);
 }
@@ -2370,6 +2434,7 @@ static void options_screen(void)
         "Back to how the game came. Your audio offset stays.",
         "Lay 4-pad charts on World Tour's five pads: cymbals yellow and orange, toms blue and green.",
         "Expert+: play the extra kicks charted for a second foot, in new downloads that have them.",
+        "One finger on a held chord keeps it ringing, so your thumbs are free for the next note.",
     };
     char line[160];
     const char * text = about[opt];
