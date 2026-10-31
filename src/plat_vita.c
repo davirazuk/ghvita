@@ -109,10 +109,11 @@ bool plat_poll(Pad * pad)
         pad->ntouch++;
     }
     sceTouchPeek(SCE_TOUCH_PORT_BACK, &touch, 1);
-    pad->back_on = touch.reportNum > 0;
-    if (pad->back_on) {
-        pad->back_x = touch.report[0].x / 1920.0f;
-        pad->back_y = (touch.report[0].y - 108) / 782.0f;
+    for (unsigned int i = 0; i < touch.reportNum && pad->back_n < 4; i++) {
+        pad->back_id[pad->back_n] = touch.report[i].id;
+        pad->back_xs[pad->back_n] = touch.report[i].x / 1920.0f;
+        pad->back_ys[pad->back_n] = (touch.report[i].y - 108) / 782.0f;
+        pad->back_n++;
     }
 
     SceMotionSensorState motion;

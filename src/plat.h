@@ -20,8 +20,9 @@ typedef struct {
     float lx, ly, rx, ry;           // sticks, -1..1
     int ntouch;                     // front touch screen, in screen pixels
     float touch_x[MAX_TOUCH], touch_y[MAX_TOUCH];
-    bool back_on;                   // the rear touchpad: a finger on it, and where (0..1)
-    float back_x, back_y;
+    int back_n;                     // the rear touchpad: the fingers on it, and where (0..1)
+    int back_id[4];
+    float back_xs[4], back_ys[4];
     int touch_id[MAX_TOUCH];
     float accel[3];                 // the accelerometer (g): which way is down, in the Vita's own frame
     bool has_motion;

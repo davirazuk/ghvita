@@ -1577,6 +1577,7 @@ static void finish_song(int how)
              "on average, spread %d", how == GAME_DONE ? "done" : "failed", result.score, result.stars,
              result.notes_hit, result.notes_total, result.best_streak, result.sp_hit, result.sp_total, result.overhits,
              result.fc ? ", full combo" : "", result.off_ms, result.spread_ms);
+    game_log_whammy();
     Song * s = songs_get(sel);
     result_best = false;
     if (s && !result.failed) {

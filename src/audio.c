@@ -113,6 +113,9 @@ static struct {
     float out[2][BEND_HOP], ola[2][BEND_FFT];
     float last[2][BEND_BINS * 2], sent[2][BEND_BINS * 2];     // the last frame's bins, as they came in and went out
 } bender;
+static volatile int anchor_jumps;       // seeks and pauses: the song's time moved in a way a buffer's report doesn't tell
+static int64_t bend_us;                 // what the whammy has cost: the song's log line
+static int bend_frames, bend_worst;
 static float bend_win[BEND_FFT], fft_cos[BEND_FFT / 2], fft_sin[BEND_FFT / 2];
 static uint16_t fft_rev[BEND_FFT / 2];
 
@@ -255,7 +258,7 @@ static void bend_frame(const Stream * st, uint32_t at, float ratio)
     uint32_t have = st->wpos - at;      // the end of a song, or a decoder behind: silence, as what isn't there
     for (int c = 0; c < 2; c++) {
         for (int j = 0; j < BEND_FFT; j++)
-            x[j] = (uint32_t)j < have || have > 0x80000000u ? st->ring[((at + j) % RING_FRAMES) * 2 + c] * bend_win[j] : 0;
+            x[j] = (uint32_t)j < have ? st->ring[((at + j) % RING_FRAMES) * 2 + c] * bend_win[j] : 0;
         rfft(x);
         float * last = bender.last[c], * sent = bender.sent[c];
         if (bender.fresh)
@@ -263,20 +266,27 @@ static void bend_frame(const Stream * st, uint32_t at, float ratio)
         else {
             for (int k = 0; k < BEND_BINS; k++)
                 power[k] = x[k * 2] * x[k * 2] + x[k * 2 + 1] * x[k * 2 + 1];
+            // from bin 1: a detuned bass's bottom string is down there, at 33 Hz. Below about 80 Hz a note's harmonics share
+            // a lobe and move by the same Hz, up to 2/3 of a semitone out at the top of the bar. Following each bin on its
+            // own tunes them and costs real bass stems 3-4 dB (tools/whammy.py), so they stay together
             int peaks = 0;
-            for (int k = 2; k < BEND_BINS - 2; k++)
-                if (power[k] > power[k - 1] && power[k] >= power[k + 1] && power[k] > power[k - 2] && power[k] >= power[k + 2]) {
+            for (int k = 1; k < BEND_BINS - 2; k++)
+                if (power[k] > power[k - 1] && power[k] >= power[k + 1] && (k < 2 || power[k] > power[k - 2]) && power[k] >= power[k + 2]) {
                     peak[peaks++] = k;
                     k += 2;
                 }
             memset(y, 0, sizeof(y));
+            if (!peaks)                 // a tone below every bin, or nothing: as it is
+                memcpy(y, x, sizeof(y));
             for (int i = 0, from = 0; i < peaks; i++) {
                 int p = peak[i], to = i + 1 < peaks ? (p + peak[i + 1] + 1) / 2 : BEND_BINS;
                 // what the peak really is, from how far its phase went since the last frame, and where that goes
                 float ph = fast_atan2(x[p * 2 + 1], x[p * 2]);
                 float d = wrap_pi(ph - fast_atan2(last[p * 2 + 1], last[p * 2]) - p / per);
-                float f = (p + d * per) * ratio;
-                int shift = (int)floorf(f - p + 0.5f), q = p + shift;
+                // the lobe moves by whole bins, as near as they get from the note's own frequency: taken from the peak's
+                // bin it could land most of a bin off, and the frames then cancel a little (2 dB at 82 Hz)
+                float was = p + d * per, f = was * ratio;
+                int shift = (int)floorf(f - was + 0.5f), q = p + shift;
                 // on from the phase its new bin went out with: rot takes the lobe there
                 float rot = 0;
                 if (q >= 0 && q < BEND_BINS)
@@ -325,7 +335,12 @@ static void mix_bent(Stream * st, uint32_t r, float * dst, int take, float v, fl
             memset(bender.ola, 0, sizeof(bender.ola));
         }
         if (bender.have == BEND_HOP) {
+            int64_t t0 = plat_now_us();
             bend_frame(st, at, powf(2, -bend * BEND_SEMITONES / 12));
+            int us = (int)(plat_now_us() - t0);
+            bend_us += us;
+            bend_worst = us > bend_worst ? us : bend_worst;
+            bend_frames++;
             bender.have = 0;
             if (bender.warm)
                 bender.warm--;
@@ -540,6 +555,7 @@ static void song_unload(void)
     pthread_mutex_lock(&mix_lock);
     song_active = false;
     song_playing = false;
+    anchor_jumps++;
     anchor_playing = false;
     last_time = -1e9;
     pthread_mutex_unlock(&mix_lock);
@@ -597,6 +613,8 @@ static void song_play(double from, double lead_in)
     }
     unlock_decoders();
     pthread_mutex_lock(&mix_lock);
+    anchor_jumps++;
+    bender.st = NULL;                   // a seek's a new start, even if it lands where the last frame would have gone on
     // frames count from the audio's start; the rings begin at `start`, and before it is the lead-in's silence
     ring_start = start;
     song_frame = start - (int64_t)(lead_in * AUDIO_RATE);
@@ -682,6 +700,7 @@ void audio_song_pause(bool pause)
 {
     double now = audio_song_time();
     pthread_mutex_lock(&mix_lock);
+    anchor_jumps++;
     song_playing = !pause;
     if (pause) {
         anchor_playing = false;
@@ -699,11 +718,22 @@ void audio_song_pause(bool pause)
 
 double audio_song_time(void)
 {
-    pthread_mutex_lock(&mix_lock);
-    int64_t af = anchor_frame, au = anchor_us;
-    bool playing = anchor_playing, from_output = anchor_from_output;
+    // The game asks every frame, and the mixer can hold this lock for all of a whammy frame: rather than wait, go on from what
+    // it said a moment ago. That's a buffer old at most, and the anchor is a time as well as a frame, so it still holds. Only
+    // after a seek or a pause does the wait matter
+    static int64_t af, au;
+    static bool playing, from_output;
+    static int seen = -1;
+    int jump = anchor_jumps;
+    if (jump != seen ? pthread_mutex_lock(&mix_lock) == 0 : pthread_mutex_trylock(&mix_lock) == 0) {
+        seen = jump;
+        af = anchor_frame;
+        au = anchor_us;
+        playing = anchor_playing;
+        from_output = anchor_from_output;
+        pthread_mutex_unlock(&mix_lock);
+    }
     double last = last_time;
-    pthread_mutex_unlock(&mix_lock);
     if (!playing)
         return last;
     double t = af / (double)AUDIO_RATE + (plat_now_us() - au) / 1e6 * song_speed;
@@ -729,6 +759,14 @@ bool audio_song_finished(void)
 bool audio_song_active(void)
 {
     return stream_count > 0 && !previewing;
+}
+
+void audio_log_cost(void)
+{
+    if (bend_frames)
+        plat_log("whammy: %d frames, avg %.0f us, slowest %d us; buffer %d us, underruns %d", bend_frames,
+                 (double)bend_us / bend_frames, bend_worst, 512 * 1000000 / AUDIO_RATE, underruns);
+    bend_us = bend_frames = bend_worst = 0;
 }
 
 void audio_stem_bend(int stem, float amount)

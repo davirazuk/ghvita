@@ -175,3 +175,11 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 ## Start-up (2026-10-31)
 - Hardware log before this: pictures 6.1 s of about 8 s. tools/rawtex.py and gfx.c load_raw cut the decoding. The vita time hasn't been measured yet: read "loaded: pictures" in log.txt.
 - library.bin: Song records keyed on the folder's time. On the Vita the listing has the time, so a known song costs no file access at all. Songs edited in place can keep the folder's time: the list menu's "Read the whole card again" drops the file.
+
+## Whammy (2026-10-31)
+- audio.c: a peak-locked phase vocoder, FFT 2048, overlap 4, a semitone at the bar's bottom as YARG sets it (pitch 2^(-bar/12), only while a sustain rings). Overlap 8 measures the same on real stems at twice the cost.
+- Below about 80 Hz a note's harmonics share a lobe and move by the same Hz: the fundamental is right, the ones above up to 2/3 of a semitone out at full bar. Tracking each bin tunes them and costs real bass stems 3-4 dB, so it isn't done.
+- whammybar.h is the input. The stick's rest is learnt while no sustain rings, and each rear finger is followed by id: a touch only counts once it's rubbing, so the fingers holding the Vita do nothing.
+- Lone-stem rule: a stem with over 85% of the heard power is never muted or bent, checked past the first 3 s.
+- The log's "whammy:" lines give the meter earned and each frame's cost on the hardware. A frame must stay well under the 10.7 ms buffer. Whether it does on a Vita has not been measured.
+- test/tools/whammy_main.c runs the real mixer on a raw stem (tools/whammy.py reads it), bar_main.c the input. In the PC build, GHV_FIXED + GHV_PACE with SDL's disk audio driver captures the game's own mix, and script line "bar N" holds the whammy.

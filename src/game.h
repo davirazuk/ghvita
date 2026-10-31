@@ -31,6 +31,7 @@ void game_practice(double from, double to, float speed);
 int game_update(const Pad * pad, uint32_t pressed);
 void game_draw(void);
 void game_pause(bool pause);
+void game_log_whammy(void);
 void game_restart(void);
 void game_stop(void);
 Result game_result(void);

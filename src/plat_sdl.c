@@ -9,6 +9,8 @@
 //                     <words...>" types into the keyboard (and enters it), "<frame> waitdl" holds the script (and
 //                     the fixed clock) until the downloader's search and downloads are done, "<frame> sleep <ms>"
 //                     waits that long in real time (a cover coming in)
+//                     "<frame> bar <0..1>" holds the whammy (the right stick) that far down
+//   GHV_PACE=1        with GHV_FIXED, frames take their real 1/60 s, so what SDL's disk driver writes is the game's mix
 //   GHV_FIXED=1       the clock runs at exactly 1/60 s per frame (and so does the song)
 //   GHV_SHOTS=dir     where shots go (PPM files)
 //   GHV_DATA=dir      the data folder (default ./data/), GHV_ASSETS=dir the assets (default ./assets/)
@@ -42,6 +44,8 @@ static int script_count, script_pos;
 static uint32_t script_buttons;
 static char pending_shot[128];          // taken from the next frame, before it's shown
 static bool script_touch;
+static float script_bar;
+static int64_t audio_frames;
 static float script_tx, script_ty;
 static bool script_overlay;
 static char script_text[256];
@@ -91,7 +95,7 @@ static void load_script(const char * path)
         while (strcmp(l.what, "text") != 0 && (tok = strtok(NULL, " \t\r\n"))) {
             if (strcmp(l.what, "shot") == 0 || strcmp(l.what, "overlay") == 0)
                 snprintf(l.name, sizeof(l.name), "%s", tok);
-            else if (strcmp(l.what, "suspend") == 0 || strcmp(l.what, "sleep") == 0)
+            else if (strcmp(l.what, "suspend") == 0 || strcmp(l.what, "sleep") == 0 || strcmp(l.what, "bar") == 0)
                 l.x = atof(tok);
             else if (strcmp(l.what, "touch") == 0) {
                 l.x = atof(tok);
@@ -202,6 +206,8 @@ bool plat_poll(Pad * pad)
             script_ty = l->y;
         } else if (strcmp(l->what, "untouch") == 0)
             script_touch = false;
+        else if (strcmp(l->what, "bar") == 0)
+            script_bar = (float)l->x;
         else if (strcmp(l->what, "shot") == 0)
             snprintf(pending_shot, sizeof(pending_shot), "%s", l->name);
         else if (strcmp(l->what, "suspend") == 0)
@@ -229,6 +235,8 @@ bool plat_poll(Pad * pad)
     }
     pad->overlay = script_overlay;
     pad->buttons |= script_buttons;
+    if (script_bar > 0)
+        pad->rx = 0.12f + 0.7f * script_bar;
     if (script_touch) {
         pad->ntouch = 1;
         pad->touch_x[0] = script_tx;
@@ -245,6 +253,16 @@ void plat_swap(void)
     }
     SDL_GL_SwapWindow(window);
     frame_number++;
+    if (fixed_clock && getenv("GHV_PACE")) {
+        // the sound card sets the speed: the fixed clock and the frames captured can't drift apart
+        static int64_t first_frame = -1, first_audio;
+        if (first_frame < 0) {
+            first_frame = frame_number;
+            first_audio = audio_frames;
+        }
+        while ((audio_frames - first_audio) * 60 < (frame_number - first_frame) * AUDIO_RATE)
+            SDL_Delay(1);
+    }
 }
 
 void plat_present(void)
@@ -271,7 +289,6 @@ const char * plat_asset_dir(void)
 
 static void (*audio_mix)(int16_t * out, int frames);
 static void (*audio_started)(int64_t frame, int64_t when_us);
-static int64_t audio_frames;
 
 static void audio_callback(void * user, Uint8 * stream, int len)
 {

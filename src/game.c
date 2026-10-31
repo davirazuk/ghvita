@@ -8,6 +8,7 @@
 #include "vocals.h"
 #include "res.h"
 #include "audio.h"
+#include "whammybar.h"
 
 #define WINDOW 0.095            // seconds early or late a note can still be hit (Warriors of Rock-ish lenient)
 #define Z_FAR 11.0f             // the highway's far end (the strikeline is at 0)
@@ -101,10 +102,9 @@ static struct {
     int vox_run;                        // phrases in a row sung well
     char popup[64];
     double popup_t;
-    float whammy, last_rx, last_ry;
+    float whammy, sp_from_bar;
+    Bar bar;
     float bend;                         // how far the whammy bends the part's stem
-    bool back_on;                       // a finger on the rear touchpad, where it landed and was
-    float back_from[2], back_last[2];
     float tilt_base[3];
     bool tilt_armed, tilt_init;
     int crowd_voice, crowd_mood;
@@ -1343,6 +1343,15 @@ void game_stop(void)
     tex_free(G.art);
     G.art = NULL;
     plat_set_perf(0);
+    game_log_whammy();
+}
+
+void game_log_whammy(void)
+{
+    if (G.sp_from_bar > 0)
+        plat_log("whammy: %.1f%% of the Star Power meter earned on sustains", G.sp_from_bar * 100);
+    G.sp_from_bar = 0;
+    audio_log_cost();
 }
 
 void game_pause(bool pause)
@@ -1893,6 +1902,7 @@ static void update_sustains(void)
             if (s->sp && G.whammy > 0.2f) {
                 bool was_ready = G.sp >= 0.5f;
                 G.sp += (float)dq * SP_PER_QUARTER;
+                G.sp_from_bar += (float)dq * SP_PER_QUARTER;
                 if (G.sp > 1)
                     G.sp = 1;
                 if (!was_ready && G.sp >= 0.5f && !G.sp_active) {
@@ -2072,24 +2082,12 @@ int game_update(const Pad * pad, uint32_t pressed)
         if (lanes_pressed & (1 << lane))
             G.pad_t[lane] = G.t;
 
-    // whammy: the right stick moving, or a finger rubbing the rear touchpad (a thumb on the frets can't reach the stick).
-    // Its way from where it landed is the bar, as far as the stick's from the middle
-    float dw = fabsf(pad->rx - G.last_rx) + fabsf(pad->ry - G.last_ry), bar = (hypotf(pad->rx, pad->ry) - 0.2f) / 0.7f;
-    bar = bar < 0 ? 0 : bar;            // a stick at rest isn't quite in the middle
-    G.last_rx = pad->rx;
-    G.last_ry = pad->ry;
-    if (pad->back_on) {
-        if (!G.back_on) {
-            G.back_from[0] = G.back_last[0] = pad->back_x;
-            G.back_from[1] = G.back_last[1] = pad->back_y;
-        }
-        dw += fabsf(pad->back_x - G.back_last[0]) + fabsf(pad->back_y - G.back_last[1]);
-        G.back_last[0] = pad->back_x;
-        G.back_last[1] = pad->back_y;
-        float rub = hypotf(pad->back_x - G.back_from[0], pad->back_y - G.back_from[1]) * 3;
-        bar = rub > bar ? rub : bar;
-    }
-    G.back_on = pad->back_on;
+    bool ringing = false;
+    for (int k = 0; k < MAX_SUS; k++)
+        ringing |= G.sus[k].note >= 0;
+    // whammy: the right stick, or a finger rubbing the rear touchpad (a thumb on the frets can't reach the stick)
+    float dw;
+    float bar = bar_read(&G.bar, pad->rx, pad->ry, pad->back_n, pad->back_id, pad->back_xs, pad->back_ys, ringing, &dw);
     if (G.autoplay) {
         bar = 0.5f + 0.5f * sinf((float)G.t * 30);
         dw = 1;
@@ -2098,9 +2096,6 @@ int game_update(const Pad * pad, uint32_t pressed)
     if (G.whammy > 1)
         G.whammy = 1;
     // the part's own stem bends while a sustain rings
-    bool ringing = false;
-    for (int k = 0; k < MAX_SUS; k++)
-        ringing |= G.sus[k].note >= 0;
     G.bend += ((ringing ? (bar > 1 ? 1 : bar) : 0) - G.bend) * 0.5f;
     if (!G.drums)
         audio_stem_bend(G.my_stem, G.bend > 0.003f && !stem_is_the_song() ? G.bend : 0);
