@@ -186,6 +186,13 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 - Drummer sheets rebaked with the cell bottom at -0.62 m: the old -0.35 cut the kit's feet. band.py and draw_band must agree. After a rebake: copy to backups/band_raw, band_ink.py, rawtex.py.
 - build-tools/ghvconv can be stale. To test a chart, put the raw folder in songs/ and let the game convert it.
 
+## Held frets, the board, the set (2026-10-31, evening)
+- Pressing a fret is the strum here, so a note on a fret already down has nothing to press. pull_off takes any note on a lift, anchored_note plays one as it reaches the line if its frets have been down since before the last note, that note was hit and on other frets, and nothing above is down. A held fret never plays a run of its own note. keepbot in the work dir plays with shared fingers kept down: Island in the Sun 542 to 594 of 595; mash still 0 stars.
+- SUS_SLACK 0.09 s, Easy chord sustains (default on).
+- Board near black, silver strings, strike bar (hot at top multiplier), cups 1.06 wide, held sustains glow, sparks. draw_rail_meter lies on the board at -HALF_W, in 3D.
+- Band: band_strip tips rigid from the feet (cardboard, keep it), floor silhouette, band_wander walks a new spot each 4 bars, solos come out front.
+- Failing: FAIL_FRAMES wind-down. Setlists in the Select menu (songs by number, cleared on a rescan or delete). Pause shows progress. Count-in option.
+
 ## Whammy (2026-10-31)
 - audio.c: a peak-locked phase vocoder, FFT 2048, overlap 4, a semitone at the bar's bottom as YARG sets it (pitch 2^(-bar/12), only while a sustain rings). Overlap 8 measures the same on real stems at twice the cost.
 - Below about 80 Hz a note's harmonics share a lobe and move by the same Hz: the fundamental is right, the ones above up to 2/3 of a semitone out at full bar. Tracking each bin tunes them and costs real bass stems 3-4 dB, so it isn't done.

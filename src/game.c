@@ -50,6 +50,7 @@ typedef struct {
     float pulse;
     bool was;
     float walk, front;          // metres along the stage they've wandered, 1 out front for a solo
+    float turn;                 // walking, a standee shows its edge a little
 } BandPart;
 
 typedef struct {
@@ -136,6 +137,7 @@ static struct {
     double show_t;
     struct { float x, y, z, vx, vy, vz, life; uint32_t col; } spark[SPARKS];
     int spark_next;
+    int count_done;
     int fail_frames;                    // the power-down after a failed song
     int sus_dropped, camera, mult_seen;
     bool big_section;                   // a chorus or a solo: the band goes harder
@@ -804,8 +806,9 @@ static void band_strip(Tex * t, float x, float bottom, float w, float h, const f
     gfx_tex(t);
     for (int i = 0; i < CUTS; i++) {
         float f0 = (float)i / CUTS, f1 = (float)(i + 1) / CUTS;
-        float x0 = x + lean * f0 * f0, x1 = x + lean * f1 * f1;
-        float y0 = bottom - h * f0 + dip * f0 * f0, y1 = bottom - h * f1 + dip * f1 * f1;
+        // cardboard: it tips from the feet in one piece, it doesn't bend
+        float x0 = x + lean * f0, x1 = x + lean * f1;
+        float y0 = bottom - h * f0 + dip * f0, y1 = bottom - h * f1 + dip * f1;
         float v0 = uv[3] + (uv[1] - uv[3]) * f0, v1 = uv[3] + (uv[1] - uv[3]) * f1;
         const float p[4][3] = {{x1 - w / 2, y1, 0}, {x1 + w / 2, y1, 0}, {x0 + w / 2, y0, 0}, {x0 - w / 2, y0, 0}};
         const float tc[4][2] = {{uv[0], v1}, {uv[2], v1}, {uv[2], v0}, {uv[0], v0}};
@@ -890,7 +893,7 @@ static void draw_band(double beat)
         int f = bp->cell;
         stage_point(&m[0], &m[1]);
         m[2] *= G.cam_z;
-        float s = m[2] / ppm, w = cw * s, h = ch * s;
+        float s = m[2] / ppm, w = cw * s * (1 - 0.16f * bp->turn), h = ch * s;
         // the kit stays where it stands; what's on their feet moves from the knees up, and a jump leaves the stage
         float bottom = m[1] - y0 * m[2] - (r ? hop : 0) * m[2];
         float dip = (r ? bob * (playing ? 1 : 0.5f) + bp->pulse * 0.05f : bob * 0.3f + bp->pulse * 0.035f) * m[2] +
@@ -899,6 +902,7 @@ static void draw_band(double beat)
         if (r >= 2) {
             // walking: the weight goes foot to foot. In a solo they rock back with it
             float going = fabsf(bp->walk - (((((uint32_t)(beat / 16) + 1) * 2654435761u * (r * 2 + 1)) >> 16 & 255) / 255.0f - 0.5f) * 1.3f) > 0.03f ? 1 : 0;
+            bp->turn += (going - bp->turn) * 0.12f;
             dip += going * fabsf(sinf((float)G.t * 9)) * 0.05f * m[2];
             lean += going * sinf((float)G.t * 9) * 0.035f * m[2];
             lean += bp->front * (i & 1 ? 0.14f : -0.14f) * m[2];
@@ -924,8 +928,11 @@ static void draw_band(double beat)
             if (bp->mic > 0)
                 band_frame(t, sing, cw, ch, m[0], bottom, w, h, lean, dip,
                            with_alpha(tint, bp->mic > 0.5f ? 1 : 2 * bp->mic));
-        } else
+        } else {
+            // the cut-out's own shape lying on the floor in front of it
+            band_frame(t, f, cw, ch, m[0], bottom, w, -h * 0.18f, -lean * 0.18f, 0, RGBA(6, 3, 12, 120));
             band_frame(t, f, cw, ch, m[0], bottom, w, h, lean, dip, tint);
+        }
         // Star Power: they burn with it
         if (G.sp_active) {
             gfx_blend(BLEND_ADD);
@@ -1251,6 +1258,7 @@ static void reset_play(void)
     G.sp_last_q = -1;
     G.failed = G.done = G.paused = false;
     G.fail_frames = 0;
+    G.count_done = 0;
     for (int i = 0; i < SPARKS; i++)
         G.spark[i].life = 0;
     G.popup[0] = 0;
@@ -1695,6 +1703,7 @@ static void hit_note(int i)
         snprintf(t, sizeof(t), "%d NOTE STREAK!", G.streak);
         popup(t);
         G.cheer = 1;
+        sound_play(res.snd[SND_CHEER1 + rand() % 3], cfg.crowd_vol * 0.05f, false);
         if (G.streak % 100 == 0)
             party();
     }
@@ -2076,6 +2085,8 @@ static void judge(uint32_t pressed_lanes, uint32_t let_go)
             if (total > 0) {
                 int pct = G.solo_hit[k] * 100 / total;
                 char t[48];
+                if (pct >= 90)
+                    sound_play(res.snd[SND_CHEER1 + rand() % 3], cfg.crowd_vol * 0.08f, false);
                 if (pct == 100)
                     snprintf(t, sizeof(t), "PERFECT SOLO! +%d", G.solo_hit[k] * 100);
                 else
@@ -2249,6 +2260,25 @@ static void update_vocals(void)
     rock_change((grade - 0.6f) * 0.2f);
 }
 
+// the drummer's sticks: four clicks up to the first note, when the lead-in has room
+static void count_in(void)
+{
+    const Part * p = G.part;
+    if (cfg.no_count_in || !p->note_count || G.count_done >= 4)
+        return;
+    double first = p->notes[0].time / 1e6;
+    double beat = 60.0 / ((chart_quarters(G.chart, first + 0.5) - chart_quarters(G.chart, first)) * 120 + 1e-6);
+    double at = first - (4 - G.count_done) * beat;
+    if (first > 60 || (G.count_done == 0 && at < -G.lead_in)) {
+        G.count_done = 4;
+        return;
+    }
+    if (G.t >= at) {
+        G.count_done++;
+        sound_play(res.snd[SND_DRUM_HAT], 0.55f, false);
+    }
+}
+
 int game_update(const Pad * pad, uint32_t pressed)
 {
     if (G.paused || !G.part)
@@ -2267,6 +2297,7 @@ int game_update(const Pad * pad, uint32_t pressed)
     }
     if (pressed & BTN_START)
         return GAME_PAUSE;
+    count_in();
 
     // lanes held and newly pressed: buttons, then the touch screen
     uint32_t held = 0, lanes_pressed = 0;
@@ -2367,8 +2398,11 @@ int game_update(const Pad * pad, uint32_t pressed)
             G.spark[i].vy -= 0.004f;
             G.spark[i].life -= 0.045f;
         }
-    if (multiplier() > G.mult_seen)
+    if (multiplier() > G.mult_seen) {
         G.mult_pop = 1;
+        if (G.t > 0)
+            sound_play(res.snd[SND_STAR], 0.3f, false);
+    }
     G.mult_seen = multiplier();
     G.mult_pop *= 0.88f;
     G.sp_flash *= 0.93f;
@@ -2489,7 +2523,15 @@ static void draw_highway(void)
         strip(x - 0.09f, x + 0.09f, 0.01f, rail, rc);
     }
     // the strike bar in front of the cups, rail to rail
-    flat(-HALF_W + 0.05f, HALF_W - 0.05f, -0.62f, -0.54f, 0.012f, bar_l, 0, 1, RGBA(235, 235, 245, 255), RGBA(235, 235, 245, 255));
+    uint32_t bar_c = RGBA(235, 235, 245, 255);
+    if (G.sp_active)
+        bar_c = RGBA(150, 220, 255, 255);
+    else if (multiplier() >= 4) {
+        // top multiplier: it runs hot, on the beat
+        int k = (int)(70 * expf(-(float)(beat - floor(beat)) * 4));
+        bar_c = RGBA(255, 190 + k / 2, 90 + k, 255);
+    }
+    flat(-HALF_W + 0.05f, HALF_W - 0.05f, -0.62f, -0.54f, 0.012f, bar_l, 0, 1, bar_c, bar_c);
 }
 
 static void draw_sustains(void)
@@ -2810,6 +2852,9 @@ static void draw_live_stats(void)
     char t[32];
     snprintf(t, sizeof(t), "%.1f%%", G.hits * 100.0 / judged);
     font_draw_shadow(res.ui, t, SCREEN_W - 16, 134, 26, WHITE, ALIGN_RIGHT);
+    const Sprite * star = atlas_get(res.hud, "hud_star_on");
+    for (int i = 0, n = stars_for(G.score); i < n; i++)
+        gfx_sprite(star, SCREEN_W - 34 - i * 20, 190, 18, 18, n >= 6 ? RGBA(255, 215, 90, 255) : WHITE);
     if (!G.misses && !G.overhits)
         font_draw_shadow(res.ui, "FC", SCREEN_W - 16, 162, 26, RGBA(255, 210, 60, 255), ALIGN_RIGHT);
 }

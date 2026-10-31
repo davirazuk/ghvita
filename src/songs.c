@@ -736,6 +736,8 @@ void config_load(void)
             cfg.no_bend = n != 0;
         else if (strcmp(k, "no_countdown") == 0)
             cfg.no_countdown = n != 0;
+        else if (strcmp(k, "no_count_in") == 0)
+            cfg.no_count_in = n != 0;
         else if (strcmp(k, "easy_sustains") == 0)
             cfg.easy_sustains = n != 0;
         else if (strcmp(k, "double_kick") == 0)
@@ -798,7 +800,8 @@ void config_save(void)
     fprintf(f, "no_popups = %d\ntiming_bar = %d\nlive_stats = %d\nvanish = %d\n"
                "no_miss_sound = %d\nno_rear_whammy = %d\nno_bend = %d\nno_countdown = %d\n",
             cfg.no_popups, cfg.timing_bar, cfg.live_stats, cfg.vanish, cfg.no_miss_sound, cfg.no_rear_whammy, cfg.no_bend, cfg.no_countdown);
-    fprintf(f, "double_kick = %d\nfive_pads = %d\neasy_sustains = %d\n", cfg.double_kick, cfg.five_pads, cfg.easy_sustains);
+    fprintf(f, "double_kick = %d\nfive_pads = %d\neasy_sustains = %d\nno_count_in = %d\n", cfg.double_kick, cfg.five_pads, cfg.easy_sustains,
+            cfg.no_count_in);
     fclose(f);
     remove(path);
     rename(tmp, path);

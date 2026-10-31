@@ -2180,7 +2180,7 @@ static void tour_screen(void)
 
 enum { O_SPEED, O_HIGHWAY, O_VENUE, O_BAND, O_SING, O_OFFSET, O_LAYOUT, O_DRUMKEYS, O_DRUMHITS, O_TILT, O_NOFAIL, O_LEFTY, O_MUSIC, O_SFX, O_CROWD, O_FPS,
        O_CAMERA, O_HWALPHA, O_VLIGHT, O_FLASH, O_POPUPS, O_TIMING, O_LIVE, O_VANISH, O_MISSSND, O_REAR, O_BEND, O_COUNTDOWN,
-       O_RESET, O_FIVEPADS, O_DOUBLEKICK, O_EASYSUS, O_COUNT };
+       O_RESET, O_FIVEPADS, O_DOUBLEKICK, O_EASYSUS, O_COUNTIN, O_COUNT };
 
 // the options by subject, L and R between them
 enum { OPT_TABS = 4, OPT_TAB_MAX = 11 };
@@ -2189,7 +2189,7 @@ static const int opt_tabs[OPT_TABS][OPT_TAB_MAX + 1] = {
     {O_SPEED, O_OFFSET, O_NOFAIL, O_EASYSUS, O_VANISH, O_COUNTDOWN, O_SING, O_RESET, -1},
     {O_LAYOUT, O_DRUMKEYS, O_FIVEPADS, O_DOUBLEKICK, O_LEFTY, O_TILT, O_REAR, -1},
     {O_HIGHWAY, O_HWALPHA, O_CAMERA, O_VENUE, O_VLIGHT, O_BAND, O_FLASH, O_POPUPS, O_TIMING, O_LIVE, O_FPS, -1},
-    {O_MUSIC, O_SFX, O_CROWD, O_DRUMHITS, O_MISSSND, O_BEND, -1},
+    {O_MUSIC, O_SFX, O_CROWD, O_COUNTIN, O_DRUMHITS, O_MISSSND, O_BEND, -1},
 };
 static int opt_tab, opt_top;
 static bool opt_reset_armed;
@@ -2250,6 +2250,7 @@ static void option_text(int i, char * name, char * value, size_t n)
     case O_BEND: strcpy(name, "Whammy bends the sound"); snprintf(value, n, "%s", cfg.no_bend ? "Off" : "On"); break;
     case O_COUNTDOWN: strcpy(name, "Countdown on resume"); snprintf(value, n, "%s", cfg.no_countdown ? "Off" : "On"); break;
     case O_FIVEPADS: strcpy(name, "Drum pads"); snprintf(value, n, "%s", cfg.five_pads ? "Five, as World Tour" : "As charted"); break;
+    case O_COUNTIN: strcpy(name, "Count-in"); snprintf(value, n, "%s", cfg.no_count_in ? "Off" : "On"); break;
     case O_EASYSUS: strcpy(name, "Easy chord sustains"); snprintf(value, n, "%s", cfg.easy_sustains ? "On" : "Off"); break;
     case O_DOUBLEKICK: strcpy(name, "Double kick"); snprintf(value, n, "%s", cfg.double_kick ? "On" : "Off"); break;
     case O_RESET: strcpy(name, "Reset settings"); snprintf(value, n, "%s", opt_reset_armed ? "Press X again" : ""); break;
@@ -2318,6 +2319,7 @@ static void change_option(int i, int d)
     case O_FIVEPADS: cfg.five_pads = !cfg.five_pads; break;
     case O_DOUBLEKICK: cfg.double_kick = !cfg.double_kick; break;
     case O_EASYSUS: cfg.easy_sustains = !cfg.easy_sustains; break;
+    case O_COUNTIN: cfg.no_count_in = !cfg.no_count_in; break;
     }
     audio_set_volumes(cfg.music_vol / 10.0f, cfg.sfx_vol / 10.0f);
 }
@@ -2435,6 +2437,7 @@ static void options_screen(void)
         "Lay 4-pad charts on World Tour's five pads: cymbals yellow and orange, toms blue and green.",
         "Expert+: play the extra kicks charted for a second foot, in new downloads that have them.",
         "One finger on a held chord keeps it ringing, so your thumbs are free for the next note.",
+        "Four clicks of the sticks before the first note, when there's room for them.",
     };
     char line[160];
     const char * text = about[opt];
