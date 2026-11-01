@@ -2841,7 +2841,8 @@ static void draw_gems(void)
         for (int l = 0; l < G.lanes; l++) {
             if (!(n->frets & (1 << l)))
                 continue;
-            int c = G.sp_active ? 5 : lane_art(l);
+            // Star Power's own cyan, for a phrase still in earn and while it burns: the beams below already are
+            int c = G.sp_active || star ? 5 : lane_art(l);
             // a cymbal lies wide and flat, its dome lit, so it can be told from a drum at a glance
             bool cym = G.drums && G.chart->version >= 2 && lane_cymbal(l, n->flags);
             const char * look = cym ? kinds[1] : kinds[kind];
