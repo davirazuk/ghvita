@@ -7,7 +7,8 @@ bool vox_load(const char * folder);         // false: no vocals.vhv (or nothing 
 void vox_free(void);                        // stops the mic too
 bool vox_exists(const char * folder);
 void vox_start(int diff, bool autoplay);    // from the top; autoplay sings by itself, through the same detector
-void vox_seek(double t);                    // the phrases before t are over, unsung and ungraded
+void vox_seek(double t);
+void vox_lyrics(double t);                    // the phrases before t are over, unsung and ungraded
 void vox_autoplay(bool on);
 bool vox_singing(double t);                 // in a phrase at time t (no vocals: true)
 double vox_end(void);                       // when the last note ends, seconds

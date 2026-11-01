@@ -444,6 +444,27 @@ static void draw_note(const VNote * n, int i, int ms, const VPhrase * scale)
     }
 }
 
+// the words along the top while you play something else: only around a line, with the next one under it. Nothing to do
+// with the mic
+void vox_lyrics(double t)
+{
+    if (!V.phrase_count || !V.notes)
+        return;
+    int ms = (int)(t * 1000), cur = -1;
+    for (int p = 0; p < V.phrase_count; p++)
+        if (ms < V.phrases[p].end + 500) {
+            cur = p;
+            break;
+        }
+    if (cur < 0 || ms < V.phrases[cur].start - 1500)
+        return;
+    gfx_blend(BLEND_ALPHA);
+    gfx_rect_grad(0, 0, SCREEN_W, 60, RGBA(0, 0, 0, 190), RGBA(0, 0, 0, 0));
+    draw_lyrics(&V.phrases[cur], ms, 6, LYRIC, true);
+    if (cur + 1 < V.phrase_count && V.phrases[cur + 1].start - V.phrases[cur].end < 1500)
+        draw_lyrics(&V.phrases[cur + 1], -1, 32, 15, false);
+}
+
 void vox_draw(double t)
 {
     int ms = (int)(t * 1000);

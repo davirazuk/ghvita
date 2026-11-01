@@ -141,7 +141,7 @@ def game_atlas():
     # now-bar cups: dark well, thick lane-coloured band, silver rim; the cap rises out of the well while held
     base = Image.open(G + '/NB_Cup1_Base_02.png').convert('RGBA')
     hollow = Image.open(G + '/NB_Cup1_Base_01.png').convert('RGBA')
-    hook = Image.open(G + '/nb_Cup1_Hook_01.png').convert('RGBA')
+    hook = Image.open(G + '/nb_Cup3_Hook_01.png').convert('RGBA')
     ring = Image.open(G + '/NB_Cup1_Ring_01.png').convert('RGBA')
     cap = Image.open(G + '/nb_cap1_base_01.png').convert('RGBA')
     cap_collar = Image.open(G + '/nb_cap1_collar_01.png').convert('RGBA')

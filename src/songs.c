@@ -685,6 +685,8 @@ void config_defaults(void)
     cfg.music_vol = 10;
     cfg.sfx_vol = 8;
     cfg.crowd_vol = 5;
+    cfg.flat_notes = true;
+    cfg.note_size = 1;
     cfg.last_diff = DIFF_MEDIUM;
 }
 
@@ -743,6 +745,24 @@ void config_load(void)
             cfg.stage_screens = n != 0;
         else if (strcmp(k, "cup_skin") == 0)
             cfg.cup_skin = n ? 1 : 0;
+        else if (strcmp(k, "no_lyrics") == 0)
+            cfg.no_lyrics = n != 0;
+        else if (strcmp(k, "auto_repress") == 0)
+            cfg.auto_repress = n != 0;
+        else if (strcmp(k, "flat_notes") == 0)
+            cfg.flat_notes = n != 0;
+        else if (strcmp(k, "no_wobble") == 0)
+            cfg.no_wobble = n != 0;
+        else if (strcmp(k, "fire") == 0)
+            cfg.fire = n < 0 ? 0 : n > 2 ? 2 : n;
+        else if (strcmp(k, "note_size") == 0)
+            cfg.note_size = n < 0 ? 0 : n > 2 ? 2 : n;
+        else if (strcmp(k, "no_crowd") == 0)
+            cfg.no_crowd = n != 0;
+        else if (strcmp(k, "no_vignette") == 0)
+            cfg.no_vignette = n != 0;
+        else if (strcmp(k, "no_menu_music") == 0)
+            cfg.no_menu_music = n != 0;
         else if (strcmp(k, "no_progress") == 0)
             cfg.no_progress = n != 0;
         else if (strcmp(k, "no_count_in") == 0)
@@ -809,7 +829,8 @@ void config_save(void)
                "last_song = %s\nvenue = %s\nno_band = %d\nsing_along = %d\ndrum_layout = %d\ndrum_hits = %d\n",
             cfg.speed, cfg.highway, cfg.offset_ms, cfg.layout, cfg.tilt, cfg.nofail, cfg.music_vol, cfg.sfx_vol,
             cfg.crowd_vol, cfg.lefty, cfg.show_fps, cfg.last_part, cfg.last_diff, cfg.sort, cfg.last_song, cfg.venue, cfg.no_band, cfg.sing_along, cfg.drum_layout, cfg.drum_hits);
-    fprintf(f, "board_look = 1\n");
+    fprintf(f, "board_look = 1\nno_lyrics = %d\nauto_repress = %d\nflat_notes = %d\nno_wobble = %d\nfire = %d\nnote_size = %d\nno_crowd = %d\nno_vignette = %d\nno_menu_music = %d\n",
+            cfg.no_lyrics, cfg.auto_repress, cfg.flat_notes, cfg.no_wobble, cfg.fire, cfg.note_size, cfg.no_crowd, cfg.no_vignette, cfg.no_menu_music);
     fprintf(f, "camera = %d\nhighway_alpha = %d\nvenue_light = %d\nflashes = %d\n",
             cfg.camera, cfg.highway_alpha, cfg.venue_light, cfg.flashes);
     fprintf(f, "no_popups = %d\ntiming_bar = %d\nlive_stats = %d\nvanish = %d\n"

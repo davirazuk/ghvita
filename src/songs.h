@@ -88,6 +88,15 @@ typedef struct {
     bool no_bend;           // the whammy earns Star Power but leaves the sound alone
     bool no_countdown;      // resume at once
     bool stage_screens;     // the song's cover on two screens over the stage
+    bool no_lyrics;         // no words along the top
+    bool auto_repress;      // a note on a fret still down plays by itself, whatever's above it
+    bool flat_notes;        // notes and cups lie on the neck
+    bool no_wobble;         // held notes stay straight
+    int fire;               // hit flames: 0 full, 1 small, 2 none
+    int note_size;          // 0 small, 1 normal, 2 big
+    bool no_crowd;          // no hands at the foot of the picture
+    bool no_vignette;       // no darkened edges
+    bool no_menu_music;     // silent menus
     int cup_skin;           // 0 World Tour's buttons, 1 the deep cups
     bool no_progress;       // no song progress line along the top
     bool no_count_in;       // no sticks before the first note

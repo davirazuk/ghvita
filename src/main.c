@@ -1,3 +1,4 @@
+#include <ctype.h>
 // GH Vita: the screens (title, song list, part and difficulty, the song, pause, results, options, calibration, the
 // song downloader)
 #include <math.h>
@@ -340,7 +341,7 @@ static bool menu_tune;
 static double menu_tune_end;
 static void menu_music(void)
 {
-    if (preview_for >= 0 || !songs_count())
+    if (preview_for >= 0 || !songs_count() || cfg.no_menu_music)
         return;
     if (menu_tune && audio_song_time() < menu_tune_end)
         return;
@@ -2212,16 +2213,18 @@ static void tour_screen(void)
 
 enum { O_SPEED, O_HIGHWAY, O_VENUE, O_BAND, O_SING, O_OFFSET, O_LAYOUT, O_DRUMKEYS, O_DRUMHITS, O_TILT, O_NOFAIL, O_LEFTY, O_MUSIC, O_SFX, O_CROWD, O_FPS,
        O_CAMERA, O_HWALPHA, O_VLIGHT, O_FLASH, O_POPUPS, O_TIMING, O_LIVE, O_VANISH, O_MISSSND, O_REAR, O_BEND, O_COUNTDOWN,
-       O_RESET, O_FIVEPADS, O_DOUBLEKICK, O_EASYSUS, O_COUNTIN, O_SCREENS, O_PROGRESS, O_CUPS, O_COUNT };
+       O_RESET, O_FIVEPADS, O_DOUBLEKICK, O_EASYSUS, O_COUNTIN, O_SCREENS, O_PROGRESS, O_CUPS, O_AUTOREPRESS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, O_CROWDHANDS, O_VIGNETTE, O_LYRICS, O_MENUMUSIC, O_COUNT };
 
 // the options by subject, L and R between them
-enum { OPT_TABS = 4, OPT_TAB_MAX = 15 };
-static const char * opt_tab_names[OPT_TABS] = {"GAME", "CONTROLS", "LOOK", "SOUND"};
+enum { OPT_TABS = 6, OPT_TAB_MAX = 9 };
+static const char * opt_tab_names[OPT_TABS] = {"GAME", "CONTROLS", "HIGHWAY", "STAGE", "SCREEN", "SOUND"};
 static const int opt_tabs[OPT_TABS][OPT_TAB_MAX + 1] = {
-    {O_SPEED, O_OFFSET, O_NOFAIL, O_EASYSUS, O_VANISH, O_COUNTDOWN, O_SING, O_RESET, -1},
+    {O_SPEED, O_OFFSET, O_NOFAIL, O_EASYSUS, O_AUTOREPRESS, O_VANISH, O_COUNTDOWN, O_SING, O_RESET, -1},
     {O_LAYOUT, O_DRUMKEYS, O_FIVEPADS, O_DOUBLEKICK, O_LEFTY, O_TILT, O_REAR, -1},
-    {O_HIGHWAY, O_HWALPHA, O_CAMERA, O_VENUE, O_VLIGHT, O_BAND, O_FLASH, O_POPUPS, O_CUPS, O_SCREENS, O_PROGRESS, O_TIMING, O_LIVE, O_FPS, -1},
-    {O_MUSIC, O_SFX, O_CROWD, O_COUNTIN, O_DRUMHITS, O_MISSSND, O_BEND, -1},
+    {O_HIGHWAY, O_HWALPHA, O_CAMERA, O_CUPS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, -1},
+    {O_VENUE, O_VLIGHT, O_BAND, O_CROWDHANDS, O_VIGNETTE, O_SCREENS, O_FLASH, -1},
+    {O_LYRICS, O_POPUPS, O_PROGRESS, O_TIMING, O_LIVE, O_FPS, -1},
+    {O_MUSIC, O_SFX, O_CROWD, O_MENUMUSIC, O_COUNTIN, O_DRUMHITS, O_MISSSND, O_BEND, -1},
 };
 static int opt_tab, opt_top;
 static bool opt_reset_armed;
@@ -2238,7 +2241,22 @@ static void option_text(int i, char * name, char * value, size_t n)
 {
     switch (i) {
     case O_SPEED: strcpy(name, "Note speed"); snprintf(value, n, "%d", cfg.speed); break;
-    case O_HIGHWAY: strcpy(name, "Highway"); snprintf(value, n, "%s", cfg.highway); break;
+    case O_HIGHWAY: {
+        strcpy(name, "Highway");
+        // gh3_judy reads Judy, GH3
+        char pretty[32];
+        const char * h = cfg.highway, * u = strchr(h, '_');
+        snprintf(pretty, sizeof(pretty), "%s", u ? u + 1 : h);
+        pretty[0] = (char)toupper((unsigned char)pretty[0]);
+        if (u)
+            snprintf(value, n, "%s, %.*s", pretty, (int)(u - h), h);
+        else
+            snprintf(value, n, "%s", pretty);
+        if (u)
+            for (char * v = value + strlen(pretty) + 2; *v; v++)
+                *v = (char)toupper((unsigned char)*v);
+        break;
+    }
     case O_VENUE:
         strcpy(name, "Venue");
         snprintf(value, n, "%s", strcmp(cfg.venue, "song") == 0 ? "A different one each song"
@@ -2283,6 +2301,15 @@ static void option_text(int i, char * name, char * value, size_t n)
     case O_COUNTDOWN: strcpy(name, "Countdown on resume"); snprintf(value, n, "%s", cfg.no_countdown ? "Off" : "On"); break;
     case O_FIVEPADS: strcpy(name, "Drum pads"); snprintf(value, n, "%s", cfg.five_pads ? "Five, as World Tour" : "As charted"); break;
     case O_SCREENS: strcpy(name, "Stage screens"); snprintf(value, n, "%s", cfg.stage_screens ? "On" : "Off"); break;
+    case O_AUTOREPRESS: strcpy(name, "Auto re-press"); snprintf(value, n, "%s", cfg.auto_repress ? "On" : "Off"); break;
+    case O_FLATNOTES: strcpy(name, "Notes"); snprintf(value, n, "%s", cfg.flat_notes ? "On the neck" : "Facing you"); break;
+    case O_NOTESIZE: strcpy(name, "Note size"); snprintf(value, n, "%s", cfg.note_size == 0 ? "Small" : cfg.note_size == 1 ? "Normal" : "Big"); break;
+    case O_WOBBLE: strcpy(name, "Sustain wobble"); snprintf(value, n, "%s", cfg.no_wobble ? "Off" : "On"); break;
+    case O_FIRE: strcpy(name, "Hit fire"); snprintf(value, n, "%s", cfg.fire == 0 ? "Full" : cfg.fire == 1 ? "Small" : "Off"); break;
+    case O_CROWDHANDS: strcpy(name, "Crowd hands"); snprintf(value, n, "%s", cfg.no_crowd ? "Off" : "On"); break;
+    case O_VIGNETTE: strcpy(name, "Dark edges"); snprintf(value, n, "%s", cfg.no_vignette ? "Off" : "On"); break;
+    case O_LYRICS: strcpy(name, "Lyrics"); snprintf(value, n, "%s", cfg.no_lyrics ? "Off" : "On"); break;
+    case O_MENUMUSIC: strcpy(name, "Menu music"); snprintf(value, n, "%s", cfg.no_menu_music ? "Off" : "On"); break;
     case O_CUPS: strcpy(name, "Cup skin"); snprintf(value, n, "%s", cfg.cup_skin ? "Deep" : "World Tour"); break;
     case O_PROGRESS: strcpy(name, "Progress line"); snprintf(value, n, "%s", cfg.no_progress ? "Off" : "On"); break;
     case O_COUNTIN: strcpy(name, "Count-in"); snprintf(value, n, "%s", cfg.no_count_in ? "Off" : "On"); break;
@@ -2358,6 +2385,19 @@ static void change_option(int i, int d)
     case O_SCREENS: cfg.stage_screens = !cfg.stage_screens; break;
     case O_PROGRESS: cfg.no_progress = !cfg.no_progress; break;
     case O_CUPS: cfg.cup_skin = !cfg.cup_skin; break;
+    case O_AUTOREPRESS: cfg.auto_repress = !cfg.auto_repress; break;
+    case O_FLATNOTES: cfg.flat_notes = !cfg.flat_notes; break;
+    case O_NOTESIZE: cfg.note_size = (cfg.note_size + d + 3) % 3; break;
+    case O_WOBBLE: cfg.no_wobble = !cfg.no_wobble; break;
+    case O_FIRE: cfg.fire = (cfg.fire + d + 3) % 3; break;
+    case O_CROWDHANDS: cfg.no_crowd = !cfg.no_crowd; break;
+    case O_VIGNETTE: cfg.no_vignette = !cfg.no_vignette; break;
+    case O_LYRICS: cfg.no_lyrics = !cfg.no_lyrics; break;
+    case O_MENUMUSIC:
+        cfg.no_menu_music = !cfg.no_menu_music;
+        if (cfg.no_menu_music)
+            menu_music_stop();
+        break;
     }
     audio_set_volumes(cfg.music_vol / 10.0f, cfg.sfx_vol / 10.0f);
 }
@@ -2415,10 +2455,10 @@ static void options_screen(void)
     panel(110, 96, 740, 356);
     for (int i = 0; i < OPT_TABS; i++) {
         float x = 110 + 740 * (i + 0.5f) / OPT_TABS;
-        font_draw(res.ui, opt_tab_names[i], x, 104, 26, i == opt_tab ? RGBA(255, 215, 110, 255) : RGBA(150, 145, 140, 255),
+        font_draw(res.ui, opt_tab_names[i], x, 106, 21, i == opt_tab ? RGBA(255, 215, 110, 255) : RGBA(150, 145, 140, 255),
                   ALIGN_CENTER);
         if (i == opt_tab)
-            gfx_rect(x - 60, 134, 120, 2, RGBA(255, 215, 110, 255));
+            gfx_rect(x - 50, 134, 100, 2, RGBA(255, 215, 110, 255));
     }
     enum { ROWS = 8 };
     if (menu_index < opt_top)
@@ -2435,7 +2475,14 @@ static void options_screen(void)
             gfx_sprite(atlas_get(res.hud, "wor_select"), 130, y - 3, 700, 38, WHITE);
         uint32_t c = on ? RGBA(255, 230, 150, 255) : RGBA(220, 215, 205, 255);
         font_draw(res.ui, name, 160, y + 1, 28, c, ALIGN_LEFT);
-        font_draw_fit(res.ui, value, 800, y + 1, 28, 380, c, ALIGN_RIGHT);
+        // the volumes and percentages show as a bar as well
+        int bar = i == O_MUSIC ? cfg.music_vol : i == O_SFX ? cfg.sfx_vol : i == O_CROWD ? cfg.crowd_vol
+                  : i == O_HWALPHA ? cfg.highway_alpha : i == O_VLIGHT ? cfg.venue_light : i == O_SPEED ? cfg.speed : -1;
+        if (bar >= 0) {
+            gfx_rect(560, y + 13, 170, 8, RGBA(0, 0, 0, 170));
+            gfx_rect(561, y + 14, 168 * bar / 10.0f, 6, on ? RGBA(255, 215, 110, 255) : RGBA(170, 150, 110, 255));
+        }
+        font_draw_fit(res.ui, value, 800, y + 1, 28, bar >= 0 ? 60 : 380, c, ALIGN_RIGHT);
     }
     // there's more above or below
     if (opt_top > 0)
@@ -2479,6 +2526,15 @@ static void options_screen(void)
         "The song's cover on two screens hanging over the stage.",
         "A thin line along the top edge showing how far through the song you are.",
         "The look of the cups at the end of the highway.",
+        "Green, red over it, green again: the green plays by itself even with red still down.",
+        "Lying on the neck, turned with the lanes, or standing up facing you.",
+        "How big the notes are.",
+        "Held notes shake on the highway.",
+        "The flames when you hit a note.",
+        "World Tour's hands at the foot of the picture.",
+        "Darkens the edges of the picture to keep your eye on the highway.",
+        "The song's words along the top while a line is sung. Sing along is the mic, separately.",
+        "One of your songs plays quietly in the menus.",
     };
     char line[160];
     const char * text = about[opt];
@@ -2492,8 +2548,8 @@ static void options_screen(void)
         text = cfg.drum_layout ? "Red L, Yellow D-pad, Blue Triangle, Green Circle, Kick R: snare and hi-hat on two hands"
                                : "Red Left, Yellow Up, Blue Triangle, Green Circle, Kick L, R, X or Down";
     font_draw_fit(res.ui, text, SCREEN_W / 2, 462, 22, 820, RGBA(200, 200, 200, 255), ALIGN_CENTER);
-    static const char * help[] = {"btn_left", "Change", "btn_l", "Tab", "btn_circle", "Done"};
-    help_bar(help, 6);
+    static const char * help[] = {"btn_left", "Change", "btn_l", "Tab", "btn_r", "Tab", "btn_circle", "Done"};
+    help_bar(help, 8);
     gfx_end();
 }
 

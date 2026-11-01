@@ -535,7 +535,7 @@ static void vignette(void)
 static void draw_crowd(double beat)
 {
     Tex * t = res.hands;
-    if (!t)
+    if (!t || cfg.no_crowd)
         return;
     float lit[3];
     float mood = G.rock < 0.33f ? 0.2f : 0.5f + G.rock * 0.5f;
@@ -719,7 +719,8 @@ static void draw_stage(void)
     draw_pyro();
     draw_crowd(beat);
     draw_party();
-    vignette();
+    if (!cfg.no_vignette)
+        vignette();
 }
 
 // The band on its marks: 48 frames over 4 beats (tools/band.py), locked to the song's beat; a tempo outside the 70-150
@@ -1725,11 +1726,12 @@ static void hit_note(int i)
         G.best_streak = G.streak;
     G.hit_pulse = 1;
     set_my_stem(1);
-    // a burst off a hit cup, once you've earned it: top multiplier or Star Power
-    for (int l = 0; l < G.lanes && (G.sp_active || multiplier() >= 4) && !(G.roll && G.roll[i]); l++) {
+    // a burst off each cup that was struck. A tremolo's gems that pass by themselves weren't, and a kick has no cup
+    bool struck = !(G.roll && G.roll[i]);
+    for (int l = 0; l < G.lanes && struck; l++) {
         if (!(n->frets & (1 << l)))
             continue;
-        for (int k = 0; k < 3; k++) {
+        for (int k = 0; k < 4; k++) {
             typeof(&G.spark[0]) sp = &G.spark[G.spark_next++ % SPARKS];
             float a = (rand() % 628) / 100.0f;
             sp->x = lane_x(l);
@@ -1744,7 +1746,7 @@ static void hit_note(int i)
     }
     G.score += 50 * frets_count(n->frets) * multiplier();
     rock_change(0.018f);
-    for (int l = 0; l < 6; l++)
+    for (int l = 0; l < 6 && struck; l++)
         if (n->frets & (1 << l))
             G.flame_t[l] = G.t;
     if (G.streak > 0 && G.streak % 50 == 0) {
@@ -2068,7 +2070,10 @@ static void anchored_note(void)
         if (G.sus[k].note >= 0)
             ringing |= G.sus[k].frets & 0x1f;
     uint32_t free = G.held & 0x1f & ~(ringing & ~(uint32_t)n->frets);
-    if ((free & n->frets) != n->frets || __builtin_clz(free) != __builtin_clz((uint32_t)n->frets))
+    if ((free & n->frets) != n->frets)
+        return;
+    // Auto re-press: the green plays even with the red still down on its way up
+    if (__builtin_clz(free) != __builtin_clz((uint32_t)n->frets) && !cfg.auto_repress)
         return;
     for (int l = 0; l < 5; l++)
         if ((n->frets & (1 << l)) && prev->frets == n->frets && G.press_t[l] <= prev->time / 1e6 + WINDOW * 0.5)
@@ -2183,8 +2188,8 @@ static void update_sustains(void)
                 }
             }
             for (int l = 0; l < 6; l++)
-                if (s->frets & (1 << l))
-                    G.flame_t[l] = G.t - 0.06;          // keep the flame going
+                if ((s->frets & (1 << l)) && (G.held & (1 << l)))
+                    G.flame_t[l] = G.t - 0.06;          // keep the flame going, on the frets really down
         }
         s->last_q = until;
         // let go with the note still ringing: as in YARG the part goes quiet until the next hit, but it's no miss.
@@ -2615,24 +2620,26 @@ static void draw_sustains(void)
                 col = lane_colour[5];
             if (dead)
                 col = RGBA(100, 100, 110, 200);
-            // whammy shakes it: the pieces joined up, every one the note's own colour
-            if (active)
+            uint32_t glow_c = col;
+            if (!dead && active)
+                col = RGBA(((col & 0xFF) + 255) / 2, (((col >> 8) & 0xFF) + 255) / 2, (((col >> 16) & 0xFF) + 255) / 2, 255);
+            // whammy shakes it
+            if (active) {
+                // a held note burns: a wide glow round the beam, breathing with the song's beat, in the note's own colour
+                float breath = 0.32f + 0.1f * sinf(t * 14);
+                gfx_blend(BLEND_ADD);
+                flat(x - w * 3.2f, x + w * 3.2f, z0, z_end, 0.011f, atlas_get(res.game, "glow"), 0, 1,
+                     with_alpha(glow_c, breath), with_alpha(glow_c, breath));
+                gfx_blend(BLEND_ALPHA);
                 w *= 1.3f;
-            float amp = active ? 0.03f + G.whammy * 0.12f : 0;
-            int pieces = active ? 40 : 1;
-            float a0 = fade(z0), wob0 = amp * sinf(z0 * 2.6f + t * 25);
-            gfx_tex(NULL);
+            }
+            int pieces = active ? 10 : 1;
+            float amp = active && !cfg.no_wobble ? 0.03f + G.whammy * 0.12f : 0;
             for (int s = 0; s < pieces; s++) {
                 float za = z0 + (z_end - z0) * s / pieces, zb = z0 + (z_end - z0) * (s + 1) / pieces;
-                float wob1 = amp * sinf(zb * 2.6f + t * 25), a1 = fade(zb);
-                uint32_t ca = with_alpha(col, a0 * (open ? 0.5f : 1)), cb = with_alpha(col, a1 * (open ? 0.5f : 1));
-                const float y = 0.012f;
-                const float p[4][3] = {{x - w + wob0, y, za}, {x + w + wob0, y, za}, {x + w + wob1, y, zb}, {x - w + wob1, y, zb}};
-                const float uv[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
-                const uint32_t c[4] = {ca, ca, cb, cb};
-                gfx_quad(p, uv, c);
-                wob0 = wob1;
-                a0 = a1;
+                float wob = amp * sinf(za * 2.6f + t * 25);
+                flat(x - w + wob, x + w + wob, za, zb, 0.012f, atlas_get(res.game, "sustain"), 0, 1, with_alpha(col, fade(za)),
+                     with_alpha(col, fade(zb)));
             }
         }
     }
@@ -2655,6 +2662,8 @@ static void draw_zones(void)
     }
 }
 
+static void lay(float x, float y, float z, float w, float d, const Sprite * s, uint32_t c);
+
 // is this lane ringing a sustain the player's still on?
 static bool lane_sustain(int l)
 {
@@ -2666,23 +2675,17 @@ static bool lane_sustain(int l)
 
 static void draw_cups(bool caps)
 {
-    const float cw = 1.02f, ch = cw / 2.26f;      // 128x64 art: on the board as wide as World Tour's, 2.9 to 1
+    const float cw = 1.02f, cup_d = 0.84f;        // 128x64 art lying on the neck: 2.9 to 1 on the screen, as World Tour's
     for (int l = 0; l < G.lanes; l++) {
         char name[16];
         float x = lane_x(l);
         if (!caps) {
             snprintf(name, sizeof(name), "%s_%d", cfg.cup_skin ? "cupdeep" : "cup", lane_art(l));
-            board(x, 0, -0.1f, cw, ch, atlas_get(res.game, name), 0, 0, 1, 1, WHITE);
+            lay(x, 0.015f, 0, cw, cup_d, atlas_get(res.game, name), WHITE);
         } else if (G.held & (1 << l)) {
-            // held, the cap fills the cup; just struck or ringing a sustain it stands up on its neck
-            double since = G.t - G.flame_t[l];
-            float up = since >= 0 && since < 0.1 ? 1 : 0;
-            if (lane_sustain(l))
-                up = 1;
+            // held, the cap stands in the cup, centred on it, raised a little
             snprintf(name, sizeof(name), "cap_%d", lane_art(l));
-            if (up > 0)
-                board(x, 0.02f, -0.1f, 0.62f, 0.2f, atlas_get(res.game, "now_neck"), 0, 0, 1, 1, RGBA(120, 120, 130, 255));
-            board(x, 0.02f + up * 0.16f, -0.1f, cw * 0.86f, ch * 0.86f, atlas_get(res.game, name), 0, 0, 1, 1, WHITE);
+            lay(x, 0.09f, 0, cw * 0.9f, cup_d * 0.9f, atlas_get(res.game, name), WHITE);
         }
     }
     // the open note's bar lights across the cups
@@ -2720,7 +2723,30 @@ static void draw_rail_meter(void)
     const float rope0 = -HALF_W + 0.04f, rope1 = -HALF_W - 0.2f, z0 = 0.55f, z1 = 3.0f;
     gfx_blend(BLEND_ALPHA);
     rail_quad(atlas_get(res.hud, "hud_rope"), rope0, rope1, z0, z1, true, false, WHITE);
-    int m = multiplier();
+    // five lamps on the board like the rope, each turned out from it so it stands square to the rail as the rail runs up
+    // the screen; the perspective leaves anything lying straight across the board sticking out in steps
+    int m = multiplier(), base_m = 1 + G.streak / 10, max_m = G.part_id == PART_BASS ? 6 : 4;
+    int lit = base_m >= max_m ? 5 : (G.streak % 10) / 2;
+    bool half = base_m < max_m && G.streak % 2;
+    const char * hue = G.sp_active ? "_blue" : base_m >= 3 ? "_purple" : base_m == 2 ? "_green" : "";
+    float gap = (z1 - z0) / 5;
+    for (int i = 0; i < 5; i++) {
+        char name[32];
+        int state = i < lit ? 2 : half && i == lit ? 1 : 0;
+        snprintf(name, sizeof(name), "hud_score_light_%d%s", state, hue);
+        const Sprite * s = atlas_get(res.hud, name);
+        float z = z0 + gap * (i + 0.5f), x = rope1 + 0.03f, y = 0.016f;
+        const float len = 0.36f, wide = gap * 0.46f, ox = -0.86f, oz = 0.5f;     // out over the stage and away from you
+        // cut end on the rope, round end out
+        const float p[4][3] = {{x + ox * len - oz * wide, y, z + oz * len + (-ox) * -wide},
+                               {x - oz * wide, y, z + ox * wide},
+                               {x + oz * wide, y, z - ox * wide},
+                               {x + ox * len + oz * wide, y, z + oz * len - ox * wide}};
+        const float uv[4][2] = {{s->u0, s->v0}, {s->u1, s->v0}, {s->u1, s->v1}, {s->u0, s->v1}};
+        const uint32_t c[4] = {WHITE, WHITE, WHITE, WHITE};
+        gfx_tex(s->tex);
+        gfx_quad(p, uv, c);
+    }
     if (m > 1) {
         char name[16];
         snprintf(name, sizeof(name), "mult_x%d", m);
@@ -2728,6 +2754,17 @@ static void draw_rail_meter(void)
         board(-HALF_W - 0.42f, 0.02f, z1 + 0.15f, 0.8f * pop, 0.4f * pop, atlas_get(res.game, name), 0, 0, 1, 1,
               G.sp_active ? RGBA(170, 225, 255, 255) : WHITE);
     }
+}
+
+// a note or cup lying on the neck: the art's foot nearest you, so the perspective turns it as it does the lanes. Off in
+// Options, they stand facing you
+static void lay(float x, float y, float z, float w, float d, const Sprite * s, uint32_t c)
+{
+    if (!cfg.flat_notes) {
+        board(x, y, z - d * 0.25f, w, d * 0.5f, s, 0, 0, 1, 1, c);
+        return;
+    }
+    flat(x + w / 2, x - w / 2, z - d / 2, z + d / 2, y, s, 1, 0, c, c);
 }
 
 static void draw_gems(void)
@@ -2784,9 +2821,12 @@ static void draw_gems(void)
                 snprintf(name, sizeof(name), "gem_%s_%d", look, c);
             // a soft shadow lifts the gem off the board art; a touch larger than before
             const Sprite * gem = atlas_get(res.game, name);
-            board(lane_x(l), 0, z - 0.07f, gw * 1.08f, gh * 1.08f, gem, 0, 0, 1, 1,
-                  with_alpha(RGBA(0, 0, 0, 255), a * 0.45f));
-            board(lane_x(l), 0, z, gw, gh, gem, 0, 0, 1, 1, ghost ? with_alpha(WHITE, a * 0.7f) : col);
+            static const float sizes[3] = {0.9f, 1, 1.14f};
+            float k = sizes[cfg.note_size];
+            gw *= k;
+            gh *= k;
+            lay(lane_x(l), 0.012f, z - 0.05f, gw * 1.08f, gh * 2.2f, gem, with_alpha(RGBA(0, 0, 0, 255), a * 0.45f));
+            lay(lane_x(l), 0.02f, z, gw, gh * 2.1f, gem, ghost ? with_alpha(WHITE, a * 0.7f) : col);
             if (accent) {
                 gfx_blend(BLEND_ADD);
                 board(lane_x(l), 0, z, gw * 1.3f, gh * 1.5f, atlas_get(res.game, "glow"), 0, 0, 1, 1, with_alpha(WHITE, a * 0.55f));
@@ -2804,21 +2844,21 @@ static void draw_flames(void)
     uint32_t fc = G.sp_active ? RGBA(120, 210, 255, 255) : RGBA(255, 190, 90, 255);
     for (int l = 0; l < 6; l++) {
         double since = G.t - G.flame_t[l];
-        if (since < 0 || since > 0.32)
+        if (since < 0 || since > 0.32 || cfg.fire == 2)
             continue;
         int frame = (int)(since / 0.32 * 16);
         if (frame > 15)
             frame = 15;
         float u0 = (frame % 4) * 0.25f, v0 = (frame / 4) * 0.25f;
         if (l == LANE_OPEN) {
-            for (int k = 0; k < G.lanes; k++)
-                board(lane_x(k), 0.05f, 0, 1.0f, 1.6f, flame, u0, v0, u0 + 0.25f, v0 + 0.25f,
-                      with_alpha(lane_colour[6], 0.8f));
+            // the kick lights its line across: fire on every cup read as notes hit that weren't
+            board(0, 0, -0.1f, 5.0f, 0.5f, glow, 0, 0, 1, 1, with_alpha(lane_colour[6], 0.8f * (1 - (float)since / 0.32f)));
             continue;
         }
         float x = lane_x(l);
-        board(x, 0.08f, 0, 1.1f, 2.1f, flame, u0, v0, u0 + 0.25f, v0 + 0.25f, fc);
-        board(x, -0.05f, 0, 1.2f, 0.6f, glow, 0, 0, 1, 1, with_alpha(lane_colour[lane_art(l)], 1 - (float)since / 0.32f));
+        float big = cfg.fire ? 0.6f : 1;
+        board(x, 0.03f, -0.42f * big, 1.1f * big, 2.1f * big, flame, u0, v0, u0 + 0.25f, v0 + 0.25f, fc);
+        lay(x, 0.05f, 0, 1.2f, 1.0f, glow, with_alpha(lane_colour[lane_art(l)], 1 - (float)since / 0.32f));
     }
     const Sprite * dot = atlas_get(res.game, "glow");
     for (int i = 0; i < SPARKS; i++)
@@ -2943,37 +2983,6 @@ static void draw_timing_bar(void)
         float off = G.hit_log[(G.hit_log_n - k) % HIT_LOG], d = fabsf(off);
         uint32_t c = d < 0.03f ? RGBA(120, 240, 140, 255) : d < 0.06f ? RGBA(250, 215, 90, 255) : RGBA(250, 130, 60, 255);
         gfx_rect(cx + off / (float)WINDOW * half - 1.5f, y - 5, 3, 14, fade_alpha(c, k == 1 ? 1 : 0.75f * (1 - (float)k / HIT_LOG)));
-    }
-}
-
-// the five lamps on the rope, drawn on the screen so each stands square to the rail as the rail runs there, not flat on
-// the board where the perspective leaves them sticking out sideways in steps
-static void draw_streak_lamps(void)
-{
-    int base_m = 1 + G.streak / 10, max_m = G.part_id == PART_BASS ? 6 : 4;
-    int lit = base_m >= max_m ? 5 : (G.streak % 10) / 2;
-    bool half = base_m < max_m && G.streak % 2;
-    const char * hue = G.sp_active ? "_blue" : base_m >= 3 ? "_purple" : base_m == 2 ? "_green" : "";
-    const float x = -HALF_W - 0.17f, z0 = 0.55f, z1 = 3.0f, gap = (z1 - z0) / 5;
-    float ax, ay, bx, by;
-    project(x, 0.015f, z0, &ax, &ay);
-    project(x, 0.015f, z1, &bx, &by);
-    float dx = bx - ax, dy = by - ay, len = sqrtf(dx * dx + dy * dy), nx = -dy / len, ny = dx / len;  // out over the stage
-    if (nx < 0) {
-        nx = -nx;
-        ny = -ny;
-    }
-    float angle = atan2f(-ny, -nx);     // the art's cut end, on its right, against the rope
-    for (int i = 0; i < 5; i++) {
-        char name[32];
-        int state = i < lit ? 2 : half && i == lit ? 1 : 0;
-        snprintf(name, sizeof(name), "hud_score_light_%d%s", state, hue);
-        const Sprite * s = atlas_get(res.hud, name);
-        float z = z0 + gap * (i + 0.5f), sx, sy, ex, ey;
-        project(x, 0.015f, z, &sx, &sy);
-        project(x - 0.3f, 0.015f, z, &ex, &ey);
-        float size = fabsf(ex - sx) * 1.05f;
-        sprite_rot(s, sx - nx * 2, sy - ny * 2, size, size, (float)s->w, s->h / 2.0f, angle, WHITE);
     }
 }
 
@@ -3151,9 +3160,6 @@ void game_draw(void)
         draw_flames();
         draw_rail_meter();
     }
-    gfx_2d();
-    if (!G.vocal)
-        draw_streak_lamps();
     draw_hud();
     if (G.fail_frames) {
         float f = (float)G.fail_frames / FAIL_FRAMES;
@@ -3164,5 +3170,7 @@ void game_draw(void)
     }
     if (G.sing)
         vox_draw(G.t);
+    else if (!cfg.no_lyrics)
+        vox_lyrics(G.t);
     gfx_end();
 }

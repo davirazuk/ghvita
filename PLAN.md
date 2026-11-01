@@ -193,6 +193,9 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 - Band: band_strip tips rigid from the feet (cardboard, keep it), floor silhouette, band_wander walks a new spot each 4 bars, solos come out front.
 - Failing: FAIL_FRAMES wind-down. Setlists in the Select menu (songs by number, cleared on a rescan or delete). Pause shows progress. Count-in option.
 
+## User's feedback on hardware (2026-10-31)
+- The user tests on the Vita and judges there. Sustain drawing and the held cap are the original look on purpose: don't restyle them. Sparks and fire on every struck note are wanted. Lamps stay 3D on the board. Lyrics are on without Sing along.
+
 ## Whammy (2026-10-31)
 - audio.c: a peak-locked phase vocoder, FFT 2048, overlap 4, a semitone at the bar's bottom as YARG sets it (pitch 2^(-bar/12), only while a sustain rings). Overlap 8 measures the same on real stems at twice the cost.
 - Below about 80 Hz a note's harmonics share a lobe and move by the same Hz: the fundamental is right, the ones above up to 2/3 of a semitone out at full bar. Tracking each bin tunes them and costs real bass stems 3-4 dB, so it isn't done.
