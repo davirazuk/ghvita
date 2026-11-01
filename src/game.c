@@ -2557,13 +2557,13 @@ static void draw_highway(void)
         float x = lane_x(l);
         double since = G.t - G.flame_t[l];
         float ring = since >= 0 && since < 0.25 ? 1 - (float)since / 0.25f : 0;
-        uint32_t c0 = ring > 0 ? lane_colour[lane_art(l)] : RGBA(215, 210, 220, 255);
-        const float seg = 0.42f, start = 0.34f, end = 8.0f;
-        float slide = fmodf(ring * 0.2f, seg);
+        uint32_t c0 = ring > 0 ? lane_colour[lane_art(l)] : RGBA(235, 232, 240, 255);
+        // thin wound steel as in the footage: a dark line under it, the coil tight, gone by the far end of the neck
+        const float seg = 0.24f, start = 0.3f, end = 8.4f, half = 0.034f + ring * 0.016f;
+        flat(x - 0.05f, x + 0.05f, start, end, 0.007f, NULL, 0, 1, RGBA(6, 4, 8, 120), RGBA(6, 4, 8, 0));
         for (float z = start; z < end; z += seg) {
             float a0 = 1 - (z - start) / (end - start), a1 = 1 - (z + seg - start) / (end - start);
-            flat(x - 0.075f, x + 0.075f, z - slide, z + seg - slide, 0.007f, NULL, 0, 1, RGBA(6, 4, 8, (int)(a0 * 110)), RGBA(6, 4, 8, (int)(a1 * 110)));
-            flat(x - 0.06f, x + 0.06f, z - slide, z + seg - slide, 0.008f, wire, 0, 1, with_alpha(c0, a0), with_alpha(c0, a1));
+            flat(x - half, x + half, z, z + seg, 0.008f, wire, 0, 1, with_alpha(c0, a0), with_alpha(c0, a1));
         }
     }
     // the rails: silver, glowing blue with Star Power ready or on, red on a miss
