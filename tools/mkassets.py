@@ -152,8 +152,10 @@ def lamp(state, hue):
     rgb = rgb + (255 - rgb) * spot * (0.55 if state < 2 else 0.8)
     alpha = np.where(body, 1.0 if state else 0.9, 0.0)
     if state == 2:
-        alpha = np.maximum(alpha, np.clip(1 - (d - r) / 5, 0, 1) ** 2 * 0.7)
-        rgb = np.where(body[..., None], rgb, hue[None, None])
+        # lit, the light eats the glass edge: no outline, a white middle going soft into the bloom
+        alpha = np.clip(1 - (d - r * 0.72) / (r * 0.46), 0, 1) ** 1.3
+        white = np.clip(1 - d / (r * 0.95), 0, 1)[..., None] ** 0.55
+        rgb = hue[None, None] * 0.55 + 115 + (140 - hue[None, None] * 0.55) * white
     a = np.dstack([np.clip(rgb, 0, 255), alpha * 255]).astype(np.uint8)
     return Image.fromarray(a, 'RGBA').resize((64, 64), Image.LANCZOS)
 

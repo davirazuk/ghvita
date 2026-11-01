@@ -2736,7 +2736,7 @@ static void draw_rail_meter(void)
         snprintf(name, sizeof(name), "lamp_%d%s", state, hue);
         const Sprite * s = atlas_get(res.game, name);
         // where its foot lies on the rope, on the screen; the dome stands square to that, as deep as it's wide
-        const float lz = z0 + 0.3f, lg = (z1 - 0.42f - lz) / 5, fx = rope1 + 0.06f;
+        const float lz = z0 + 0.3f, lg = (z1 - 0.42f - lz) / 5, fx = rope1 + 0.17f;
         const float a3[3] = {fx, 0.016f, lz + lg * (i - 0.02f)}, b3[3] = {fx, 0.016f, lz + lg * (i + 1.02f)};
         float a[2], b[2];
         project(a3[0], a3[1], a3[2], &a[0], &a[1]);
