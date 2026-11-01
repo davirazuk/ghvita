@@ -2227,13 +2227,13 @@ static void tour_screen(void)
 
 enum { O_SPEED, O_HIGHWAY, O_VENUE, O_BAND, O_SING, O_OFFSET, O_LAYOUT, O_DRUMKEYS, O_DRUMHITS, O_TILT, O_NOFAIL, O_LEFTY, O_MUSIC, O_SFX, O_CROWD, O_FPS,
        O_CAMERA, O_HWALPHA, O_VLIGHT, O_FLASH, O_POPUPS, O_TIMING, O_LIVE, O_VANISH, O_MISSSND, O_REAR, O_BEND, O_COUNTDOWN,
-       O_RESET, O_FIVEPADS, O_DOUBLEKICK, O_EASYSUS, O_COUNTIN, O_SCREENS, O_PROGRESS, O_CUPS, O_AUTOREPRESS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, O_CROWDHANDS, O_VIGNETTE, O_LYRICS, O_MENUMUSIC, O_SHRINKCHECK, O_COUNT };
+       O_RESET, O_FIVEPADS, O_DOUBLEKICK, O_EASYSUS, O_COUNTIN, O_SCREENS, O_PROGRESS, O_CUPS, O_AUTOREPRESS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, O_CROWDHANDS, O_VIGNETTE, O_LYRICS, O_MENUMUSIC, O_SINGSP, O_SHRINKCHECK, O_COUNT };
 
 // the options by subject, L and R between them
-enum { OPT_TABS = 6, OPT_TAB_MAX = 10 };
+enum { OPT_TABS = 6, OPT_TAB_MAX = 11 };
 static const char * opt_tab_names[OPT_TABS] = {"GAME", "CONTROLS", "HIGHWAY", "STAGE", "SCREEN", "SOUND"};
 static const int opt_tabs[OPT_TABS][OPT_TAB_MAX + 1] = {
-    {O_SPEED, O_OFFSET, O_NOFAIL, O_EASYSUS, O_AUTOREPRESS, O_VANISH, O_COUNTDOWN, O_SING, O_SHRINKCHECK, O_RESET, -1},
+    {O_SPEED, O_OFFSET, O_NOFAIL, O_EASYSUS, O_AUTOREPRESS, O_VANISH, O_COUNTDOWN, O_SING, O_SINGSP, O_SHRINKCHECK, O_RESET, -1},
     {O_LAYOUT, O_DRUMKEYS, O_FIVEPADS, O_DOUBLEKICK, O_LEFTY, O_TILT, O_REAR, -1},
     {O_HIGHWAY, O_HWALPHA, O_CAMERA, O_CUPS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, -1},
     {O_VENUE, O_VLIGHT, O_BAND, O_CROWDHANDS, O_VIGNETTE, O_SCREENS, O_FLASH, -1},
@@ -2242,11 +2242,16 @@ static const int opt_tabs[OPT_TABS][OPT_TAB_MAX + 1] = {
 };
 static int opt_tab, opt_top;
 static bool opt_reset_armed;
-// the shrink check: a song a frame, so the menu keeps moving
+// the shrink check: a song a frame, so the menu keeps moving. X then shrinks what the check found, on a background
+// thread; each song waits for a song being played to end before its files are swapped
 static int shrink_next = -1, shrink_left, shrink_seen;
+static volatile bool shrink_running;
+static volatile int shrink_done_n, shrink_all_n;
 
 static void shrink_check_step(void)
 {
+    if (shrink_running)
+        return;
     if (shrink_next < 0 || shrink_next >= songs_count()) {
         shrink_next = -1;
         return;
@@ -2257,6 +2262,27 @@ static void shrink_check_step(void)
         shrink_left++;
         plat_log("not shrunk: %s", so->folder);
     }
+}
+
+static int shrink_worker(void * arg)
+{
+    (void)arg;
+    int total = 0;
+    for (int i = 0; i < songs_count(); i++)
+        if (!shrink_done(songs_get(i)->folder))
+            total++;
+    shrink_all_n = total;
+    for (int i = 0; i < songs_count() && shrink_running; i++) {
+        const Song * so = songs_get(i);
+        if (shrink_done(so->folder))
+            continue;
+        shrink_song(so->folder);
+        shrink_done_n++;
+    }
+    plat_log("shrink: %d of %d songs shrunk", shrink_done_n, shrink_all_n);
+    shrink_running = false;
+    shrink_next = shrink_left = shrink_seen = 0;    // the walk counts them again from the top
+    return 0;
 }
 
 static int opt_tab_count(void)
@@ -2296,6 +2322,7 @@ static void option_text(int i, char * name, char * value, size_t n)
         break;
     case O_BAND: strcpy(name, "Band on stage"); snprintf(value, n, "%s", cfg.no_band ? "Off" : "On"); break;
     case O_SING: strcpy(name, "Sing along"); snprintf(value, n, "%s", cfg.sing_along ? "On" : "Off"); break;
+    case O_SINGSP: strcpy(name, "Singing starts Star Power"); snprintf(value, n, "%s", cfg.sing_sp ? "On" : "Off"); break;
     case O_OFFSET: strcpy(name, "Audio offset"); snprintf(value, n, "%+d ms", cfg.offset_ms); break;
     case O_LAYOUT: strcpy(name, "Buttons"); snprintf(value, n, "%s", cfg.layout ? "Layout B" : "Layout A"); break;
     case O_TILT: strcpy(name, "Tilt for Star Power"); snprintf(value, n, "%s", cfg.tilt ? "On" : "Off"); break;
@@ -2347,12 +2374,14 @@ static void option_text(int i, char * name, char * value, size_t n)
     case O_DOUBLEKICK: strcpy(name, "Double kick"); snprintf(value, n, "%s", cfg.double_kick ? "On" : "Off"); break;
     case O_SHRINKCHECK:
         strcpy(name, "Check songs are shrunk");
-        if (shrink_next >= 0)
+        if (shrink_running)
+            snprintf(value, n, "shrinking %d of %d", shrink_done_n, shrink_all_n);
+        else if (shrink_next >= 0)
             snprintf(value, n, "%d/%d", shrink_seen, songs_count());
         else if (!shrink_seen)
             snprintf(value, n, "Press X");
         else if (shrink_left)
-            snprintf(value, n, "%d of %d not", shrink_left, shrink_seen);
+            snprintf(value, n, "%d of %d not, X shrinks", shrink_left, shrink_seen);
         else
             snprintf(value, n, "All %d", shrink_seen);
         break;
@@ -2396,6 +2425,7 @@ static void change_option(int i, int d)
     }
     case O_BAND: cfg.no_band = !cfg.no_band; break;
     case O_SING: cfg.sing_along = !cfg.sing_along; break;
+    case O_SINGSP: cfg.sing_sp = !cfg.sing_sp; break;
     case O_OFFSET: cfg.offset_ms = clampi(cfg.offset_ms + d * 5, -300, 300); break;
     case O_LAYOUT: cfg.layout = !cfg.layout; break;
     case O_DRUMKEYS: cfg.drum_layout = !cfg.drum_layout; break;
@@ -2461,8 +2491,13 @@ static void options_screen(void)
     }
     shrink_check_step();
     int opt = opt_tabs[opt_tab][menu_index];
-    if (opt == O_SHRINKCHECK && (pressed & BTN_CROSS)) {
-        shrink_next = shrink_left = shrink_seen = 0;
+    if (opt == O_SHRINKCHECK && (pressed & BTN_CROSS) && !shrink_running) {
+        if (shrink_seen && shrink_left) {
+            shrink_done_n = 0;
+            shrink_running = true;
+            plat_thread("shrink", shrink_worker, NULL, PLAT_BACKGROUND);
+        } else
+            shrink_next = shrink_left = shrink_seen = 0;
         ui_sound(SND_UI_SELECT);
     }
     if (opt == O_RESET) {
@@ -2581,7 +2616,8 @@ static void options_screen(void)
         "Darkens the edges of the picture to keep your eye on the highway.",
         "The song's words along the top while a line is sung. Sing along is the mic, separately.",
         "One of your songs plays quietly in the menus.",
-        "X counts the songs whose audio isn't shrunk to Opus yet.",
+        "While Star Power is banked, singing a note in tune starts it, like YARG's voice-activated option.",
+        "X counts the songs whose audio isn't shrunk to Opus yet, then X shrinks them, right on the Vita.",
     };
     char line[160];
     const char * text = about[opt];

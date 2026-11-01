@@ -22,6 +22,7 @@ typedef struct {
     int t, len;                 // ms
     int pitch;                  // MIDI, 0: spoken, any voice counts
     bool hyphen;                // the next syllable joins this one
+    bool perc;                  // no lyric at all: the line's clap, any noise plays it
     char text[28];              // with the space after it
     float w;                    // its width at LYRIC, measured once
 } VNote;
@@ -46,9 +47,10 @@ static struct {
     float * marks;              // how each note went, 0..1
     float shown;                // the arrow's pitch on screen
     volatile float mic_pitch;   // MIDI, -1 nothing sung
-    volatile float mic_level;
+    volatile float mic_level;   // how loud the room is, for the claps
     volatile int target;        // autoplay's: what its voice sings
     volatile bool run, running, mic_ok, autoplay;
+    bool sung_now;              // a note is being sung right, this frame (singing starts Star Power with it)
 } V;
 
 float vox_pitch(const short * in, int n)
@@ -63,7 +65,8 @@ float vox_pitch(const short * in, int n)
     }
     const short * s = half;
     int w = n - TAU_MAX - 1;
-    if (w < 64 || sqrt(energy / n) < 160)
+    V.mic_level = sqrtf(energy / n);
+    if (w < 64 || V.mic_level < 160)
         return -1;
     // YIN: the difference of the signal with itself, normalised by its running mean
     float sum = 0, best = 0;
@@ -203,6 +206,7 @@ bool vox_load(const char * folder)
             }
             if (!strcmp(n->text, "+"))
                 n->text[0] = 0;
+            n->perc = !n->text[0] && !n->pitch;
             if (n->text[0] && !n->hyphen)
                 strncat(n->text, " ", sizeof(n->text) - strlen(n->text) - 1);
             n->w = font_width(res.ui, n->text, LYRIC);
@@ -341,6 +345,11 @@ bool vox_mic_ok(void)
     return V.mic_ok;
 }
 
+bool vox_sung_now(void)
+{
+    return V.sung_now;
+}
+
 // how far the voice is from the note in semitones: any octave counts
 static float off_pitch(float sung, int pitch)
 {
@@ -358,6 +367,7 @@ bool vox_update(double t, float * grade, float * points)
     V.last_t = t;
     if (dt < 0 || dt > 0.25)
         dt = 0;
+    V.sung_now = false;
     // the voice heard now began a window ago
     int ms = (int)(t * 1000) - 70;
     if (V.cur >= V.phrase_count) {
@@ -373,10 +383,18 @@ bool vox_update(double t, float * grade, float * points)
             continue;
         want = n->pitch ? n->pitch : 60;
         V.total += (float)dt;
-        bool ok = voice >= 0 && (!n->pitch || fabsf(off_pitch(voice, n->pitch)) <= V.tolerance);
+        // a clap is any noise at all, a spoken line any voice, the rest the note in tune
+        bool ok;
+        if (n->perc)
+            ok = voice >= 0 || V.mic_level > 600;
+        else if (!n->pitch)
+            ok = voice >= 0;
+        else
+            ok = voice >= 0 && fabsf(off_pitch(voice, n->pitch)) <= V.tolerance;
         if (ok) {
             V.sung += (float)dt;
             V.marks[i] += (float)dt / (n->len / 1000.0f);
+            V.sung_now = true;
         }
     }
     V.target = want;
@@ -433,6 +451,15 @@ static void draw_note(const VNote * n, int i, int ms, const VPhrase * scale)
     if (x > SCREEN_W || x + w < 0)
         return;
     w = w < 4 ? 4 : w;
+    if (n->perc) {
+        // a clap: a burst at the lane's centre that swells as it comes, green once any of it landed
+        float cx = x + w / 2, cy = LANE_Y + LANE_H / 2.0f;
+        float s = 7 + 3 * (0.5f + 0.5f * sinf(ms * 0.02f));
+        uint32_t c = V.marks[i] > 0.02f ? RGBA(120, 240, 170, 255) : RGBA(235, 245, 255, 255);
+        gfx_rect(cx - s, cy - 2, s * 2, 4, c);
+        gfx_rect(cx - 2, cy - s, 4, s * 2, c);
+        return;
+    }
     float y = n->pitch ? pitch_y((float)n->pitch, scale) : LANE_Y + LANE_H / 2.0f;
     uint32_t top = n->pitch ? RGBA(150, 240, 245, 245) : RGBA(205, 205, 215, 190);
     uint32_t low = n->pitch ? RGBA(20, 130, 150, 245) : RGBA(110, 110, 125, 190);

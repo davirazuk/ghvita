@@ -2283,7 +2283,11 @@ static bool both_cymbals(uint32_t lanes_pressed)
 static void update_vocals(void)
 {
     float grade, points;
-    if (!vox_update(G.t, &grade, &points))
+    bool phrase = vox_update(G.t, &grade, &points);
+    // YARG's voice-activated Star Power: with the meter half full, a note sung in tune is enough
+    if (cfg.sing_sp && !G.sp_active && G.sp >= 0.5f && vox_sung_now())
+        activate_sp();
+    if (!phrase)
         return;
     static const char * const words[5] = {"AWFUL", "MESSY", "OK", "STRONG", "AWESOME!"};
     int w = grade >= 1 ? 4 : grade >= 0.8f ? 3 : grade >= 0.6f ? 2 : grade >= 0.1f ? 1 : 0;

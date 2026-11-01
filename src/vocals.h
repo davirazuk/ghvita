@@ -16,6 +16,7 @@ double vox_base_score(void);                // the score with no multiplier
 int vox_phrases(void);
 // advances to time t. A phrase that ended is graded: its share sung (0..1) in *grade, its points in *points, true returned
 bool vox_update(double t, float * grade, float * points);
+bool vox_sung_now(void);                   // a note is being sung right (singing starts Star Power with it)
 void vox_draw(double t);
 // the worst the mic has been: false when it couldn't be opened
 bool vox_mic_ok(void);

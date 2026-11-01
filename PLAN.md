@@ -178,6 +178,8 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 
 ## Settings, career, drums (2026-10-31)
 - Options has tabs (L/R: GAME, CONTROLS, LOOK, SOUND; opt_tabs in main.c). New: highway camera (World Tour, Close, High), highway solid, venue brightness, screen flashes, streak messages, timing bar (under the highway, ticks by hit offset), live percent + FC, vanishing notes, wrong note sounds, rear pad whammy, whammy bends the sound, countdown on resume, Reset settings (keeps offset and last song).
+- "Check songs are shrunk" (O_SHRINKCHECK) now shrinks too: X counts, and with unshrunk songs found, X again runs them through shrink_song() on a background thread, a song at a time, waiting for any song being played to end. The menus' music is a preview, so it never blocks it.
+- Vocals, YARG extras: a vocal note with no lyric at all is the line's clap — drawn as a burst in the lane's centre, hit by any noise above the voice gate (mic_level in vox_pitch); "Singing starts Star Power" (sing_sp, default off, YARG's voice-activated option) lights the meter from a note sung in tune. Pitch windows stay wider than YARG's on purpose: the Vita's mic.
 - CAREER (career.c, career.txt): lifetime totals and a title by stars. Counts real plays only: no bot, no practice.
 - Results: Square jumps to practice on the toughest named section (not in the tour).
 - A sustain let go before its last 0.12 s mutes the part until the next hit, as in YARG. Not a miss.
