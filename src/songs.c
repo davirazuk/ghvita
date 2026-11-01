@@ -676,7 +676,7 @@ void config_defaults(void)
 {
     memset(&cfg, 0, sizeof(cfg));
     cfg.speed = 5;
-    snprintf(cfg.highway, sizeof(cfg.highway), "classic");
+    snprintf(cfg.highway, sizeof(cfg.highway), "judy");
     snprintf(cfg.venue, sizeof(cfg.venue), "song");
     cfg.tilt = true;
     cfg.easy_sustains = true;
@@ -691,6 +691,7 @@ void config_defaults(void)
 void config_load(void)
 {
     config_defaults();
+    int look = 0;
     char path[400];
     snprintf(path, sizeof(path), "%ssettings.txt", plat_data_dir());
     FILE * f = fopen(path, "r");
@@ -708,6 +709,8 @@ void config_load(void)
         int n = atoi(v);
         if (strcmp(k, "speed") == 0)
             cfg.speed = n < 1 ? 1 : n > 10 ? 10 : n;
+        else if (strcmp(k, "board_look") == 0)
+            look = n;
         else if (strcmp(k, "highway") == 0)
             snprintf(cfg.highway, sizeof(cfg.highway), "%s", v);
         else if (strcmp(k, "venue") == 0)
@@ -736,6 +739,12 @@ void config_load(void)
             cfg.no_bend = n != 0;
         else if (strcmp(k, "no_countdown") == 0)
             cfg.no_countdown = n != 0;
+        else if (strcmp(k, "stage_screens") == 0)
+            cfg.stage_screens = n != 0;
+        else if (strcmp(k, "cup_skin") == 0)
+            cfg.cup_skin = n ? 1 : 0;
+        else if (strcmp(k, "no_progress") == 0)
+            cfg.no_progress = n != 0;
         else if (strcmp(k, "no_count_in") == 0)
             cfg.no_count_in = n != 0;
         else if (strcmp(k, "easy_sustains") == 0)
@@ -780,6 +789,11 @@ void config_load(void)
             snprintf(cfg.last_song, sizeof(cfg.last_song), "%s", v);
     }
     fclose(f);
+    // a settings file from before the board matched World Tour still names the old default: move it on, once
+    if (!look && strcmp(cfg.highway, "classic") == 0)
+        snprintf(cfg.highway, sizeof(cfg.highway), "judy");
+    if (!look)
+        cfg.sing_along = false;     // lyrics over the top of the picture when you aren't singing: only if asked for
 }
 
 void config_save(void)
@@ -795,13 +809,14 @@ void config_save(void)
                "last_song = %s\nvenue = %s\nno_band = %d\nsing_along = %d\ndrum_layout = %d\ndrum_hits = %d\n",
             cfg.speed, cfg.highway, cfg.offset_ms, cfg.layout, cfg.tilt, cfg.nofail, cfg.music_vol, cfg.sfx_vol,
             cfg.crowd_vol, cfg.lefty, cfg.show_fps, cfg.last_part, cfg.last_diff, cfg.sort, cfg.last_song, cfg.venue, cfg.no_band, cfg.sing_along, cfg.drum_layout, cfg.drum_hits);
+    fprintf(f, "board_look = 1\n");
     fprintf(f, "camera = %d\nhighway_alpha = %d\nvenue_light = %d\nflashes = %d\n",
             cfg.camera, cfg.highway_alpha, cfg.venue_light, cfg.flashes);
     fprintf(f, "no_popups = %d\ntiming_bar = %d\nlive_stats = %d\nvanish = %d\n"
                "no_miss_sound = %d\nno_rear_whammy = %d\nno_bend = %d\nno_countdown = %d\n",
             cfg.no_popups, cfg.timing_bar, cfg.live_stats, cfg.vanish, cfg.no_miss_sound, cfg.no_rear_whammy, cfg.no_bend, cfg.no_countdown);
-    fprintf(f, "double_kick = %d\nfive_pads = %d\neasy_sustains = %d\nno_count_in = %d\n", cfg.double_kick, cfg.five_pads, cfg.easy_sustains,
-            cfg.no_count_in);
+    fprintf(f, "double_kick = %d\nfive_pads = %d\neasy_sustains = %d\nno_count_in = %d\nstage_screens = %d\nno_progress = %d\ncup_skin = %d\n", cfg.double_kick, cfg.five_pads, cfg.easy_sustains,
+            cfg.no_count_in, cfg.stage_screens, cfg.no_progress, cfg.cup_skin);
     fclose(f);
     remove(path);
     rename(tmp, path);

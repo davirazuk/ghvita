@@ -139,18 +139,27 @@ def game_atlas():
                 img = to_img(a)
             A.add('%s_%s' % (name, kind), img.resize((384, 48), Image.LANCZOS))
     # now-bar cups: dark well, thick lane-coloured band, silver rim; the cap rises out of the well while held
-    base = Image.open(G + '/NB_Cup1_Base_01.png').convert('RGBA')
+    base = Image.open(G + '/NB_Cup1_Base_02.png').convert('RGBA')
+    hollow = Image.open(G + '/NB_Cup1_Base_01.png').convert('RGBA')
+    hook = Image.open(G + '/nb_Cup1_Hook_01.png').convert('RGBA')
     ring = Image.open(G + '/NB_Cup1_Ring_01.png').convert('RGBA')
     cap = Image.open(G + '/nb_cap1_base_01.png').convert('RGBA')
     cap_collar = Image.open(G + '/nb_cap1_collar_01.png').convert('RGBA')
     for i, c in enumerate(LANES + [SP, OPEN]):
         cc = tuple(min(1.0, v * 1.3) for v in c)
         cup = Image.new('RGBA', base.size)
-        cup = scaled_on(cup, base, 0.9)
-        cup = scaled_on(cup, ring, 1.0, cc)
-        cup = scaled_on(cup, ring, 0.955, cc)
-        cup = scaled_on(cup, ring, 0.88, (0.9, 0.9, 0.93))
+        cup = scaled_on(cup, hook, 1.0)
+        band = tuple(v * 1.7 for v in cc)    # the ring art is mid grey: the footage's band is full colour
+        for k in (1.0, 0.975, 0.95, 0.925):
+            cup = scaled_on(cup, ring, k, band)
+        cup = scaled_on(cup, ring, 0.88, (1.25, 1.25, 1.3))
+        cup = scaled_on(cup, base, 0.82)
         A.add('cup_%d' % i, cup)
+        deep = scaled_on(Image.new('RGBA', hollow.size), hollow, 0.9)
+        deep = scaled_on(deep, ring, 1.0, cc)
+        deep = scaled_on(deep, ring, 0.955, cc)
+        deep = scaled_on(deep, ring, 0.88, (0.9, 0.9, 0.93))
+        A.add('cupdeep_%d' % i, deep)
         cp = Image.new('RGBA', cap.size)
         cp = scaled_on(cp, cap, 1.0, tuple(min(1.0, v * 1.15) for v in c))
         cp = scaled_on(cp, cap_collar, 1.0)
@@ -161,6 +170,7 @@ def game_atlas():
     A.add('bar_med', Image.open(G + '/FretBar_Med01_DNC.png'))
     A.add('bar_small', Image.open(G + '/FretBar_Small01_DNC.png'))
     A.add('rail', Image.open(G + '/sidebar01.png'))
+    A.add('now_neck', Image.open(G + '/NowBar_Neck.png'))
     A.add('string', Image.open(G + '/string.png'))
     A.add('lightning', Image.open(G + '/JOW_StarPower_TeslaLightning01.png'))
     A.add('sp_side', Image.open(G + '/starpower_sidegrade.png'))
@@ -200,6 +210,8 @@ def hud_atlas():
               'HUD_score_flash', 'hud_star_power_ready_glow', 'hud_seat', 'star_bulb_0',
               'hud_score_light_0', 'hud_score_light_1', 'hud_score_light_2',
               'hud_score_light_0_blue', 'hud_score_light_1_blue', 'hud_score_light_2_blue',
+              'hud_score_light_0_green', 'hud_score_light_1_green', 'hud_score_light_2_green',
+              'hud_score_light_0_purple', 'hud_score_light_1_purple', 'hud_score_light_2_purple',
               'HUD_score_nixie_1a', 'HUD_score_nixie_2a', 'HUD_score_nixie_2b', 'HUD_score_nixie_3a',
               'HUD_score_nixie_4a', 'HUD_score_nixie_4b', 'HUD_score_nixie_6b', 'HUD_score_nixie_8b',
               'list_bg', 'list_highlight', 'generic_title_bg', 'dialog_bg', 'helper_background',
@@ -211,6 +223,18 @@ def hud_atlas():
     for n in ('HUD_counter_body', 'HUD_RM_solo_bottom', 'multi_light_seat', 'star_light_seat_1g',
               'HUD_rock_tube_glow_fill', 'HUD_rock_tube_glow_fill_b'):
         A.add(n.lower(), Image.open(T + '/ghwt_hud/' + n + '.png'))
+    # the rope comes slanted for the screen; the board's perspective does that here, so stand it up
+    rope = np.asarray(Image.open(T + '/ghwt_hud_seat.png').convert('RGBA')).copy()
+    out = np.zeros((rope.shape[0], 16, 4), dtype=np.uint8)
+    for y in range(rope.shape[0]):
+        xs = np.nonzero(rope[y, :, 3] > 40)[0]
+        if len(xs):
+            c = int(xs.mean())
+            for x in range(16):
+                sx = c - 8 + x
+                if 0 <= sx < rope.shape[1]:
+                    out[y, x] = rope[y, sx]
+    A.add('hud_rope', Image.fromarray(out, 'RGBA'))
     for n in ('hud_star_on', 'hud_star_off', 'hud_star_gold'):
         A.add(n, Image.open(T + '/' + n + '.png'))
     A.add('wor_row', Image.open(T + '/wor_row.png').resize((768, 72), Image.LANCZOS))

@@ -26,7 +26,7 @@ typedef struct {
     Atlas * stage;                      // what the venue adds to its picture (tools/mkstage.py)
     Font * ui;
     Font * title;
-    Tex * bg_title, * bg_menu, * bg_results, * bg_stage, * logo, * vignette;
+    Tex * bg_title, * bg_menu, * bg_results, * bg_stage, * logo, * vignette, * hands;
     Sound * snd[SND_COUNT];
     int highway_count;
     char highway_names[24][32];

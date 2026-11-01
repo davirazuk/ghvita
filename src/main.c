@@ -59,8 +59,12 @@ static bool calib_playing;
 static char toast[160];
 static double toast_t = -10;
 
+static void menu_music_stop(void);
+
 static void go(int s)
 {
+    if (s != S_TITLE && s != S_MAIN)
+        menu_music_stop();
     screen = s;
     screen_t = now_s;
     screen_frames = 0;
@@ -331,9 +335,37 @@ static void update_screen(void)
     gfx_end();
 }
 
+// a song of yours plays low under the menus, from its chorus, the way the game has its own tracks there
+static bool menu_tune;
+static double menu_tune_end;
+static void menu_music(void)
+{
+    if (preview_for >= 0 || !songs_count())
+        return;
+    if (menu_tune && audio_song_time() < menu_tune_end)
+        return;
+    if (menu_tune)
+        audio_song_unload();
+    const Song * s = songs_get(rand() % songs_count());
+    const char * stems[MAX_STEMS];
+    for (int i = 0; i < s->stem_count; i++)
+        stems[i] = s->stems[i];
+    audio_preview(s->folder, stems, s->stem_count, s->preview_ms / 1000.0, 0.35f, 2.0f);
+    menu_tune_end = s->preview_ms / 1000.0 + 55;
+    menu_tune = true;
+}
+
+static void menu_music_stop(void)
+{
+    if (menu_tune)
+        audio_song_unload();
+    menu_tune = false;
+}
+
 static void main_menu(void)
 {
     static bool offered;
+    menu_music();
     update_check();
     const char * news = update_news();
     if (news)
@@ -2180,15 +2212,15 @@ static void tour_screen(void)
 
 enum { O_SPEED, O_HIGHWAY, O_VENUE, O_BAND, O_SING, O_OFFSET, O_LAYOUT, O_DRUMKEYS, O_DRUMHITS, O_TILT, O_NOFAIL, O_LEFTY, O_MUSIC, O_SFX, O_CROWD, O_FPS,
        O_CAMERA, O_HWALPHA, O_VLIGHT, O_FLASH, O_POPUPS, O_TIMING, O_LIVE, O_VANISH, O_MISSSND, O_REAR, O_BEND, O_COUNTDOWN,
-       O_RESET, O_FIVEPADS, O_DOUBLEKICK, O_EASYSUS, O_COUNTIN, O_COUNT };
+       O_RESET, O_FIVEPADS, O_DOUBLEKICK, O_EASYSUS, O_COUNTIN, O_SCREENS, O_PROGRESS, O_CUPS, O_COUNT };
 
 // the options by subject, L and R between them
-enum { OPT_TABS = 4, OPT_TAB_MAX = 11 };
+enum { OPT_TABS = 4, OPT_TAB_MAX = 15 };
 static const char * opt_tab_names[OPT_TABS] = {"GAME", "CONTROLS", "LOOK", "SOUND"};
 static const int opt_tabs[OPT_TABS][OPT_TAB_MAX + 1] = {
     {O_SPEED, O_OFFSET, O_NOFAIL, O_EASYSUS, O_VANISH, O_COUNTDOWN, O_SING, O_RESET, -1},
     {O_LAYOUT, O_DRUMKEYS, O_FIVEPADS, O_DOUBLEKICK, O_LEFTY, O_TILT, O_REAR, -1},
-    {O_HIGHWAY, O_HWALPHA, O_CAMERA, O_VENUE, O_VLIGHT, O_BAND, O_FLASH, O_POPUPS, O_TIMING, O_LIVE, O_FPS, -1},
+    {O_HIGHWAY, O_HWALPHA, O_CAMERA, O_VENUE, O_VLIGHT, O_BAND, O_FLASH, O_POPUPS, O_CUPS, O_SCREENS, O_PROGRESS, O_TIMING, O_LIVE, O_FPS, -1},
     {O_MUSIC, O_SFX, O_CROWD, O_COUNTIN, O_DRUMHITS, O_MISSSND, O_BEND, -1},
 };
 static int opt_tab, opt_top;
@@ -2250,6 +2282,9 @@ static void option_text(int i, char * name, char * value, size_t n)
     case O_BEND: strcpy(name, "Whammy bends the sound"); snprintf(value, n, "%s", cfg.no_bend ? "Off" : "On"); break;
     case O_COUNTDOWN: strcpy(name, "Countdown on resume"); snprintf(value, n, "%s", cfg.no_countdown ? "Off" : "On"); break;
     case O_FIVEPADS: strcpy(name, "Drum pads"); snprintf(value, n, "%s", cfg.five_pads ? "Five, as World Tour" : "As charted"); break;
+    case O_SCREENS: strcpy(name, "Stage screens"); snprintf(value, n, "%s", cfg.stage_screens ? "On" : "Off"); break;
+    case O_CUPS: strcpy(name, "Cup skin"); snprintf(value, n, "%s", cfg.cup_skin ? "Deep" : "World Tour"); break;
+    case O_PROGRESS: strcpy(name, "Progress line"); snprintf(value, n, "%s", cfg.no_progress ? "Off" : "On"); break;
     case O_COUNTIN: strcpy(name, "Count-in"); snprintf(value, n, "%s", cfg.no_count_in ? "Off" : "On"); break;
     case O_EASYSUS: strcpy(name, "Easy chord sustains"); snprintf(value, n, "%s", cfg.easy_sustains ? "On" : "Off"); break;
     case O_DOUBLEKICK: strcpy(name, "Double kick"); snprintf(value, n, "%s", cfg.double_kick ? "On" : "Off"); break;
@@ -2320,6 +2355,9 @@ static void change_option(int i, int d)
     case O_DOUBLEKICK: cfg.double_kick = !cfg.double_kick; break;
     case O_EASYSUS: cfg.easy_sustains = !cfg.easy_sustains; break;
     case O_COUNTIN: cfg.no_count_in = !cfg.no_count_in; break;
+    case O_SCREENS: cfg.stage_screens = !cfg.stage_screens; break;
+    case O_PROGRESS: cfg.no_progress = !cfg.no_progress; break;
+    case O_CUPS: cfg.cup_skin = !cfg.cup_skin; break;
     }
     audio_set_volumes(cfg.music_vol / 10.0f, cfg.sfx_vol / 10.0f);
 }
@@ -2438,6 +2476,9 @@ static void options_screen(void)
         "Expert+: play the extra kicks charted for a second foot, in new downloads that have them.",
         "One finger on a held chord keeps it ringing, so your thumbs are free for the next note.",
         "Four clicks of the sticks before the first note, when there's room for them.",
+        "The song's cover on two screens hanging over the stage.",
+        "A thin line along the top edge showing how far through the song you are.",
+        "The look of the cups at the end of the highway.",
     };
     char line[160];
     const char * text = about[opt];

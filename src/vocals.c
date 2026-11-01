@@ -428,8 +428,8 @@ static void draw_note(const VNote * n, int i, int ms, const VPhrase * scale)
         return;
     w = w < 4 ? 4 : w;
     float y = n->pitch ? pitch_y((float)n->pitch, scale) : LANE_Y + LANE_H / 2.0f;
-    uint32_t top = n->pitch ? RGBA(120, 225, 255, 240) : RGBA(205, 205, 215, 190);
-    uint32_t low = n->pitch ? RGBA(30, 125, 190, 240) : RGBA(110, 110, 125, 190);
+    uint32_t top = n->pitch ? RGBA(150, 240, 245, 245) : RGBA(205, 205, 215, 190);
+    uint32_t low = n->pitch ? RGBA(20, 130, 150, 245) : RGBA(110, 110, 125, 190);
     // a lozenge: the ends a pixel in
     gfx_rect_grad(x + 1, y - 5, w - 2, 10, top, low);
     gfx_rect(x, y - 4, 1, 8, low);
@@ -447,11 +447,17 @@ static void draw_note(const VNote * n, int i, int ms, const VPhrase * scale)
 void vox_draw(double t)
 {
     int ms = (int)(t * 1000);
+    // nothing to sing for a while: the strip leaves the top of the picture to the band
+    bool near = false;
+    for (int p = V.cur > 0 ? V.cur - 1 : 0; p < V.phrase_count && p < V.cur + 2; p++)
+        near |= ms > V.phrases[p].start - 2500 && ms < V.phrases[p].end + 800;
+    if (!near)
+        return;
     gfx_blend(BLEND_ALPHA);
-    gfx_rect_grad(0, LANE_Y, SCREEN_W, LANE_H, RGBA(14, 12, 30, 215), RGBA(6, 6, 14, 195));
-    gfx_rect_grad(0, LANE_Y + LANE_H, SCREEN_W, 50, RGBA(0, 0, 0, 175), RGBA(0, 0, 0, 0));
-    gfx_rect(0, LANE_Y, SCREEN_W, 1, RGBA(255, 190, 70, 200));
-    gfx_rect(0, LANE_Y + LANE_H - 1, SCREEN_W, 1, RGBA(255, 190, 70, 200));
+    // World Tour's strip: dark glass with a teal hairline, the words on a darker band under it
+    gfx_rect_grad(0, LANE_Y, SCREEN_W, LANE_H, RGBA(6, 16, 24, 190), RGBA(4, 10, 16, 170));
+    gfx_rect_grad(0, LANE_Y + LANE_H, SCREEN_W, 56, RGBA(0, 0, 0, 200), RGBA(0, 0, 0, 0));
+    gfx_rect(0, LANE_Y + LANE_H - 2, SCREEN_W, 2, RGBA(70, 200, 210, 170));
 
     int cur = V.cur < V.phrase_count ? V.cur : V.phrase_count - 1;
     const VPhrase * scale = &V.phrases[cur];        // the scale holds still inside a phrase

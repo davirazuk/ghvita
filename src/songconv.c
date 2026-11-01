@@ -490,6 +490,7 @@ typedef struct {
     VEC(int32_t) forced_ticks;      // .chart: the HOPO flip
     VEC(Forced) forced;             // .mid: forced on / off ranges
     VEC(TR) taps, sp, solos;
+    VEC(TR) accent, ghost;          // drums: hit hard, hit softly
     VEC(TR) kick2;                  // drums: where the kick is Expert+ (.mid note 95, .chart 32)
     VEC(TR) cyms;                   // .chart drums: tick, pad (0 yellow, 1 blue, 2 green) of a cymbal
 } Track;
@@ -530,6 +531,8 @@ static void parsed_free(Parsed * p)
             FREE(t->notes);
             FREE(t->forced_ticks);
             FREE(t->kick2);
+            FREE(t->accent);
+            FREE(t->ghost);
             FREE(t->forced);
             FREE(t->taps);
             FREE(t->sp);
@@ -667,6 +670,12 @@ static bool parse_chart(char * text, Parsed * P)
                     else if (a == 6) {
                         TR r = {tick, tick + 1};
                         PUSH(t->taps, r);
+                    } else if (a >= 34 && a <= 44 && a != 39 && pid == PART_DRUMS) {
+                        TR r = {tick, tick + 1};
+                        if (a <= 38)
+                            PUSH(t->accent, r);
+                        else
+                            PUSH(t->ghost, r);
                     } else if (a == 32 && pid == PART_DRUMS) {
                         // the kick played on green's note number
                         RawNote n = {tick, 0, 0, order++};
@@ -778,6 +787,7 @@ static bool parse_mid(const uint8_t * d, size_t n, const Source * src, Parsed * 
         memset(open, 0, sizeof(open));
         VEC(Sysex) sysex = {0};
         VEC(Name) texts = {0};
+        VEC(Pair) dyn = {0};        // .mid drums: tick, and pitch * 2 + 1 if soft
         bool bad = false, fail = false;
         while (o < end && !bad) {
             tick += (int32_t)vlq(d, end, &o, &bad);
@@ -844,6 +854,10 @@ static bool parse_mid(const uint8_t * d, size_t n, const Source * src, Parsed * 
                 }
                 uint8_t pitch = d[o] & 0x7F, vel = d[o + 1];
                 o += 2;
+                if (kind == 0x90 && (vel == 127 || vel == 1)) {
+                    Pair dp = {tick, pitch * 2 + (vel == 1)};
+                    PUSH(dyn, dp);
+                }
                 if (kind == 0x90 && vel > 0)
                     PUSH(open[pitch], tick);
                 else if (open[pitch].n) {
@@ -870,6 +884,7 @@ static bool parse_mid(const uint8_t * d, size_t n, const Source * src, Parsed * 
             for (int i = 0; i < texts.n; i++)
                 free(texts.v[i].text);
             FREE(texts);
+            FREE(dyn);
             FREE(sysex);
             return false;
         }
@@ -936,6 +951,20 @@ static bool parse_mid(const uint8_t * d, size_t n, const Source * src, Parsed * 
                     RawNote rn = {pr.s, fret, pr.e - pr.s, order++};
                     PUSH(t->notes, rn);
                 }
+            // velocities only mean something where the chart says so
+            bool dynamics = false;
+            for (int i = 0; pid == PART_DRUMS && i < texts.n; i++)
+                dynamics |= strstr(texts.v[i].text, "ENABLE_CHART_DYNAMICS") != NULL;
+            for (int i = 0; dynamics && i < dyn.n; i++) {
+                int pitch = dyn.v[i].e / 2;
+                if (pitch > base && pitch <= base + 5) {
+                    TR r = {dyn.v[i].s, dyn.v[i].s + 1};
+                    if (dyn.v[i].e & 1)
+                        PUSH(t->ghost, r);
+                    else
+                        PUSH(t->accent, r);
+                }
+            }
             // Expert only: 95 under its kick on 96
             if (pid == PART_DRUMS && di == DIFF_COUNT - 1)
                 for (int i = 0; i < notes[95].n; i++) {
@@ -1798,6 +1827,11 @@ bool songconv_install(const char * src_path, const char * dest_root, const ConvO
                         o->len = 0;
                         if (in_ranges(dt->kick2.v, dt->kick2.n, o->tick))
                             o->flags |= NOTE_KICK2;
+                        // on drums these two bits are how hard: no gem here is a hammer-on
+                        if (in_ranges(dt->accent.v, dt->accent.n, o->tick))
+                            o->flags |= F_HOPO;
+                        else if (in_ranges(dt->ghost.v, dt->ghost.n, o->tick))
+                            o->flags |= F_TAP;
                         // cymbals unless the chart says otherwise (.chart marks the cymbals instead). A chart that
                         // doesn't tell them apart: blue's a tom
                         for (int k = 0; k < 3; k++) {

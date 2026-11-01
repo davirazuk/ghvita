@@ -12,7 +12,7 @@
 
 #define WINDOW 0.095            // seconds early or late a note can still be hit (Warriors of Rock-ish lenient)
 #define Z_FAR 11.0f             // the highway's far end (the strikeline is at 0)
-#define Z_NEAR -1.3f
+#define Z_NEAR -3.4f
 #define HALF_W 2.62f            // half the highway's width (lanes are 1 wide)
 #define MAX_SUS 8
 #define MAX_ZONES 64
@@ -461,6 +461,13 @@ static void draw_rig(double beat, float pulse)
     for (int i = 0; i < LAMPS; i++)
         gfx_sprite(lamp, lamp_x[i] - 15 * G.cam_z, lamp_y[i] - 18 * G.cam_z, 30 * G.cam_z, 36 * G.cam_z,
                    col3(G.key_col, 1));
+    // the lamps flare with the kick
+    const Sprite * dot = atlas_get(res.stage, "dot");
+    float size = (46 + 54 * pulse * G.band_loud) * G.cam_z;
+    gfx_blend(BLEND_ADD);
+    for (int i = 0; i < LAMPS; i++)
+        gfx_sprite(dot, lamp_x[i] - size / 2, lamp_y[i] - size / 2 + 8, size, size, col3(G.key_col, 0.35f + 0.5f * pulse));
+    gfx_blend(BLEND_ALPHA);
 }
 
 // the air the lights go through
@@ -503,34 +510,57 @@ static void draw_screens(float pulse)
 
 // the crowd down front, seen from behind: everyone keeps their own time, and the better it goes the higher they jump and
 // the more hands go up
+// the edges of the picture fall away, so the eye stays on the highway and the band, more under Star Power's flood
+static void vignette(void)
+{
+    gfx_tex(NULL);
+    gfx_blend(BLEND_ALPHA);
+    int a = G.sp_active ? 170 : 125;
+    uint32_t edge = RGBA(4, 2, 10, a), none = RGBA(4, 2, 10, 0);
+    const float w = SCREEN_W, h = SCREEN_H, in = w * 0.2f;
+    const float uv[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+    const float l[4][3] = {{0, 0, 0}, {in, 0, 0}, {in, h, 0}, {0, h, 0}};
+    const uint32_t lc[4] = {edge, none, none, edge};
+    gfx_quad(l, uv, lc);
+    const float r[4][3] = {{w - in, 0, 0}, {w, 0, 0}, {w, h, 0}, {w - in, h, 0}};
+    const uint32_t rc[4] = {none, edge, edge, none};
+    gfx_quad(r, uv, rc);
+    const float top[4][3] = {{0, 0, 0}, {w, 0, 0}, {w, 100, 0}, {0, 100, 0}};
+    const uint32_t tc[4] = {edge, edge, none, none};
+    gfx_quad(top, uv, tc);
+}
+
+// World Tour's own sheet of raised hands, four rows of it, three depths across the foot of the picture. Dark against
+// the lights, more of them and higher the better it's going; they jump on the beat
 static void draw_crowd(double beat)
 {
-    float lit[3], pi = 3.14159265f;
-    for (int i = 0; i < 3; i++)
-        lit[i] = 0.25f + G.stage_col[i] * 0.45f + G.key_col[i] * 0.35f;
-    uint32_t col = col3(lit, 1);
-    float mood = G.rock < 0.33f ? 0.15f : 0.45f + G.rock * 0.8f;
-    for (int row = 0; row < 2; row++) {
-        int count = row ? 11 : 15;
-        float scale = row ? 1.3f : 1, base = row ? 582 : 548;
-        for (int i = 0; i < count; i++) {
-            uint32_t h = (uint32_t)(i * 2654435761u + row * 40503u);
-            int kind = (h >> 8) % 4;
-            if ((float)((h >> 12) % 100) / 100 < mood - (row ? 0.3f : 0))
-                kind += 4;
-            char name[8];
-            snprintf(name, sizeof(name), "fan_%d", kind);
-            const Sprite * s = atlas_get(res.stage, name);
-            float phase = (float)((h >> 16) & 7) / 8;
-            float hop = fabsf(sinf(pi * ((float)beat + phase * 0.35f))) * (3 + 19 * mood * (0.3f + 0.7f * G.band_loud));
-            float w = s->w * scale, hh = s->h * scale;
-            float x = (i + 0.5f) * (980.0f / count) - 10 - w / 2 + (float)((h >> 20) % 24) - 12;
-            gfx_sprite(s, x, base - hh - hop * scale, w, hh, col);
-        }
+    Tex * t = res.hands;
+    if (!t)
+        return;
+    float lit[3];
+    float mood = G.rock < 0.33f ? 0.2f : 0.5f + G.rock * 0.5f;
+    if (G.sp_active)
+        mood = 1;
+    gfx_tex(t);
+    gfx_blend(BLEND_ALPHA);
+    for (int row = 0; row < 3; row++) {
+        float k = 0.4f + row * 0.3f;        // nearer rows are darker: the light's behind them
+        for (int i = 0; i < 3; i++)
+            lit[i] = (0.03f + G.stage_col[i] * 0.05f + G.key_col[i] * 0.14f) * (1.1f - k);
+        uint32_t col = col3(lit, 1);
+        float bounce = fabsf(sinf(3.14159265f * ((float)beat + row * 0.3f)));
+        float h = 112 + row * 22, top = 544 - h * (0.62f + 0.38f * mood) + 14 * row - bounce * 14 * mood;
+        int sheet = ((int)floor(beat * 0.5) + row) & 3;
+        float x = -40 + sinf((float)G.t * (0.3f + row * 0.1f) + row) * 16 + row * 90.0f;
+        const float wid = 1100;
+        float v0 = sheet * 0.25f + 0.01f, v1 = v0 + 0.23f;
+        const float p[4][3] = {{x, top, 0}, {x + wid, top, 0}, {x + wid, top + h, 0}, {x, top + h, 0}};
+        const float uv[4][2] = {{0, v0}, {1, v0}, {1, v1}, {0, v1}};
+        const uint32_t c[4] = {col, col, col, col};
+        gfx_quad(p, uv, c);
     }
 }
 
-// confetti and stars, on Star Power, a chorus, a big streak and the last chord
 static void draw_party(void)
 {
     double since = G.t - G.party_t;
@@ -672,21 +702,24 @@ static void draw_stage(void)
     if (G.t > G.last_note_end && G.t > 0 && !G.end_party) {
         G.end_party = true;
         party();
+        sound_play(res.snd[SND_APPLAUSE], cfg.crowd_vol * 0.1f, false);
     }
     stage_layer(G.venue, col3(G.stage_col, 1));
     // a whole screen of blending: not when it would add nothing
     if (G.venue_lights && fmaxf(G.light_col[0], fmaxf(G.light_col[1], G.light_col[2])) > 0.02f) {
         gfx_blend(BLEND_ADD);
-        stage_layer(G.venue_lights, col3(G.light_col, 1));
+        stage_layer(G.venue_lights, col3(G.light_col, 0.72f));
         gfx_blend(BLEND_ALPHA);
     }
-    draw_screens(pulse);
+    if (cfg.stage_screens)
+        draw_screens(pulse);
     draw_haze();
     draw_band(beat);
     draw_rig(beat, pulse);
     draw_pyro();
     draw_crowd(beat);
     draw_party();
+    vignette();
 }
 
 // The band on its marks: 48 frames over 4 beats (tools/band.py), locked to the song's beat; a tempo outside the 70-150
@@ -795,25 +828,27 @@ static bool band_playing(int r, double beat_len)
     return G.t > 0 && (G.t < b->held + beat_len || next - G.t < beat_len * 0.5);
 }
 
-// A member's cell as a strip that bends: the feet stay on their mark (and the kit under the drummer), and from there up
+// A member's cell as a stiff card: the feet stay on their mark (and the kit under the drummer), and from there up
 // the body leans by `lean` and dips by `dip` (pixels, at the top of the cell), more the higher up: a spine and a pair of
 // knees, for four more quads than a flat picture.
 static void band_strip(Tex * t, float x, float bottom, float w, float h, const float uv[4], float lean, float dip,
                        uint32_t tint)
 {
-    enum { CUTS = 3 };
+    // a stiff card turns about its feet: a true rotation, nothing sheared
     const uint32_t c[4] = {tint, tint, tint, tint};
-    gfx_tex(t);
-    for (int i = 0; i < CUTS; i++) {
-        float f0 = (float)i / CUTS, f1 = (float)(i + 1) / CUTS;
-        // cardboard: it tips from the feet in one piece, it doesn't bend
-        float x0 = x + lean * f0, x1 = x + lean * f1;
-        float y0 = bottom - h * f0 + dip * f0, y1 = bottom - h * f1 + dip * f1;
-        float v0 = uv[3] + (uv[1] - uv[3]) * f0, v1 = uv[3] + (uv[1] - uv[3]) * f1;
-        const float p[4][3] = {{x1 - w / 2, y1, 0}, {x1 + w / 2, y1, 0}, {x0 + w / 2, y0, 0}, {x0 - w / 2, y0, 0}};
-        const float tc[4][2] = {{uv[0], v1}, {uv[2], v1}, {uv[2], v0}, {uv[0], v0}};
-        gfx_quad(p, tc, c);
+    float a = h != 0 ? atan2f(lean, fabsf(h)) : 0, cs = cosf(a), sn = sinf(a);
+    float top = h - dip, sign = h < 0 ? -1.0f : 1.0f;
+    float bl[2] = {-w / 2, 0}, br[2] = {w / 2, 0}, tr[2] = {w / 2, -top}, tl[2] = {-w / 2, -top};
+    const float * q[4] = {tl, tr, br, bl};
+    float p[4][3];
+    for (int i = 0; i < 4; i++) {
+        p[i][0] = x + q[i][0] * cs - q[i][1] * sn * sign;
+        p[i][1] = bottom + q[i][0] * sn * sign + q[i][1] * cs;
+        p[i][2] = 0;
     }
+    const float tc[4][2] = {{uv[0], uv[1]}, {uv[2], uv[1]}, {uv[2], uv[3]}, {uv[0], uv[3]}};
+    gfx_tex(t);
+    gfx_quad(p, tc, c);
 }
 
 static void band_frame(Tex * t, int f, float cw, float ch, float x, float bottom, float w, float h, float lean,
@@ -929,7 +964,13 @@ static void draw_band(double beat)
                 band_frame(t, sing, cw, ch, m[0], bottom, w, h, lean, dip,
                            with_alpha(tint, bp->mic > 0.5f ? 1 : 2 * bp->mic));
         } else {
-            // the cut-out's own shape lying on the floor in front of it
+            // a pool of the stage's light at their feet, the one the camera's on brighter, and the cut-out's own shape
+            // lying on the floor in front of it
+            const Sprite * pool = atlas_get(res.stage, "dot");
+            float pw = w * 1.5f, ph = pw * 0.26f;
+            gfx_blend(BLEND_ADD);
+            gfx_sprite(pool, m[0] - pw / 2, bottom - ph / 2, pw, ph, col3(G.key_col, G.focus == r ? 0.75f : 0.3f + 0.2f * G.band_loud));
+            gfx_blend(BLEND_ALPHA);
             band_frame(t, f, cw, ch, m[0], bottom, w, -h * 0.18f, -lean * 0.18f, 0, RGBA(6, 3, 12, 120));
             band_frame(t, f, cw, ch, m[0], bottom, w, h, lean, dip, tint);
         }
@@ -1027,8 +1068,8 @@ static void project(float x, float y, float z, float * sx, float * sy)
 static void setup_camera(void)
 {
     // World Tour's, then lower and nearer for bigger gems, then high up to read further ahead
-    static const float eyes[3][3] = {{0, 4.0f, -5.2f}, {0, 3.5f, -4.9f}, {0, 5.0f, -5.6f}};
-    static const float ats[3] = {4.8f, 3.9f, 5.6f};
+    static const float eyes[3][3] = {{0, 4.7f, -6.5f}, {0, 4.0f, -5.5f}, {0, 5.7f, -6.9f}};
+    static const float ats[3] = {4.6f, 3.9f, 5.4f};
     G.camera = cfg.camera;
     const float * eye = eyes[cfg.camera], at[3] = {0, 0, ats[cfg.camera]}, up[3] = {0, 1, 0};
     mat_perspective(G.proj, 40, (float)SCREEN_W / SCREEN_H, 0.5f, 60);
@@ -1598,7 +1639,7 @@ static void set_crowd(void)
     G.crowd_mood = mood;
     if (G.crowd_voice >= 0)
         sound_stop(G.crowd_voice);
-    G.crowd_voice = sound_play(res.snd[mood], cfg.crowd_vol * 0.03f, true);
+    G.crowd_voice = sound_play(res.snd[mood], cfg.crowd_vol * 0.04f, true);
 }
 
 static void rock_change(float d)
@@ -1652,6 +1693,14 @@ static void mark_judged(uint8_t frets)
 static void miss_note(int i)
 {
     G.state[i] = MISSED;
+#ifndef __vita__
+    {
+        const Note * n = &G.part->notes[i];
+        if (getenv("GHV_MISSLOG"))
+            plat_log("MISS t=%.3f frets=%02x flags=%02x prev=%.3f prevf=%02x prevstate=%d held=%02x", n->time / 1e6, n->frets, n->flags,
+                     i ? G.part->notes[i - 1].time / 1e6 : 0, i ? G.part->notes[i - 1].frets : 0, i ? G.state[i - 1] : -1, G.held);
+    }
+#endif
     mark_judged(G.part->notes[i].frets);
     G.misses++;
     break_streak();
@@ -1676,11 +1725,11 @@ static void hit_note(int i)
         G.best_streak = G.streak;
     G.hit_pulse = 1;
     set_my_stem(1);
-    // a burst off each cup that was hit
-    for (int l = 0; l < G.lanes; l++) {
+    // a burst off a hit cup, once you've earned it: top multiplier or Star Power
+    for (int l = 0; l < G.lanes && (G.sp_active || multiplier() >= 4) && !(G.roll && G.roll[i]); l++) {
         if (!(n->frets & (1 << l)))
             continue;
-        for (int k = 0; k < 4; k++) {
+        for (int k = 0; k < 3; k++) {
             typeof(&G.spark[0]) sp = &G.spark[G.spark_next++ % SPARKS];
             float a = (rand() % 628) / 100.0f;
             sp->x = lane_x(l);
@@ -1998,9 +2047,10 @@ static void activate_sp(void)
 #endif
 }
 
-// Held green, tapped red, and the next note's green: nothing's left to press, and the finger that lifted may have come
-// up long before. An anchor: the note's frets have been down since before the last note, which was hit and on other
-// frets, and nothing above them is. It plays as it reaches the line. A held fret never plays a run of its own note
+// Held green, tapped red, and the next note's green: nothing's left to press, and fingers don't arrive on the frame. The
+// green may have stayed down all along, or been lifted and put back a moment early, red up or still coming up. Whichever:
+// when the note reaches the line with its frets down and nothing above them, and the last note was hit, it plays. On a
+// repeat of the last note's own frets the finger must have come back down since it, so a held fret never plays a run
 static void anchored_note(void)
 {
     const Part * p = G.part;
@@ -2011,7 +2061,7 @@ static void anchored_note(void)
         return;
     const Note * n = &p->notes[i], * prev = &p->notes[i - 1];
     double nt = n->time / 1e6;
-    if (G.t < nt || G.t > nt + WINDOW || (n->frets & FRET_OPEN) || G.state[i - 1] != HIT || prev->frets == n->frets)
+    if (G.t < nt || G.t > nt + WINDOW || (n->frets & FRET_OPEN) || G.state[i - 1] != HIT)
         return;
     uint32_t ringing = 0;
     for (int k = 0; k < MAX_SUS; k++)
@@ -2021,7 +2071,7 @@ static void anchored_note(void)
     if ((free & n->frets) != n->frets || __builtin_clz(free) != __builtin_clz((uint32_t)n->frets))
         return;
     for (int l = 0; l < 5; l++)
-        if ((n->frets & (1 << l)) && G.press_t[l] > prev->time / 1e6 + WINDOW)
+        if ((n->frets & (1 << l)) && prev->frets == n->frets && G.press_t[l] <= prev->time / 1e6 + WINDOW * 0.5)
             return;
     hit_note(i);
 }
@@ -2443,8 +2493,9 @@ int game_update(const Pad * pad, uint32_t pressed)
 
 static uint32_t board_col(float z, float lift)
 {
-    // World Tour's neck is near black: the notes are what you see
-    float d = z < 0 ? 0 : z / Z_FAR, v = 96 - 34 * d + lift * 0.6f;
+    // measured off World Tour's neck: its art at about 80%, 60% at the far end
+    float d = z < 0 ? 0 : z / Z_FAR, v = 205 - 60 * d + lift * 0.6f;
+    v = v > 255 ? 255 : v;
     if (G.sp_active)
         return RGBA((int)(v * 0.64f), (int)(v * 0.85f), (int)(v * 1.15f > 255 ? 255 : v * 1.15f), 255);
     return RGBA((int)v, (int)v, (int)v, 255);
@@ -2490,22 +2541,25 @@ static void draw_highway(void)
         if (z > Z_FAR)
             break;
         bool measure = c->beats[i].kind == 0;
-        float d = measure ? 0.13f : 0.07f;
-        uint32_t col = with_alpha(measure ? RGBA(235, 235, 245, 230) : RGBA(190, 190, 200, 150), fade(z));
-        flat(-HALF_W + 0.05f, HALF_W - 0.05f, z - d / 2, z + d / 2, 0.005f, measure ? bar_l : bar_m, 0, 1, col, col);
+        // silver bars stopping short of the rails, the measure's the stronger
+        float d = measure ? 0.26f : 0.13f;
+        uint32_t col = with_alpha(measure ? RGBA(235, 235, 245, 255) : RGBA(190, 185, 200, 170), fade(z));
+        flat(-HALF_W + 0.13f, HALF_W - 0.13f, z - d / 2, z + d / 2, 0.005f, measure ? bar_l : bar_m, 0, 1, col, col);
     }
-    // the strings
-    const Sprite * line = atlas_get(res.game, "line");
+    // the strings: coiled wire hooked on the back of each cup, fading off up the neck; a struck one rings in its colour
+    const Sprite * wire = atlas_get(res.game, "string");
     for (int l = 0; l < G.lanes; l++) {
         float x = lane_x(l);
-        // silver wire, a darker one under it to lift it off the board; a struck string rings in its colour
-        strip(x - 0.05f, x + 0.05f, 0.007f, line, RGBA(8, 8, 12, 150));
-        uint32_t near_c = RGBA(205, 205, 215, 190);
         double since = G.t - G.flame_t[l];
         float ring = since >= 0 && since < 0.25 ? 1 - (float)since / 0.25f : 0;
-        if (ring > 0)
-            near_c = with_alpha(lane_colour[lane_art(l)], 0.6f + 0.4f * ring);
-        strip(x - 0.022f - ring * 0.02f, x + 0.022f + ring * 0.02f, 0.008f, line, near_c);
+        uint32_t c0 = ring > 0 ? lane_colour[lane_art(l)] : RGBA(215, 210, 220, 255);
+        const float seg = 0.42f, start = 0.34f, end = 8.0f;
+        float slide = fmodf(ring * 0.2f, seg);
+        for (float z = start; z < end; z += seg) {
+            float a0 = 1 - (z - start) / (end - start), a1 = 1 - (z + seg - start) / (end - start);
+            flat(x - 0.075f, x + 0.075f, z - slide, z + seg - slide, 0.007f, NULL, 0, 1, RGBA(6, 4, 8, (int)(a0 * 110)), RGBA(6, 4, 8, (int)(a1 * 110)));
+            flat(x - 0.06f, x + 0.06f, z - slide, z + seg - slide, 0.008f, wire, 0, 1, with_alpha(c0, a0), with_alpha(c0, a1));
+        }
     }
     // the rails: silver, glowing blue with Star Power ready or on, red on a miss
     const Sprite * rail = atlas_get(res.game, "rail");
@@ -2520,24 +2574,16 @@ static void draw_highway(void)
     }
     for (int side = -1; side <= 1; side += 2) {
         float x = side * HALF_W;
-        strip(x - 0.09f, x + 0.09f, 0.01f, rail, rc);
+        strip(x - 0.07f, x + 0.07f, 0.01f, rail, rc);
     }
-    // the strike bar in front of the cups, rail to rail
-    uint32_t bar_c = RGBA(235, 235, 245, 255);
-    if (G.sp_active)
-        bar_c = RGBA(150, 220, 255, 255);
-    else if (multiplier() >= 4) {
-        // top multiplier: it runs hot, on the beat
-        int k = (int)(70 * expf(-(float)(beat - floor(beat)) * 4));
-        bar_c = RGBA(255, 190 + k / 2, 90 + k, 255);
-    }
-    flat(-HALF_W + 0.05f, HALF_W - 0.05f, -0.62f, -0.54f, 0.012f, bar_l, 0, 1, bar_c, bar_c);
+    // the silver bar just in front of the cups, rail to rail, whatever the board is doing
+    uint32_t bar_c = G.sp_active ? RGBA(150, 220, 255, 255) : RGBA(235, 235, 245, 255);
+    flat(-HALF_W + 0.1f, HALF_W - 0.1f, -0.5f, -0.34f, 0.012f, bar_l, 0, 1, bar_c, bar_c);
 }
 
 static void draw_sustains(void)
 {
     const Part * p = G.part;
-    const Sprite * sus = atlas_get(res.game, "sustain");
     float t = (float)G.t;
     for (int i = G.first > 8 ? G.first - 8 : 0; i < p->note_count; i++) {
         const Note * n = &p->notes[i];
@@ -2564,37 +2610,34 @@ static void draw_sustains(void)
                 continue;
             bool open = l == LANE_OPEN;
             float x = open ? 0 : lane_x(l), w = open ? 1.6f : 0.13f;
-            uint32_t col = open ? lane_colour[6] : lane_colour[l];
+            uint32_t col = open ? lane_colour[6] : lane_colour[lane_art(l)];
             if (G.sp_active || (G.phrase[i] >= 0 && G.phrase_ok[G.phrase[i]]))
                 col = lane_colour[5];
             if (dead)
-                col = RGBA(110, 110, 120, 200);
-            else if (active)
-                col = RGBA(((col & 0xFF) + 255) / 2, (((col >> 8) & 0xFF) + 255) / 2, (((col >> 16) & 0xFF) + 255) / 2,
-                           255);
-            // whammy shakes it
-            if (active) {
-                // a held note burns: a wide glow round the beam, breathing with the song's beat
-                float breath = 0.32f + 0.1f * sinf(t * 14);
-                gfx_blend(BLEND_ADD);
-                flat(x - w * 3.2f, x + w * 3.2f, z0, z_end, 0.011f, atlas_get(res.game, "glow"), 0, 1,
-                     with_alpha(open ? lane_colour[6] : lane_colour[l], breath), with_alpha(open ? lane_colour[6] : lane_colour[l], 0));
-                gfx_blend(BLEND_ALPHA);
+                col = RGBA(100, 100, 110, 200);
+            // whammy shakes it: the pieces joined up, every one the note's own colour
+            if (active)
                 w *= 1.3f;
-            }
-            int pieces = active ? 10 : 1;
             float amp = active ? 0.03f + G.whammy * 0.12f : 0;
+            int pieces = active ? 40 : 1;
+            float a0 = fade(z0), wob0 = amp * sinf(z0 * 2.6f + t * 25);
+            gfx_tex(NULL);
             for (int s = 0; s < pieces; s++) {
                 float za = z0 + (z_end - z0) * s / pieces, zb = z0 + (z_end - z0) * (s + 1) / pieces;
-                float wob = amp * sinf(za * 2.6f + t * 25);
-                flat(x - w + wob, x + w + wob, za, zb, 0.012f, sus, 0, 1, with_alpha(col, fade(za)),
-                     with_alpha(col, fade(zb)));
+                float wob1 = amp * sinf(zb * 2.6f + t * 25), a1 = fade(zb);
+                uint32_t ca = with_alpha(col, a0 * (open ? 0.5f : 1)), cb = with_alpha(col, a1 * (open ? 0.5f : 1));
+                const float y = 0.012f;
+                const float p[4][3] = {{x - w + wob0, y, za}, {x + w + wob0, y, za}, {x + w + wob1, y, zb}, {x - w + wob1, y, zb}};
+                const float uv[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+                const uint32_t c[4] = {ca, ca, cb, cb};
+                gfx_quad(p, uv, c);
+                wob0 = wob1;
+                a0 = a1;
             }
         }
     }
 }
 
-// the drums' marks on the board: a roll glows down its lane, a gap for freestyle right across
 static void draw_zones(void)
 {
     float half = fabsf(lane_x(1) - lane_x(0)) * 0.46f;
@@ -2612,17 +2655,34 @@ static void draw_zones(void)
     }
 }
 
+// is this lane ringing a sustain the player's still on?
+static bool lane_sustain(int l)
+{
+    for (int i = 0; i < MAX_SUS; i++)
+        if (G.sus[i].note >= 0 && (G.part->notes[G.sus[i].note].frets & (1 << l)))
+            return true;
+    return false;
+}
+
 static void draw_cups(bool caps)
 {
+    const float cw = 1.02f, ch = cw / 2.26f;      // 128x64 art: on the board as wide as World Tour's, 2.9 to 1
     for (int l = 0; l < G.lanes; l++) {
         char name[16];
         float x = lane_x(l);
         if (!caps) {
-            snprintf(name, sizeof(name), "cup_%d", lane_art(l));
-            board(x, -0.03f, 0, 1.06f, 0.62f, atlas_get(res.game, name), 0, 0, 1, 1, WHITE);
+            snprintf(name, sizeof(name), "%s_%d", cfg.cup_skin ? "cupdeep" : "cup", lane_art(l));
+            board(x, 0, -0.1f, cw, ch, atlas_get(res.game, name), 0, 0, 1, 1, WHITE);
         } else if (G.held & (1 << l)) {
+            // held, the cap fills the cup; just struck or ringing a sustain it stands up on its neck
+            double since = G.t - G.flame_t[l];
+            float up = since >= 0 && since < 0.1 ? 1 : 0;
+            if (lane_sustain(l))
+                up = 1;
             snprintf(name, sizeof(name), "cap_%d", lane_art(l));
-            board(x, 0.11f, -0.01f, 0.98f, 0.5f, atlas_get(res.game, name), 0, 0, 1, 1, WHITE);
+            if (up > 0)
+                board(x, 0.02f, -0.1f, 0.62f, 0.2f, atlas_get(res.game, "now_neck"), 0, 0, 1, 1, RGBA(120, 120, 130, 255));
+            board(x, 0.02f + up * 0.16f, -0.1f, cw * 0.86f, ch * 0.86f, atlas_get(res.game, name), 0, 0, 1, 1, WHITE);
         }
     }
     // the open note's bar lights across the cups
@@ -2655,26 +2715,17 @@ static void rail_quad(const Sprite * s, float x0, float x1, float z0, float z1, 
 
 static void draw_rail_meter(void)
 {
-    const float in = -HALF_W + 0.1f, seat_x = -HALF_W - 0.62f, z0 = 0.5f, z1 = 3.0f;
+    // the gold rope hugs the outside of the rail, five lamps on it with their cut ends against it; yellow up to x2,
+    // green to x3, purple on to the top, as the footage has them
+    const float rope0 = -HALF_W + 0.04f, rope1 = -HALF_W - 0.2f, z0 = 0.55f, z1 = 3.0f;
     gfx_blend(BLEND_ALPHA);
-    rail_quad(atlas_get(res.hud, "multi_light_seat"), in, seat_x, z0, z1, true, false, WHITE);
-    int m = multiplier(), base_m = 1 + G.streak / 10, max_m = G.part_id == PART_BASS ? 6 : 4;
-    int lit = base_m >= max_m ? 5 : (G.streak % 10) / 2;
-    bool half = base_m < max_m && G.streak % 2;     // the lamp on its way
-    float gap = (z1 - z0) / 5;
-    for (int i = 0; i < 5; i++) {
-        char name[32];
-        int state = i < lit ? 2 : half && i == lit ? 1 : 0;
-        snprintf(name, sizeof(name), "hud_score_light_%d%s", state, G.sp_active ? "_blue" : "");
-        float z = z0 + gap * (i + 0.5f);
-        // the art's flat end on the strip, its round end out over the stage
-        rail_quad(atlas_get(res.hud, name), -HALF_W - 0.24f, -HALF_W - 0.62f, z - gap * 0.4f, z + gap * 0.4f, false, true, WHITE);
-    }
+    rail_quad(atlas_get(res.hud, "hud_rope"), rope0, rope1, z0, z1, true, false, WHITE);
+    int m = multiplier();
     if (m > 1) {
         char name[16];
         snprintf(name, sizeof(name), "mult_x%d", m);
         float pop = 1 + G.mult_pop * 0.45f;
-        board(-HALF_W - 0.55f, 0.02f, z1 + 0.3f, 1.0f * pop, 0.5f * pop, atlas_get(res.game, name), 0, 0, 1, 1,
+        board(-HALF_W - 0.42f, 0.02f, z1 + 0.15f, 0.8f * pop, 0.4f * pop, atlas_get(res.game, name), 0, 0, 1, 1,
               G.sp_active ? RGBA(170, 225, 255, 255) : WHITE);
     }
 }
@@ -2702,7 +2753,7 @@ static void draw_gems(void)
             a *= 0.55f;
         else if (cfg.vanish)
             a *= clamp01((z - 2.2f) / 1.6f);    // gone before the strikeline: play it from memory
-        int kind = n->flags & NOTE_TAP ? 2 : n->flags & NOTE_HOPO ? 1 : 0;
+        int kind = G.drums ? 0 : n->flags & NOTE_TAP ? 2 : n->flags & NOTE_HOPO ? 1 : 0;
         bool star = G.phrase[i] >= 0 && G.phrase_ok[G.phrase[i]];
         uint32_t col = with_alpha(WHITE, a);
         char name[32];
@@ -2719,7 +2770,14 @@ static void draw_gems(void)
             // a cymbal lies wide and flat, its dome lit, so it can be told from a drum at a glance
             bool cym = G.drums && G.chart->version >= 2 && lane_cymbal(l, n->flags);
             const char * look = cym ? kinds[1] : kinds[kind];
-            float gw = cym ? 1.2f : 1.04f, gh = cym ? 0.4f : 0.52f;
+            float gw = cym ? 1.2f : 1.04f, gh = cym ? 0.4f : 0.48f;
+            // drums: an accent stands out big and lit, a ghost note's small and faint. Any hit plays them: buttons have
+            // no velocity
+            bool accent = G.drums && (n->flags & NOTE_HOPO), ghost = G.drums && (n->flags & NOTE_TAP);
+            if (accent || ghost) {
+                gw *= accent ? 1.24f : 0.76f;
+                gh *= accent ? 1.24f : 0.76f;
+            }
             if (star)
                 snprintf(name, sizeof(name), "star_%s_%d_%d", look, c, star_frame);
             else
@@ -2728,7 +2786,12 @@ static void draw_gems(void)
             const Sprite * gem = atlas_get(res.game, name);
             board(lane_x(l), 0, z - 0.07f, gw * 1.08f, gh * 1.08f, gem, 0, 0, 1, 1,
                   with_alpha(RGBA(0, 0, 0, 255), a * 0.45f));
-            board(lane_x(l), 0, z, gw, gh, gem, 0, 0, 1, 1, col);
+            board(lane_x(l), 0, z, gw, gh, gem, 0, 0, 1, 1, ghost ? with_alpha(WHITE, a * 0.7f) : col);
+            if (accent) {
+                gfx_blend(BLEND_ADD);
+                board(lane_x(l), 0, z, gw * 1.3f, gh * 1.5f, atlas_get(res.game, "glow"), 0, 0, 1, 1, with_alpha(WHITE, a * 0.55f));
+                gfx_blend(BLEND_ALPHA);
+            }
         }
     }
 }
@@ -2762,16 +2825,21 @@ static void draw_flames(void)
         if (G.spark[i].life > 0)
             board(G.spark[i].x, G.spark[i].y, G.spark[i].z, 0.24f, 0.24f, dot, 0, 0, 1, 1,
                   with_alpha(G.spark[i].col, G.spark[i].life));
-    // Star Power: lightning down both rails
+    // Star Power: the rails burn, and bolts stand off them out over the stage, a new set a few times a second
     if (G.sp_active) {
         const Sprite * bolt = atlas_get(res.game, "lightning");
         for (int side = -1; side <= 1; side += 2) {
             float x = side * HALF_W;
-            int seed = (int)(G.t * 20) * 7 + side * 3;
-            for (int k = 0; k < 4; k++) {
-                float z0 = ((seed * (k + 3)) % 9) * 0.9f, len = 1.6f;
-                uint32_t c = with_alpha(RGBA(140, 210, 255, 255), fade(z0) * 0.9f);
-                flat(x - 0.22f, x + 0.22f, z0, z0 + len, 0.02f, bolt, 0, 1, c, c);
+            flat(x - side * 0.25f, x + side * 0.9f, Z_NEAR, Z_FAR * 0.75f, 0.018f, glow, 0, 1,
+                 RGBA(90, 170, 255, 150), RGBA(90, 170, 255, 0));
+            uint32_t seed = (uint32_t)(G.t * 14) * 2654435761u + (uint32_t)(side + 2) * 40503u;
+            for (int k = 0; k < 7; k++) {
+                uint32_t h = seed * (uint32_t)(k + 3) * 16777619u;
+                float z0 = (h >> 8 & 255) / 255.0f * 7.5f, len = 1.5f + (h >> 16 & 255) / 255.0f * 1.6f;
+                float out = (h >> 24 & 255) / 255.0f * 0.7f, wide = 0.45f + out * 0.8f;
+                uint32_t c = with_alpha(RGBA(190, 230, 255, 255), fade(z0));
+                flat(x - side * 0.1f + side * out - wide, x + side * out + wide, z0, z0 + len, 0.02f + out * 0.2f, bolt, 0, 1, c,
+                     with_alpha(c, 0.3f));
             }
         }
     }
@@ -2813,7 +2881,9 @@ static void lcd(const char * which, long value, int cells, float right, float y,
     int n = (int)strlen(buf);
     float cell = 1.0f / 11, w = h * 64.0f / 112, x = right - n * w;
     for (int i = 0; i < n; i++) {
-        float u0 = (buf[i] == ' ' ? 10 : buf[i] - '0') * cell;
+        if (buf[i] == ' ')
+            continue;
+        float u0 = (buf[i] - '0') * cell;
         gfx_sprite_uv(s, x + i * w, y, w, h, u0, 0, u0 + cell, 1, buf[i] == ' ' ? RGBA(255, 255, 255, 90) : WHITE);
     }
 }
@@ -2876,12 +2946,43 @@ static void draw_timing_bar(void)
     }
 }
 
+// the five lamps on the rope, drawn on the screen so each stands square to the rail as the rail runs there, not flat on
+// the board where the perspective leaves them sticking out sideways in steps
+static void draw_streak_lamps(void)
+{
+    int base_m = 1 + G.streak / 10, max_m = G.part_id == PART_BASS ? 6 : 4;
+    int lit = base_m >= max_m ? 5 : (G.streak % 10) / 2;
+    bool half = base_m < max_m && G.streak % 2;
+    const char * hue = G.sp_active ? "_blue" : base_m >= 3 ? "_purple" : base_m == 2 ? "_green" : "";
+    const float x = -HALF_W - 0.17f, z0 = 0.55f, z1 = 3.0f, gap = (z1 - z0) / 5;
+    float ax, ay, bx, by;
+    project(x, 0.015f, z0, &ax, &ay);
+    project(x, 0.015f, z1, &bx, &by);
+    float dx = bx - ax, dy = by - ay, len = sqrtf(dx * dx + dy * dy), nx = -dy / len, ny = dx / len;  // out over the stage
+    if (nx < 0) {
+        nx = -nx;
+        ny = -ny;
+    }
+    float angle = atan2f(-ny, -nx);     // the art's cut end, on its right, against the rope
+    for (int i = 0; i < 5; i++) {
+        char name[32];
+        int state = i < lit ? 2 : half && i == lit ? 1 : 0;
+        snprintf(name, sizeof(name), "hud_score_light_%d%s", state, hue);
+        const Sprite * s = atlas_get(res.hud, name);
+        float z = z0 + gap * (i + 0.5f), sx, sy, ex, ey;
+        project(x, 0.015f, z, &sx, &sy);
+        project(x - 0.3f, 0.015f, z, &ex, &ey);
+        float size = fabsf(ex - sx) * 1.05f;
+        sprite_rot(s, sx - nx * 2, sy - ny * 2, size, size, (float)s->w, s->h / 2.0f, angle, WHITE);
+    }
+}
+
 static void draw_hud(void)
 {
     gfx_2d();
     gfx_blend(BLEND_ALPHA);
     float t = (float)G.t;
-    const float k = 0.72f, dx = 14, dy = 250;          // the dome's 256x256 texture
+    const float k = 0.6f, dx = 30, dy = 288;           // the dome's 256x256 texture
     const float cx = dx + 129 * k, cy = dy + 124 * k;   // the centre of the dome's arc
     const float pi = 3.14159265f;
     // six tubes stand round the dome, lit as the meter fills: orange, blue once Star Power can be used
@@ -2897,36 +2998,48 @@ static void draw_hud(void)
     const Sprite * tube = atlas_get(res.hud, "hud_rock_tube");
     const Sprite * glow = atlas_get(res.hud, blue ? "hud_rock_tube_glow_full_b" : "hud_rock_tube_glow_full");
     for (int i = 0; i < 6; i++) {
-        float th = (150 - i * 24) * pi / 180, r = 66;
+        float th = (146 - i * 22.4f) * pi / 180, r = 52;
         float x = cx + r * cosf(th), y = cy - r * sinf(th), rot = pi / 2 - th;
-        sprite_rot(tube, x, y, 21, 42, tube->w / 2.0f, (float)tube->h, rot, WHITE);
+        sprite_rot(tube, x, y, 19, 36, tube->w / 2.0f, (float)tube->h, rot, WHITE);
         float fill = clamp01(G.sp * 6 - i) * pulse;
         if (fill > 0) {
             gfx_blend(BLEND_ADD);
-            sprite_rot(glow, x, y, 21, 42, glow->w / 2.0f, (float)glow->h, rot, fade_alpha(WHITE, fill));
+            sprite_rot(glow, x, y, 19, 36, glow->w / 2.0f, (float)glow->h, rot, fade_alpha(WHITE, fill));
             gfx_blend(BLEND_ALPHA);
         }
     }
     // the score counter the dome stands on, the streak plate under it
-    const float sk = 0.72f, sx = dx, sy = dy + 199 * k - 67 * sk;
+    const float sk = 0.62f, sx = cx - 129 * sk, sy = dy + 172 * k - 66 * sk;
+    gfx_rect(sx + 22 * sk, sy + 78 * sk, 212 * sk, 44 * sk, RGBA(2, 12, 4, 255));
     hud_at("hud_rm_solo_bottom", sx, sy, sk, sk, 0, 0, 256, 128, WHITE);
-    lcd("lcd_green", (long)G.score, 7, sx + 232 * sk, sy + 96 * sk - 14, 28);
-    const float kx = 0.66f, ky = 0.46f, px = cx - 128 * kx, py = sy + 124 * sk - 21 * ky;
+    lcd("lcd_green", (long)G.score, 7, sx + 226 * sk, sy + 100 * sk - 13, 26);
+    const float kx = 0.54f, ky = 0.42f, px = cx - 128 * kx, py = sy + 122 * sk - 24 * ky;
+    gfx_rect(px + 40 * kx, py + 38 * ky, 176 * kx, 50 * ky, RGBA(3, 3, 3, 255));
     hud_at("hud_counter_body", px, py, kx, ky, 0, 0, 256, 128, WHITE);
-    lcd("lcd_orange", G.streak, 4, px + 205 * kx, py + 62 * ky - 10, 20);
-    // the dome: its window red, yellow or green, the needle swinging from red to green
+    lcd("lcd_orange", G.streak, 4, px + 214 * kx, py + 62 * ky - 9, 19);
+    // the dome: the metal first, its bright window set inside it with ROCK in black, the three sectors pale, the one
+    // the needle's in lit up. The art's plinth under the rim is cropped: the dome sits on the score plate
     float h = G.rock;
-    hud_at("hud_rock_body", dx, dy, k, k, 0, 0, 256, 256, WHITE);
     float w0 = clamp01((0.40f - h) / 0.1f), w2 = clamp01((h - 0.60f) / 0.1f), w1 = clamp01(1 - w0 - w2);
     if (h < 0.25f)
         w0 *= 0.65f + 0.35f * fabsf(sinf(t * 6));        // failing: the red throbs
+    gfx_sprite_uv(atlas_get(res.hud, "hud_rock_body"), dx, dy, 256 * k, 172 * k, 0, 0, 1, 172.0f / 256, RGBA(245, 230, 195, 255));
+    const float wk = k * 0.9f, wx = cx - 129 * wk, wy = cy - 124 * wk;
     if (w0 > 0)
-        hud_at("hud_rock_bg_red", dx, dy, k, k, 0, 0, 256, 256, fade_alpha(WHITE, w0));
+        hud_at("hud_rock_bg_red", wx, wy, wk, wk, 0, 0, 256, 256, fade_alpha(WHITE, w0));
     if (w1 > 0)
-        hud_at("hud_rock_bg_yellow", dx, dy, k, k, 0, 0, 256, 256, fade_alpha(WHITE, w1));
+        hud_at("hud_rock_bg_yellow", wx, wy, wk, wk, 0, 0, 256, 256, fade_alpha(WHITE, w1));
     if (w2 > 0)
-        hud_at("hud_rock_bg_green", dx, dy, k, k, 0, 0, 256, 256, fade_alpha(WHITE, w2));
-    hud_at("hud_rock_lights_all", dx, dy, k, k, 0, 0, 256, 128, WHITE);
+        hud_at("hud_rock_bg_green", wx, wy, wk, wk, 0, 0, 256, 256, fade_alpha(WHITE, w2));
+    hud_at("hud_rock_lights_all", wx, wy, wk, wk, 0, 0, 256, 128, RGBA(235, 225, 210, 235));
+    gfx_blend(BLEND_ADD);
+    if (w0 > 0)
+        hud_at("hud_rock_lights_red", wx, wy, wk, wk, 0, 0, 128, 128, fade_alpha(WHITE, w0));
+    if (w1 > 0)
+        hud_at("hud_rock_lights_yellow", wx + 64 * wk, wy, wk, wk, 0, 0, 128, 128, fade_alpha(WHITE, w1));
+    if (w2 > 0)
+        hud_at("hud_rock_lights_green", wx + 128 * wk, wy, wk, wk, 0, 0, 128, 128, fade_alpha(WHITE, w2));
+    gfx_blend(BLEND_ALPHA);
     const Sprite * needle = atlas_get(res.hud, "hud_rock_needle");
     // shorter than the sprite's own length and a narrower swing, so it stays inside the dome, and weighted: it eases to the
     // value instead of snapping with every note
@@ -2953,8 +3066,10 @@ static void draw_hud(void)
     if (len > 0) {
         float f = (float)(G.t / len);
         f = f < 0 ? 0 : f > 1 ? 1 : f;
-        gfx_rect(0, 0, SCREEN_W, 4, RGBA(0, 0, 0, 120));
-        gfx_rect(0, 0, SCREEN_W * f, 4, RGBA(255, 200, 60, 200));
+        if (!cfg.no_progress && !G.sing) {
+            gfx_rect(0, 0, SCREEN_W, 2, RGBA(0, 0, 0, 90));
+            gfx_rect(0, 0, SCREEN_W * f, 2, RGBA(235, 235, 245, 150));
+        }
     }
     // the song's card at the start
     if (G.t < 4.5 && !G.sing) {
@@ -3036,6 +3151,9 @@ void game_draw(void)
         draw_flames();
         draw_rail_meter();
     }
+    gfx_2d();
+    if (!G.vocal)
+        draw_streak_lamps();
     draw_hud();
     if (G.fail_frames) {
         float f = (float)G.fail_frames / FAIL_FRAMES;

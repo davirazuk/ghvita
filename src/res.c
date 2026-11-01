@@ -162,6 +162,7 @@ void res_load(void)
     res.bg_stage = load_tex("bg_stage.jpg", 0);
     res.logo = load_tex("logo.png", TEX_MIPMAP);
     res.vignette = load_tex("vignette.png", 0);
+    res.hands = load_tex("crowd_hands.png", 0);
     res_loading(1, "LOADING");
     plat_log("loaded: pictures %d ms", (int)((plat_now_us() - t0) / 1000));
     // the menus' own sounds now, the rest on a thread
