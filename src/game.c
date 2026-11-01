@@ -288,9 +288,10 @@ static void member_spot(int r, float m[3])
     m[1] = G.marks[r][1];
     m[2] = G.marks[r][2];
     if (r == 1) {
-        m[0] = G.marks[0][0] - G.marks[0][2] * 1.35f;
-        m[1] = G.marks[0][1] + 24;
-        m[2] = G.marks[0][2] * 1.1f;
+        // the singer stands forward of the kit, clear of the far end of the board
+        m[0] = fminf(G.marks[0][0] - G.marks[0][2] * 1.35f, 322);
+        m[1] = fmaxf(G.marks[0][1] + 24, 262);
+        m[2] = G.marks[0][2] * 1.25f;
     }
     if (r < 2)
         return;
@@ -301,6 +302,8 @@ static void member_spot(int r, float m[3])
     m[0] += b->walk * m[2];
     m[1] += b->front * 26;
     m[2] *= 1 + b->front * 0.2f;
+    // wherever they wander, out of the way of the board and the rock meter
+    m[0] = r == 3 ? fminf(fmaxf(m[0], 222), 262) : fminf(fmaxf(m[0], 738), 858);
 }
 
 // a guitarist out in a solo of their own part
@@ -2558,9 +2561,8 @@ static void draw_highway(void)
         double since = G.t - G.flame_t[l];
         float ring = since >= 0 && since < 0.25 ? 1 - (float)since / 0.25f : 0;
         uint32_t c0 = ring > 0 ? lane_colour[lane_art(l)] : RGBA(235, 232, 240, 255);
-        // thin wound steel as in the footage: a dark line under it, the coil tight, gone by the far end of the neck
+        // thin wound steel as in the footage, the coil tight, gone by the far end of the neck
         const float seg = 0.24f, start = 0.3f, end = 8.4f, half = 0.034f + ring * 0.016f;
-        flat(x - 0.05f, x + 0.05f, start, end, 0.007f, NULL, 0, 1, RGBA(6, 4, 8, 120), RGBA(6, 4, 8, 0));
         for (float z = start; z < end; z += seg) {
             float a0 = 1 - (z - start) / (end - start), a1 = 1 - (z + seg - start) / (end - start);
             flat(x - half, x + half, z, z + seg, 0.008f, wire, 0, 1, with_alpha(c0, a0), with_alpha(c0, a1));
@@ -2718,35 +2720,43 @@ static void rail_quad(const Sprite * s, float x0, float x1, float z0, float z1, 
 
 static void draw_rail_meter(void)
 {
-    // the gold rope hugs the outside of the rail, five lamps on it with their cut ends against it; yellow up to x2,
-    // green to x3, purple on to the top, as the footage has them
-    const float rope0 = -HALF_W + 0.04f, rope1 = -HALF_W - 0.2f, z0 = 0.55f, z1 = 3.0f;
-    gfx_blend(BLEND_ALPHA);
-    rail_quad(atlas_get(res.hud, "hud_rope"), rope0, rope1, z0, z1, true, false, WHITE);
-    // five lamps on the board like the rope, each turned out from it so it stands square to the rail as the rail runs up
-    // the screen; the perspective leaves anything lying straight across the board sticking out in steps
+    // the gold rope hugs the outside of the rail with five glass domes along it, stood straight out from it and set
+    // apart; yellow up to x2, green to x3, purple on to the top, as the footage has them
+    const float rope0 = -HALF_W + 0.04f, rope1 = -HALF_W - 0.24f, z0 = 0.55f, z1 = 3.0f;
     int m = multiplier(), base_m = 1 + G.streak / 10, max_m = G.part_id == PART_BASS ? 6 : 4;
     int lit = base_m >= max_m ? 5 : (G.streak % 10) / 2;
     bool half = base_m < max_m && G.streak % 2;
     const char * hue = G.sp_active ? "_blue" : base_m >= 3 ? "_purple" : base_m == 2 ? "_green" : "";
-    float gap = (z1 - z0) / 5;
+    const float gap = (z1 - z0) / 5;
+    gfx_blend(BLEND_ALPHA);
+    gfx_2d();
     for (int i = 0; i < 5; i++) {
         char name[32];
         int state = i < lit ? 2 : half && i == lit ? 1 : 0;
-        snprintf(name, sizeof(name), "hud_score_light_%d%s", state, hue);
-        const Sprite * s = atlas_get(res.hud, name);
-        float z = z0 + gap * (i + 0.5f), x = rope1 + 0.03f, y = 0.016f;
-        const float len = 0.36f, wide = gap * 0.46f, ox = -0.86f, oz = 0.5f;     // out over the stage and away from you
-        // cut end on the rope, round end out
-        const float p[4][3] = {{x + ox * len - oz * wide, y, z + oz * len + (-ox) * -wide},
-                               {x - oz * wide, y, z + ox * wide},
-                               {x + oz * wide, y, z - ox * wide},
-                               {x + ox * len + oz * wide, y, z + oz * len - ox * wide}};
+        snprintf(name, sizeof(name), "lamp_%d%s", state, hue);
+        const Sprite * s = atlas_get(res.game, name);
+        // where its foot lies on the rope, on the screen; the dome stands square to that, as deep as it's wide
+        const float lz = z0 + 0.3f, lg = (z1 - 0.42f - lz) / 5, fx = rope1 + 0.06f;
+        const float a3[3] = {fx, 0.016f, lz + lg * (i - 0.02f)}, b3[3] = {fx, 0.016f, lz + lg * (i + 1.02f)};
+        float a[2], b[2];
+        project(a3[0], a3[1], a3[2], &a[0], &a[1]);
+        project(b3[0], b3[1], b3[2], &b[0], &b[1]);
+        float nx = b[1] - a[1], ny = a[0] - b[0];
+        if (nx < 0) {
+            nx = -nx;
+            ny = -ny;
+        }
+        const float tall = 1.0f;
+        const float p[4][3] = {{a[0] + nx * tall, a[1] + ny * tall, 0}, {a[0], a[1], 0}, {b[0], b[1], 0},
+                               {b[0] + nx * tall, b[1] + ny * tall, 0}};
         const float uv[4][2] = {{s->u0, s->v0}, {s->u1, s->v0}, {s->u1, s->v1}, {s->u0, s->v1}};
         const uint32_t c[4] = {WHITE, WHITE, WHITE, WHITE};
         gfx_tex(s->tex);
         gfx_quad(p, uv, c);
     }
+    gfx_3d(G.proj, G.view);
+    gfx_blend(BLEND_ALPHA);
+    rail_quad(atlas_get(res.hud, "hud_rope"), rope0, rope1, z0, z1, true, false, WHITE);
     if (m > 1) {
         char name[16];
         snprintf(name, sizeof(name), "mult_x%d", m);
@@ -2765,6 +2775,28 @@ static void lay(float x, float y, float z, float w, float d, const Sprite * s, u
         return;
     }
     flat(x + w / 2, x - w / 2, z - d / 2, z + d / 2, y, s, 1, 0, c, c);
+}
+
+// a gem is round, so the perspective hardly leans it, where a flat picture on the board would be skewed the further out
+// it lies: green and orange worst. Most of that is taken back, about its centre, so it stays on its string
+static float view_depth(float z)
+{
+    return -(G.view[10] * z + G.view[14]);
+}
+
+static void lay_gem(float x, float y, float z, float w, float d, const Sprite * s, uint32_t c)
+{
+    if (!cfg.flat_notes) {
+        lay(x, y, z, w, d, s, c);
+        return;
+    }
+    const float keep = 0.75f, mid = view_depth(z), z0 = z - d / 2, z1 = z + d / 2;
+    float x0 = x * (1 + keep * (view_depth(z0) / mid - 1)), x1 = x * (1 + keep * (view_depth(z1) / mid - 1));
+    const float p[4][3] = {{x0 + w / 2, y, z0}, {x0 - w / 2, y, z0}, {x1 - w / 2, y, z1}, {x1 + w / 2, y, z1}};
+    const float uv[4][2] = {{s->u0, s->v1}, {s->u1, s->v1}, {s->u1, s->v0}, {s->u0, s->v0}};
+    const uint32_t cc[4] = {c, c, c, c};
+    gfx_tex(s->tex);
+    gfx_quad(p, uv, cc);
 }
 
 static void draw_gems(void)
@@ -2825,8 +2857,8 @@ static void draw_gems(void)
             float k = sizes[cfg.note_size];
             gw *= k;
             gh *= k;
-            lay(lane_x(l), 0.012f, z - 0.05f, gw * 1.08f, gh * 2.2f, gem, with_alpha(RGBA(0, 0, 0, 255), a * 0.45f));
-            lay(lane_x(l), 0.02f, z, gw, gh * 2.1f, gem, ghost ? with_alpha(WHITE, a * 0.7f) : col);
+            lay_gem(lane_x(l), 0.012f, z - 0.05f, gw * 1.08f, gh * 2.2f, gem, with_alpha(RGBA(0, 0, 0, 255), a * 0.45f));
+            lay_gem(lane_x(l), 0.02f, z, gw, gh * 2.1f, gem, ghost ? with_alpha(WHITE, a * 0.7f) : col);
             if (accent) {
                 gfx_blend(BLEND_ADD);
                 board(lane_x(l), 0, z, gw * 1.3f, gh * 1.5f, atlas_get(res.game, "glow"), 0, 0, 1, 1, with_alpha(WHITE, a * 0.55f));
@@ -2865,23 +2897,33 @@ static void draw_flames(void)
         if (G.spark[i].life > 0)
             board(G.spark[i].x, G.spark[i].y, G.spark[i].z, 0.24f, 0.24f, dot, 0, 0, 1, 1,
                   with_alpha(G.spark[i].col, G.spark[i].life));
-    // Star Power: the rails burn, and bolts stand off them out over the stage, a new set a few times a second
+    // Star Power: the rails burn, and the game's own jagged bolts leap off them out over the stage, a new set a dozen
+    // times a second, each with a wider faint one behind it for the glow
     if (G.sp_active) {
-        const Sprite * bolt = atlas_get(res.game, "lightning");
+        for (int side = -1; side <= 1; side += 2)
+            flat(side * HALF_W - side * 0.25f, side * HALF_W + side * 0.9f, Z_NEAR, Z_FAR * 0.75f, 0.018f, dot, 0, 1,
+                 RGBA(90, 170, 255, 55), RGBA(90, 170, 255, 0));
+        const Sprite * bolt = atlas_get(res.game, "bolt");
+        gfx_2d();
+        gfx_blend(BLEND_ADD);
         for (int side = -1; side <= 1; side += 2) {
-            float x = side * HALF_W;
-            flat(x - side * 0.25f, x + side * 0.9f, Z_NEAR, Z_FAR * 0.75f, 0.018f, glow, 0, 1,
-                 RGBA(90, 170, 255, 150), RGBA(90, 170, 255, 0));
-            uint32_t seed = (uint32_t)(G.t * 14) * 2654435761u + (uint32_t)(side + 2) * 40503u;
+            uint32_t seed = (uint32_t)(G.t * 12) * 2654435761u + (uint32_t)(side + 2) * 40503u;
             for (int k = 0; k < 7; k++) {
-                uint32_t h = seed * (uint32_t)(k + 3) * 16777619u;
-                float z0 = (h >> 8 & 255) / 255.0f * 7.5f, len = 1.5f + (h >> 16 & 255) / 255.0f * 1.6f;
-                float out = (h >> 24 & 255) / 255.0f * 0.7f, wide = 0.45f + out * 0.8f;
-                uint32_t c = with_alpha(RGBA(190, 230, 255, 255), fade(z0));
-                flat(x - side * 0.1f + side * out - wide, x + side * out + wide, z0, z0 + len, 0.02f + out * 0.2f, bolt, 0, 1, c,
-                     with_alpha(c, 0.3f));
+                uint32_t h = (seed + (uint32_t)k * 97u) * 2654435761u;
+                float z = 0.6f + k * 1.0f + (h >> 8 & 255) / 255.0f * 0.8f, sx, sy;
+                project(side * HALF_W, 0, z, &sx, &sy);
+                float near = 5.5f / (z + 5.5f), len = (70 + (h >> 16 & 255) / 255.0f * 70) * near;
+                float tilt = ((h >> 24 & 255) / 127.5f - 1) * 0.7f;
+                // on the screen +x is -side: out from the rail either way
+                float rot = (side < 0 ? 0 : 3.14159265f) + tilt - 0.2f * (side < 0 ? 1 : -1);
+                float px = bolt->w * 0.02f, py = bolt->h / 2.0f, fa = fade(z);
+                sprite_rot(bolt, sx, sy, len * 1.1f, 34 * near, px, py, rot, with_alpha(RGBA(60, 170, 255, 255), 0.55f * fa));
+                sprite_rot(bolt, sx, sy, len, 18 * near, px, py, rot, with_alpha(RGBA(215, 245, 255, 255), fa));
             }
         }
+        gfx_blend(BLEND_ALPHA);
+        gfx_3d(G.proj, G.view);
+        gfx_blend(BLEND_ADD);
     }
     gfx_blend(BLEND_ALPHA);
 }
@@ -3139,6 +3181,10 @@ static void draw_hud(void)
 
 void game_draw(void)
 {
+#ifndef __vita__
+    if (getenv("GHV_SPFX"))
+        G.sp_active = true;             // to look at Star Power without playing up to it
+#endif
     if (G.camera != cfg.camera)
         setup_camera();         // changed from the pause menu
     gfx_begin(0, 0, 0);

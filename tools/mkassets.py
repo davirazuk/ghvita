@@ -35,6 +35,7 @@ def to_img(a):
 def gem(kind, c, star=False):
     """GHWT's gem: the dome (collar art) carries the colour (x1.75), the base is the silver rim with the white cap,
     the highlight is added over both, hammer-ons add the halo; taps use the see-through collar"""
+    silver = star and tuple(c) != tuple(SP)
     if kind == 'open':
         b, co, hi, ha = (load(G + '/Button_Drum_Kick_Base01.png'), load(G + '/Button_Drum_Kick_Collar01.png'),
                          load(G + '/Button_Drum_Kick_highlight01.png'), None)
@@ -62,7 +63,16 @@ def gem(kind, c, star=False):
     if ha is not None and ha.shape == b.shape:
         o[..., :3] += ha[..., :3] * ha[..., 3:4]
         o[..., 3:4] = np.maximum(o[..., 3:4], ha[..., 3:4] * 0.85)
-    return to_img(o)
+    out = to_img(o)
+    if silver:
+        # the star's base has a cyan edge that reads as a layer slipped off the gem: silver, as on the round ones
+        a = np.array(out.convert('RGBA'))
+        r, g, b = a[..., 0].astype(int), a[..., 1].astype(int), a[..., 2].astype(int)
+        m = (b > r + 40) & (g > r + 30) & (b > 110)
+        v = ((g + b) // 2).clip(0, 255)
+        a[..., 0][m], a[..., 1][m], a[..., 2][m] = (v[m] * 0.86).astype(np.uint8), (v[m] * 0.86).astype(np.uint8), (v[m] * 0.9).astype(np.uint8)
+        out = Image.fromarray(a, 'RGBA')
+    return out
 
 
 def scaled_on(canvas, img, scale, tint=None):
@@ -115,6 +125,37 @@ def frames(img, cols, rows):
     w, h = img.size[0] // cols, img.size[1] // rows
     return [img.crop(((f % cols) * w, (f // cols) * h, (f % cols + 1) * w, (f // cols + 1) * h))
             for f in range(cols * rows)]
+
+
+def lamp(state, hue):
+    """one rope lamp, crisp at any size: a glass dome, the round end left, the foot on the right under the rope.
+    0 dark glass, 1 half lit, 2 lit with a white-hot middle and the bloom outside it"""
+    S = 4
+    n = 64 * S
+    yy, xx = np.mgrid[0:n, 0:n] / S
+    cx, cy, r = 32.0, 32.0, 27.0
+    d = np.hypot(xx - cx, yy - cy)      # a ball: the rope lies over its inner side
+    body = d < r
+    ndist = np.clip(d / r, 0, 1)
+    hue = np.array(hue, float)
+    if state == 2:
+        rgb = hue[None, None] * (0.75 + 0.25 * (1 - ndist[..., None])) + (255 - hue[None, None]) * (1 - ndist[..., None] ** 2.2)[..., :] * 0.95
+    elif state == 1:
+        rgb = hue[None, None] * (0.32 + 0.5 * (1 - ndist[..., None])) + 25
+    else:
+        rgb = hue[None, None] * (0.13 + 0.16 * ndist[..., None] ** 2) + 12
+    # the glass: a bright edge, and a window of light up on the shoulder
+    edge = np.clip((ndist - 0.84) / 0.16, 0, 1)[..., None]
+    k = 0.55 if state < 2 else 0.22
+    rgb = rgb * (1 - edge * k) + hue[None, None] * edge * k + (40 if state < 2 else 0) * edge
+    spot = np.exp(-(((xx - cx + 9) / 7.5) ** 2 + ((yy - cy + 10) / 4.5) ** 2))[..., None]
+    rgb = rgb + (255 - rgb) * spot * (0.55 if state < 2 else 0.8)
+    alpha = np.where(body, 1.0 if state else 0.9, 0.0)
+    if state == 2:
+        alpha = np.maximum(alpha, np.clip(1 - (d - r) / 5, 0, 1) ** 2 * 0.7)
+        rgb = np.where(body[..., None], rgb, hue[None, None])
+    a = np.dstack([np.clip(rgb, 0, 255), alpha * 255]).astype(np.uint8)
+    return Image.fromarray(a, 'RGBA').resize((64, 64), Image.LANCZOS)
 
 
 def game_atlas():
@@ -173,6 +214,10 @@ def game_atlas():
     A.add('now_neck', Image.open(G + '/NowBar_Neck.png'))
     A.add('string', Image.open(G + '/string.png'))
     A.add('lightning', Image.open(G + '/JOW_StarPower_TeslaLightning01.png'))
+    A.add('bolt', Image.open(G + '/VH_Lightning_fx.png').convert('RGB').crop((128, 0, 256, 32)))
+    for hname, hc in (('', (255, 196, 70)), ('_green', (90, 245, 110)), ('_purple', (255, 140, 225)), ('_blue', (95, 225, 255))):
+        for st in range(3):
+            A.add('lamp_%d%s' % (st, hname), lamp(st, hc))
     A.add('sp_side', Image.open(G + '/starpower_sidegrade.png'))
     A.add('flare', Image.open(G + '/JOW_ButtonFlare01.png'))
     A.add('spark', Image.open(G + '/JOW_ButtonStar02.png'))
