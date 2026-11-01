@@ -312,6 +312,22 @@ static void shrink_stem(const char * path, int bitrate)
     plat_log("shrink: %s %s", path, ok ? "to Opus" : "left as it was");
 }
 
+bool shrink_done(const char * folder)
+{
+    DIR * d = opendir(folder);
+    if (!d)
+        return false;
+    bool all = true;
+    for (struct dirent * e; all && (e = readdir(d));)
+        if (is_audio(e->d_name)) {
+            char path[700];
+            snprintf(path, sizeof(path), "%s/%s", folder, e->d_name);
+            all = is_opus(path);
+        }
+    closedir(d);
+    return all;
+}
+
 void shrink_song(const char * folder)
 {
     char names[16][256];

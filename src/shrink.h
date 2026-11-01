@@ -6,3 +6,5 @@
 bool shrink_mogg(const char * folder);
 // every stem of a song folder that isn't Opus yet. What fails stays as it was
 void shrink_song(const char * folder);
+// every stem of a song folder is Opus already
+bool shrink_done(const char * folder);

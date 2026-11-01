@@ -255,6 +255,10 @@ bool vox_load(const char * folder)
     return kept > 0;
 }
 
+#define WAKE 40
+static float wake_y[WAKE];
+static bool wake_hit[WAKE];
+
 void vox_free(void)
 {
     mic_stop();
@@ -266,6 +270,8 @@ void vox_free(void)
 
 void vox_start(int diff, bool autoplay)
 {
+    for (int i = 0; i < WAKE; i++)
+        wake_y[i] = -1;
     static const float tolerance[4] = {3.0f, 2.5f, 1.75f, 1.0f};
     // YARG's: low, but a voice always has breaths and consonants the mic can't place
     static const float need[4] = {0.325f, 0.4f, 0.45f, 0.575f};
@@ -430,10 +436,20 @@ static void draw_note(const VNote * n, int i, int ms, const VPhrase * scale)
     float y = n->pitch ? pitch_y((float)n->pitch, scale) : LANE_Y + LANE_H / 2.0f;
     uint32_t top = n->pitch ? RGBA(150, 240, 245, 245) : RGBA(205, 205, 215, 190);
     uint32_t low = n->pitch ? RGBA(20, 130, 150, 245) : RGBA(110, 110, 125, 190);
-    // a lozenge: the ends a pixel in
-    gfx_rect_grad(x + 1, y - 5, w - 2, 10, top, low);
-    gfx_rect(x, y - 4, 1, 8, low);
-    gfx_rect(x + w - 1, y - 4, 1, 8, low);
+    // a tube, its ends rounded; the one you're on burns brighter
+    const int h = 5;
+    static const float inset[5] = {3, 1.5f, 0.6f, 0, 0};
+    for (int k = 0; k < h; k++) {
+        float in = inset[k] < w / 2 ? inset[k] : w / 2 - 1;
+        uint32_t c = k < 2 ? top : low;
+        gfx_rect(x + in, y - h + k, w - in * 2, 1, c);
+        gfx_rect(x + in, y + h - 1 - k, w - in * 2, 1, low);
+    }
+    if (ms >= n->t && ms < n->t + n->len) {
+        gfx_blend(BLEND_ADD);
+        gfx_rect(x, y - h - 2, w, h * 2 + 4, RGBA(70, 190, 200, 70));
+        gfx_blend(BLEND_ALPHA);
+    }
     // what's been sung of it lights up
     if (ms > n->t && V.marks[i] > 0.02f) {
         float f = (ms - n->t) / (float)n->len;
@@ -487,22 +503,43 @@ void vox_draw(double t)
         for (int i = ph->first; i < ph->first + ph->count; i++)
             draw_note(&V.notes[i], i, ms, scale);
     }
+    // where each line begins
+    for (int p = cur > 0 ? cur - 1 : 0; p < V.phrase_count && p < cur + 3; p++) {
+        float x = NOW_X + (V.phrases[p].start - ms) / 1000.0f * PX_PER_S;
+        if (x > 0 && x < SCREEN_W)
+            gfx_rect(x, LANE_Y + 1, 1, LANE_H - 3, RGBA(120, 210, 220, 55));
+    }
     gfx_rect(NOW_X - 3, LANE_Y + 1, 7, LANE_H - 2, RGBA(255, 255, 255, 36));
     gfx_rect(NOW_X - 1, LANE_Y + 1, 2, LANE_H - 2, RGBA(255, 255, 255, 230));
 
     // the voice, a point on the now line: folded to the octave of the note being asked for
     float voice = V.mic_pitch;
+    bool hit = false;
+    float voice_y = -1;
     if (voice >= 0) {
         int want = V.target ? V.target : (scale->low + scale->high) / 2;
         float shown = want + off_pitch(voice, want);
         V.shown = V.shown > 0 ? V.shown + (shown - V.shown) * 0.4f : shown;
-        float y = pitch_y(V.shown, scale);
-        bool hit = V.target && fabsf(off_pitch(voice, V.target)) <= V.tolerance;
-        uint32_t c = hit ? RGBA(140, 255, 160, 255) : RGBA(255, 130, 90, 255);
-        for (int i = 0; i < 6; i++)
-            gfx_rect(NOW_X - 18 + i * 3, y - (6 - i), 3, (6 - i) * 2, c);
+        voice_y = pitch_y(V.shown, scale);
+        hit = V.target && fabsf(off_pitch(voice, V.target)) <= V.tolerance;
     } else
         V.shown = 0;
+    // the voice leaves a wake running back from the now line, green where it was on the note
+    memmove(wake_y + 1, wake_y, sizeof(wake_y) - sizeof(wake_y[0]));
+    memmove(wake_hit + 1, wake_hit, sizeof(wake_hit) - sizeof(wake_hit[0]));
+    wake_y[0] = voice_y;
+    wake_hit[0] = hit;
+    for (int i = 1; i < WAKE; i++)
+        if (wake_y[i] >= 0) {
+            float a = 1 - (float)i / WAKE;
+            uint32_t c = wake_hit[i] ? RGBA(140, 255, 160, 255) : RGBA(255, 130, 90, 255);
+            gfx_rect(NOW_X - i * 3.0f - 3, wake_y[i] - 2 * a - 1, 3, 4 * a + 2, (c & 0xFFFFFF) | ((uint32_t)(a * 170) << 24));
+        }
+    if (voice_y >= 0) {
+        uint32_t c = hit ? RGBA(140, 255, 160, 255) : RGBA(255, 130, 90, 255);
+        for (int i = 0; i < 6; i++)
+            gfx_rect(NOW_X - 18 + i * 3, voice_y - (6 - i), 3, (6 - i) * 2, c);
+    }
 
     if (V.cur < V.phrase_count) {
         draw_lyrics(&V.phrases[cur], ms, LANE_Y + LANE_H + 1, LYRIC, true);

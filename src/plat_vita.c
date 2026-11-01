@@ -24,7 +24,15 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
+#include <psp2/io/devctl.h>
 #include "plat.h"
+
+long long plat_free_bytes(void)
+{
+    SceIoDevInfo info;
+    memset(&info, 0, sizeof(info));
+    return sceIoDevctl("ux0:", 0x3001, NULL, 0, &info, sizeof(info)) < 0 ? -1 : (long long)info.free_size;
+}
 
 #define DATA_DIR "ux0:data/ghvita/"
 #define AUDIO_GRAIN 512

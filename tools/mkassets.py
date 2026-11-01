@@ -133,8 +133,9 @@ def lamp(state, hue):
     S = 4
     n = 64 * S
     yy, xx = np.mgrid[0:n, 0:n] / S
-    cx, cy, r = 32.0, 32.0, 27.0
-    d = np.hypot(xx - cx, yy - cy)      # a ball: the rope lies over its inner side
+    cx, cy, r = 28.0, 32.0, 25.0
+    # a dome: round at the end, running straight on under the rope so it grows out of it
+    d = np.where(xx >= cx, np.abs(yy - cy), np.hypot(xx - cx, yy - cy))
     body = d < r
     ndist = np.clip(d / r, 0, 1)
     hue = np.array(hue, float)

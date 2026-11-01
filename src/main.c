@@ -12,6 +12,7 @@
 #include "font.h"
 #include "res.h"
 #include "audio.h"
+#include "shrink.h"
 #include "songs.h"
 #include "tour.h"
 #include "career.h"
@@ -777,6 +778,19 @@ static void download_screen(void)
     else if (more || dl_searching())
         font_draw(res.ui, dl_searching() ? "..." : "more below", 304, 130 + DL_ROWS * 56, 18,
                   RGBA(170, 170, 170, 255), ALIGN_CENTER);
+    // what room's left on the card, looked at every few seconds
+    static long long room = -1;
+    static int room_wait;
+    if (--room_wait <= 0) {
+        room = plat_free_bytes();
+        room_wait = 180;
+    }
+    if (room >= 0) {
+        snprintf(t, sizeof(t), room >= (1LL << 30) ? "%.1f GB free" : "%.0f MB free",
+                 room >= (1LL << 30) ? room / 1073741824.0 : room / 1048576.0);
+        font_draw_shadow(res.ui, t, 936, 68, 20, room < (200LL << 20) ? RGBA(255, 120, 100, 255) : RGBA(190, 230, 190, 255),
+                         ALIGN_RIGHT);
+    }
     // what's downloading
     char now[160];
     dl_now(now, sizeof(now));
@@ -2213,13 +2227,13 @@ static void tour_screen(void)
 
 enum { O_SPEED, O_HIGHWAY, O_VENUE, O_BAND, O_SING, O_OFFSET, O_LAYOUT, O_DRUMKEYS, O_DRUMHITS, O_TILT, O_NOFAIL, O_LEFTY, O_MUSIC, O_SFX, O_CROWD, O_FPS,
        O_CAMERA, O_HWALPHA, O_VLIGHT, O_FLASH, O_POPUPS, O_TIMING, O_LIVE, O_VANISH, O_MISSSND, O_REAR, O_BEND, O_COUNTDOWN,
-       O_RESET, O_FIVEPADS, O_DOUBLEKICK, O_EASYSUS, O_COUNTIN, O_SCREENS, O_PROGRESS, O_CUPS, O_AUTOREPRESS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, O_CROWDHANDS, O_VIGNETTE, O_LYRICS, O_MENUMUSIC, O_COUNT };
+       O_RESET, O_FIVEPADS, O_DOUBLEKICK, O_EASYSUS, O_COUNTIN, O_SCREENS, O_PROGRESS, O_CUPS, O_AUTOREPRESS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, O_CROWDHANDS, O_VIGNETTE, O_LYRICS, O_MENUMUSIC, O_SHRINKCHECK, O_COUNT };
 
 // the options by subject, L and R between them
-enum { OPT_TABS = 6, OPT_TAB_MAX = 9 };
+enum { OPT_TABS = 6, OPT_TAB_MAX = 10 };
 static const char * opt_tab_names[OPT_TABS] = {"GAME", "CONTROLS", "HIGHWAY", "STAGE", "SCREEN", "SOUND"};
 static const int opt_tabs[OPT_TABS][OPT_TAB_MAX + 1] = {
-    {O_SPEED, O_OFFSET, O_NOFAIL, O_EASYSUS, O_AUTOREPRESS, O_VANISH, O_COUNTDOWN, O_SING, O_RESET, -1},
+    {O_SPEED, O_OFFSET, O_NOFAIL, O_EASYSUS, O_AUTOREPRESS, O_VANISH, O_COUNTDOWN, O_SING, O_SHRINKCHECK, O_RESET, -1},
     {O_LAYOUT, O_DRUMKEYS, O_FIVEPADS, O_DOUBLEKICK, O_LEFTY, O_TILT, O_REAR, -1},
     {O_HIGHWAY, O_HWALPHA, O_CAMERA, O_CUPS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, -1},
     {O_VENUE, O_VLIGHT, O_BAND, O_CROWDHANDS, O_VIGNETTE, O_SCREENS, O_FLASH, -1},
@@ -2228,6 +2242,22 @@ static const int opt_tabs[OPT_TABS][OPT_TAB_MAX + 1] = {
 };
 static int opt_tab, opt_top;
 static bool opt_reset_armed;
+// the shrink check: a song a frame, so the menu keeps moving
+static int shrink_next = -1, shrink_left, shrink_seen;
+
+static void shrink_check_step(void)
+{
+    if (shrink_next < 0 || shrink_next >= songs_count()) {
+        shrink_next = -1;
+        return;
+    }
+    const Song * so = songs_get(shrink_next++);
+    shrink_seen++;
+    if (!shrink_done(so->folder)) {
+        shrink_left++;
+        plat_log("not shrunk: %s", so->folder);
+    }
+}
 
 static int opt_tab_count(void)
 {
@@ -2315,6 +2345,17 @@ static void option_text(int i, char * name, char * value, size_t n)
     case O_COUNTIN: strcpy(name, "Count-in"); snprintf(value, n, "%s", cfg.no_count_in ? "Off" : "On"); break;
     case O_EASYSUS: strcpy(name, "Easy chord sustains"); snprintf(value, n, "%s", cfg.easy_sustains ? "On" : "Off"); break;
     case O_DOUBLEKICK: strcpy(name, "Double kick"); snprintf(value, n, "%s", cfg.double_kick ? "On" : "Off"); break;
+    case O_SHRINKCHECK:
+        strcpy(name, "Check songs are shrunk");
+        if (shrink_next >= 0)
+            snprintf(value, n, "%d/%d", shrink_seen, songs_count());
+        else if (!shrink_seen)
+            snprintf(value, n, "Press X");
+        else if (shrink_left)
+            snprintf(value, n, "%d of %d not", shrink_left, shrink_seen);
+        else
+            snprintf(value, n, "All %d", shrink_seen);
+        break;
     case O_RESET: strcpy(name, "Reset settings"); snprintf(value, n, "%s", opt_reset_armed ? "Press X again" : ""); break;
     }
 }
@@ -2418,7 +2459,12 @@ static void options_screen(void)
         opt_reset_armed = false;
         ui_sound(SND_UI_MOVE);
     }
+    shrink_check_step();
     int opt = opt_tabs[opt_tab][menu_index];
+    if (opt == O_SHRINKCHECK && (pressed & BTN_CROSS)) {
+        shrink_next = shrink_left = shrink_seen = 0;
+        ui_sound(SND_UI_SELECT);
+    }
     if (opt == O_RESET) {
         if (pressed & BTN_CROSS) {
             if (opt_reset_armed) {
@@ -2535,6 +2581,7 @@ static void options_screen(void)
         "Darkens the edges of the picture to keep your eye on the highway.",
         "The song's words along the top while a line is sung. Sing along is the mic, separately.",
         "One of your songs plays quietly in the menus.",
+        "X counts the songs whose audio isn't shrunk to Opus yet.",
     };
     char line[160];
     const char * text = about[opt];

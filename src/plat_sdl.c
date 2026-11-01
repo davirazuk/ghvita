@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/statvfs.h>
 #include <stdarg.h>
 #include "plat.h"
 #include "update_apply.h"
@@ -447,4 +448,10 @@ void plat_screenshot(const char * name)
         fwrite(px + y * SCREEN_W * 3, 1, SCREEN_W * 3, f);
     fclose(f);
     plat_log("shot: %s", path);
+}
+
+long long plat_free_bytes(void)
+{
+    struct statvfs v;
+    return statvfs(".", &v) ? -1 : (long long)v.f_bavail * (long long)v.f_frsize;
 }

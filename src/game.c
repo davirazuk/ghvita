@@ -2736,23 +2736,29 @@ static void draw_rail_meter(void)
         snprintf(name, sizeof(name), "lamp_%d%s", state, hue);
         const Sprite * s = atlas_get(res.game, name);
         // where its foot lies on the rope, on the screen; the dome stands square to that, as deep as it's wide
-        const float lz = z0 + 0.3f, lg = (z1 - 0.42f - lz) / 5, fx = rope1 + 0.17f;
+        const float lz = z0 + 0.52f, lg = (z1 - 0.42f - lz) / 5, fx = rope1 + 0.14f;
         const float a3[3] = {fx, 0.016f, lz + lg * (i - 0.02f)}, b3[3] = {fx, 0.016f, lz + lg * (i + 1.02f)};
         float a[2], b[2];
         project(a3[0], a3[1], a3[2], &a[0], &a[1]);
         project(b3[0], b3[1], b3[2], &b[0], &b[1]);
-        float nx = b[1] - a[1], ny = a[0] - b[0];
-        if (nx < 0) {
-            nx = -nx;
-            ny = -ny;
-        }
-        const float tall = 1.0f;
-        const float p[4][3] = {{a[0] + nx * tall, a[1] + ny * tall, 0}, {a[0], a[1], 0}, {b[0], b[1], 0},
-                               {b[0] + nx * tall, b[1] + ny * tall, 0}};
+        // a stiff lamp pointing straight out to the side of the screen, as in the footage, not square to the slanted rope
+        const float tilt = -0.09f, ux = cosf(tilt), uy = sinf(tilt), wide = hypotf(b[0] - a[0], b[1] - a[1]) * 0.5f;
+        const float len = wide * 2.5f, mx0 = (a[0] + b[0]) / 2, my0 = (a[1] + b[1]) / 2, vx = -uy * wide, vy = ux * wide;
+        const float p[4][3] = {{mx0 + ux * len - vx, my0 + uy * len - vy, 0}, {mx0 - vx, my0 - vy, 0}, {mx0 + vx, my0 + vy, 0},
+                               {mx0 + ux * len + vx, my0 + uy * len + vy, 0}};
         const float uv[4][2] = {{s->u0, s->v0}, {s->u1, s->v0}, {s->u1, s->v1}, {s->u0, s->v1}};
         const uint32_t c[4] = {WHITE, WHITE, WHITE, WHITE};
         gfx_tex(s->tex);
         gfx_quad(p, uv, c);
+        if (state == 2) {
+            // lit, it throws light round itself
+            const uint32_t light = G.sp_active ? RGBA(95, 225, 255, 255) : base_m >= 3 ? RGBA(255, 130, 225, 255)
+                                 : base_m == 2 ? RGBA(90, 245, 110, 255) : RGBA(255, 196, 70, 255);
+            float mx = mx0 + ux * len * 0.72f, my = my0 + uy * len * 0.72f, r = wide * 2.2f;
+            gfx_blend(BLEND_ADD);
+            gfx_sprite(atlas_get(res.game, "glow"), mx - r, my - r, r * 2, r * 2, with_alpha(light, 0.6f));
+            gfx_blend(BLEND_ALPHA);
+        }
     }
     gfx_3d(G.proj, G.view);
     gfx_blend(BLEND_ALPHA);

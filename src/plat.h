@@ -68,4 +68,6 @@ void plat_keep_awake(void);
 void plat_text_begin(const char * title, const char * initial);
 int plat_text_poll(char * text, int size);
 // a test build's scripted input and screenshots (no-ops on the Vita)
-void plat_screenshot(const char * name);
+void plat_screenshot(const char * name);// bytes free on the card, -1 if it can't be told
+long long plat_free_bytes(void);
+
