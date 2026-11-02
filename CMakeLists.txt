@@ -24,7 +24,7 @@ execute_process(COMMAND git rev-list --count HEAD WORKING_DIRECTORY ${CMAKE_SOUR
 if (NOT GHV_BUILD)
     set(GHV_BUILD ${GHV_COMMITS})
 endif()
-set_source_files_properties(src/update.c PROPERTIES COMPILE_DEFINITIONS GHV_BUILD=${GHV_BUILD})
+set_source_files_properties(src/update.c src/main.c PROPERTIES COMPILE_DEFINITIONS GHV_BUILD=${GHV_BUILD})
 
 if (VITA)
     set(VITA_APP_NAME "GH Vita")

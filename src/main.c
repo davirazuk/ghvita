@@ -23,7 +23,7 @@
 #include "update.h"
 
 enum { S_TITLE, S_MAIN, S_TOUR, S_SONGS, S_SELECT, S_PRACTICE, S_PLAY, S_PAUSE, S_RESUME, S_RESULTS, S_OPTIONS, S_CALIBRATE, S_EMPTY,
-       S_DOWNLOAD, S_UPDATE, S_CAREER };
+       S_DOWNLOAD, S_UPDATE, S_CAREER, S_NEWS };
 
 static int screen = S_TITLE;
 static double now_s, screen_t;
@@ -1699,7 +1699,7 @@ static void practice_screen(void)
         pr_speed -= 5;
     if (repeat & BTN_RIGHT)
         pr_speed += 5;
-    pr_speed = pr_speed < 50 ? 50 : pr_speed > 100 ? 100 : pr_speed;
+    pr_speed = pr_speed < 50 ? 50 : pr_speed > 150 ? 150 : pr_speed;
     if (pr_from != from || pr_to != to || pr_speed != speed)
         ui_sound(SND_UI_MOVE);
     if (pressed & BTN_CIRCLE) {
@@ -2343,15 +2343,16 @@ enum { O_SPEED, O_HIGHWAY, O_VENUE, O_BAND, O_SING, O_OFFSET, O_LAYOUT, O_DRUMKE
        O_RESET, O_FIVEPADS, O_DOUBLEKICK, O_EASYSUS, O_COUNTIN, O_SCREENS, O_PROGRESS, O_CUPS, O_AUTOREPRESS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, O_CROWDHANDS, O_VIGNETTE, O_LYRICS, O_MENUMUSIC, O_SINGSP, O_SHRINKCHECK, O_COUNT };
 
 // the options by subject, L and R between them
-enum { OPT_TABS = 6, OPT_TAB_MAX = 11 };
-static const char * opt_tab_names[OPT_TABS] = {"GAME", "CONTROLS", "HIGHWAY", "STAGE", "SCREEN", "SOUND"};
+enum { OPT_TABS = 7, OPT_TAB_MAX = 11 };
+static const char * opt_tab_names[OPT_TABS] = {"GAME", "CONTROLS", "HIGHWAY", "STAGE", "SCREEN", "SOUND", "LIBRARY"};
 static const int opt_tabs[OPT_TABS][OPT_TAB_MAX + 1] = {
-    {O_SPEED, O_OFFSET, O_NOFAIL, O_EASYSUS, O_AUTOREPRESS, O_VANISH, O_COUNTDOWN, O_SING, O_SINGSP, O_SHRINKCHECK, O_RESET, -1},
-    {O_LAYOUT, O_DRUMKEYS, O_FIVEPADS, O_DOUBLEKICK, O_LEFTY, O_TILT, O_REAR, -1},
+    {O_SPEED, O_OFFSET, O_NOFAIL, O_EASYSUS, O_AUTOREPRESS, O_VANISH, O_COUNTDOWN, O_SING, O_RESET, -1},
+    {O_LAYOUT, O_DRUMKEYS, O_FIVEPADS, O_DOUBLEKICK, O_LEFTY, O_TILT, O_REAR, O_SINGSP, -1},
     {O_HIGHWAY, O_HWALPHA, O_CAMERA, O_CUPS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, -1},
     {O_VENUE, O_VLIGHT, O_BAND, O_CROWDHANDS, O_VIGNETTE, O_SCREENS, O_FLASH, -1},
     {O_LYRICS, O_POPUPS, O_PROGRESS, O_TIMING, O_LIVE, O_FPS, -1},
     {O_MUSIC, O_SFX, O_CROWD, O_MENUMUSIC, O_COUNTIN, O_DRUMHITS, O_MISSSND, O_BEND, -1},
+    {O_SHRINKCHECK, -1},
 };
 static int opt_tab, opt_top;
 static bool opt_reset_armed;
@@ -2813,6 +2814,46 @@ static void career_screen(void)
     gfx_end();
 }
 
+// what changed in this build, shown once the first time it starts (or after an update)
+static void news_screen(void)
+{
+    static const char * const lines[] = {
+        "Star Power's gems burn blue instead of silver.",
+        "Songs shrink on the Vita: Settings -> GAME -> \"Check songs are shrunk\" counts, then X shrinks, no card.",
+        "Vocals: clap notes (any noise plays them), and \"Singing starts Star Power\" (off by default).",
+        "Download queue survives closing the game: waiting jobs carry on, failed ones wait on SELECT's queue for X.",
+        "Bass 10x and 12x multiplier badges (no more gray squares).",
+        "The vocal arrow lines up with the notes; lamps point the right way.",
+        "Search and library sort by relevance; genre and the chart author's note show before downloading.",
+        "Practice mode now goes up to 150% speed.",
+        "Shrinking shows which song it's on and runs faster.",
+    };
+    int n = (int)(sizeof(lines) / sizeof(lines[0]));
+    gfx_begin(0, 0, 0);
+    gfx_2d();
+    draw_background(res.bg_menu, WHITE);
+    banner("WHAT'S NEW IN THIS BUILD");
+    panel(150, 96, 660, 400);
+    float y = 124;
+    for (int i = 0; i < n; i++) {
+        font_draw_fit(res.ui, lines[i], 170, y, 20, 620, RGBA(230, 230, 235, 255), ALIGN_LEFT);
+        y += 44;
+    }
+    font_draw_shadow(res.ui, "X  continue", SCREEN_W / 2, 498, 20, RGBA(180, 220, 255, 255), ALIGN_CENTER);
+    draw_toast();
+    gfx_end();
+    if (pressed & (BTN_CROSS | BTN_CIRCLE)) {
+        char path[400];
+        snprintf(path, sizeof(path), "%sseen.txt", plat_data_dir());
+        FILE * f = fopen(path, "w");
+        if (f) {
+            fprintf(f, "%d\n", GHV_BUILD);
+            fclose(f);
+        }
+        go(S_TITLE);
+    }
+}
+
 // --------------------------------------------------------------------------------------------------- calibration
 
 static int by_double(const void * a, const void * b)
@@ -2947,6 +2988,19 @@ int main(void)
             game_set_autoplay(autoplay);
             go(S_PLAY);
         }
+    } else {
+        // the first time this build starts, say what's new; one press and it never shows again
+        char seen_path[400], line[32] = "";
+        int seen = 0;
+        snprintf(seen_path, sizeof(seen_path), "%sseen.txt", plat_data_dir());
+        FILE * sf = fopen(seen_path, "r");
+        if (sf) {
+            if (fgets(line, sizeof(line), sf))
+                seen = atoi(line);
+            fclose(sf);
+        }
+        if (seen != GHV_BUILD)
+            go(S_NEWS);
     }
     uint32_t last_buttons = 0;
     bool last_overlay = false;
@@ -2970,6 +3024,7 @@ int main(void)
         case S_SELECT: select_screen(); break;
         case S_PRACTICE: practice_screen(); break;
         case S_CAREER: career_screen(); break;
+        case S_NEWS: news_screen(); break;
         case S_PLAY: play_screen(); break;
         case S_PAUSE: pause_screen(); break;
         case S_RESUME: resume_screen(); break;
