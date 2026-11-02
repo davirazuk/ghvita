@@ -454,7 +454,8 @@ static void draw_rig(double beat, float pulse)
             angle = from + 0.3f * swing;
         float a = level;
         if (G.focus >= 0 && i == spot) {
-            angle = atan2f(-(tx - lamp_x[i]), ty - lamp_y[i]);
+            // the focused lamp points at the band: atan2(y, x), not the axes swapped
+            angle = atan2f(ty - lamp_y[i], tx - lamp_x[i]);
             a = 0.5f + 0.3f * pulse;
         }
         sprite_rot(beam, lamp_x[i], lamp_y[i], 200 * G.cam_z, 450 * G.cam_z, beam->w / 2.0f, 0, angle,

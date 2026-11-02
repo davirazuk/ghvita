@@ -718,6 +718,7 @@ static void download_screen(void)
         dl_queue_view = true;
         dl_jobs_sel = 0;
         ui_sound(SND_UI_SELECT);
+        return;                     // it opens next frame: the same press must not close it again here
     }
     if (dl_queue_view) {
         dl_queue_screen();
