@@ -919,6 +919,11 @@ static void download_screen(void)
             font_draw_fit(res.ui, t, 630, y, 18, 300, RGBA(200, 200, 200, 255), ALIGN_LEFT);
             y += 21;
         }
+        if (cur.genre[0]) {
+            snprintf(t, sizeof(t), "Genre: %s", cur.genre);
+            font_draw_fit(res.ui, t, 630, y, 18, 300, RGBA(170, 170, 170, 255), ALIGN_LEFT);
+            y += 21;
+        }
         int secs = cur.length_ms / 1000;
         if (cur.size > 0)
             snprintf(t, sizeof(t), "%d:%02d   %.1f MB", secs / 60, secs % 60, cur.size / 1048576.0);
@@ -930,6 +935,10 @@ static void download_screen(void)
             snprintf(t, sizeof(t), "Charted by %s%s", cur.charter, cur.rock_band ? "  (Rock Band)" : "");
             font_draw_fit(res.ui, t, 630, y, 18, 300, RGBA(170, 170, 170, 255), ALIGN_LEFT);
             y += 22;
+        }
+        if (cur.comment[0]) {
+            font_draw_fit(res.ui, cur.comment, 630, y, 16, 300, RGBA(190, 190, 200, 255), ALIGN_LEFT);
+            y += 44;
         }
         // what's in the chart, with how hard: known before it's downloaded
         if (cur.any_parts) {

@@ -42,6 +42,33 @@ static void trim(char * s)
 }
 
 // "The Strokes" sorts as "strokes"
+// letters and digits: digit runs compare by value, so "Track 2" sorts before "Track 10"
+static int natural_cmp(const char * a, const char * b)
+{
+    while (*a && *b) {
+        if (isdigit((unsigned char)*a) && isdigit((unsigned char)*b)) {
+            while (*a == '0') a++;
+            while (*b == '0') b++;
+            size_t la = 0, lb = 0;
+            while (isdigit((unsigned char)a[la])) la++;
+            while (isdigit((unsigned char)b[lb])) lb++;
+            int cmp;
+            if (la != lb) cmp = (int)(la - lb);
+            else cmp = memcmp(a, b, la < lb ? la : lb);
+            if (cmp)
+                return cmp;
+            a += la;
+            b += lb;
+        } else {
+            int ca = tolower((unsigned char)*a), cb = tolower((unsigned char)*b);
+            if (ca != cb) return ca - cb;
+            a++;
+            b++;
+        }
+    }
+    return (unsigned char)*a - (unsigned char)*b;
+}
+
 static void sort_key(char * out, size_t size, const char * in)
 {
     if (strncasecmp(in, "the ", 4) == 0)
@@ -533,21 +560,21 @@ Song * songs_get(int index)
 static int by_title(const void * a, const void * b)
 {
     const Song * x = a, * y = b;
-    int c = strcmp(x->sort_name, y->sort_name);
-    return c ? c : strcmp(x->sort_artist, y->sort_artist);
+    int c = natural_cmp(x->sort_name, y->sort_name);
+    return c ? c : natural_cmp(x->sort_artist, y->sort_artist);
 }
 
 static int by_artist(const void * a, const void * b)
 {
     const Song * x = a, * y = b;
-    int c = strcmp(x->sort_artist, y->sort_artist);
-    return c ? c : strcmp(x->sort_name, y->sort_name);
+    int c = natural_cmp(x->sort_artist, y->sort_artist);
+    return c ? c : natural_cmp(x->sort_name, y->sort_name);
 }
 
 static int by_album(const void * a, const void * b)
 {
     const Song * x = a, * y = b;
-    int c = strcasecmp(x->album, y->album);
+    int c = natural_cmp(x->album, y->album);
     return c ? c : by_artist(a, b);
 }
 
@@ -561,14 +588,14 @@ static int by_year(const void * a, const void * b)
 static int by_genre(const void * a, const void * b)
 {
     const Song * x = a, * y = b;
-    int c = strcasecmp(x->genre, y->genre);
+    int c = natural_cmp(x->genre, y->genre);
     return c ? c : by_artist(a, b);
 }
 
 static int by_charter(const void * a, const void * b)
 {
     const Song * x = a, * y = b;
-    int c = strcasecmp(x->charter, y->charter);
+    int c = natural_cmp(x->charter, y->charter);
     return c ? c : by_artist(a, b);
 }
 

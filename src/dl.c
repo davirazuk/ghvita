@@ -247,7 +247,9 @@ static int parse_chorus(const char * body, size_t len, DlHit ** out, int * total
         copy_str(h->artist, sizeof(h->artist), json_get(c, "artist"));
         copy_str(h->album, sizeof(h->album), json_get(c, "album"));
         copy_str(h->year, sizeof(h->year), json_get(c, "year"));
+        copy_str(h->genre, sizeof(h->genre), json_get(c, "genre"));
         copy_str(h->charter, sizeof(h->charter), json_get(c, "charter"));
+        copy_str(h->comment, sizeof(h->comment), json_get(c, "loading_phrase"));
         h->length_ms = (int)json_num(json_get(c, "song_length"), 0);
         snprintf(h->url, sizeof(h->url), "https://files.enchor.us/%s.sng", md5);
         copy_str(art, sizeof(art), json_get(c, "albumArtMd5"));
@@ -413,6 +415,10 @@ static int parse_rv(const char * body, size_t len, DlHit ** out, int * total, ch
         if (!h->album[0])
             copy_str(h->album, sizeof(h->album), json_get(f, "file_album"));
         copy_str(h->year, sizeof(h->year), json_get(d, "year"));
+        copy_str(h->genre, sizeof(h->genre), json_get(d, "genre"));
+        copy_str(h->comment, sizeof(h->comment), json_get(d, "loading_phrase"));
+        if (!h->comment[0])
+            copy_str(h->comment, sizeof(h->comment), json_get(f, "loading_phrase"));
         if (!strcmp(h->year, "0"))
             h->year[0] = 0;
         copy_str(h->charter, sizeof(h->charter), json_path(f, "author.name"));
@@ -556,6 +562,60 @@ static bool rv_page(const char * query, int page, DlHit ** out, int * n, int * t
     return ok;
 }
 
+// while a search is typed, the results come in the site's order; sort by how well each one fits the words instead.
+// an empty query keeps the site's order (newest first)
+static char sort_query[128];
+
+static int hit_rank(const DlHit * h)
+{
+    char q[128], n[96], a[96];
+    for (int i = 0; sort_query[i] && i < 127; i++)
+        q[i] = (char)tolower((unsigned char)sort_query[i]);
+    q[127] = 0;
+    for (int i = 0; h->name[i] && i < 95; i++)
+        n[i] = (char)tolower((unsigned char)h->name[i]);
+    n[95] = 0;
+    for (int i = 0; h->artist[i] && i < 95; i++)
+        a[i] = (char)tolower((unsigned char)h->artist[i]);
+    a[95] = 0;
+    if (!strcmp(n, q))
+        return 0;
+    if (strstr(n, q) == n)
+        return 1;
+    if (strstr(a, q) == a)
+        return 2;
+    if (strstr(n, q))
+        return 3;
+    if (strstr(a, q))
+        return 4;
+    return 5;
+}
+
+static void sort_hits(DlHit * h, int n, const char * query)
+{
+    if (!query || !query[0] || n < 2)
+        return;
+    snprintf(sort_query, sizeof(sort_query), "%s", query);
+    // order[] keeps it stable: equal ranks keep the site's order
+    int order[256];
+    for (int i = 0; i < n; i++)
+        order[i] = i;
+    for (int i = 1; i < n; i++) {
+        int j = i;
+        while (j > 0 && hit_rank(&h[order[j - 1]]) > hit_rank(&h[order[j]])) {
+            int t = order[j - 1];
+            order[j - 1] = order[j];
+            order[j] = t;
+            j--;
+        }
+    }
+    DlHit tmp[256];
+    for (int i = 0; i < n; i++)
+        tmp[i] = h[order[i]];
+    for (int i = 0; i < n; i++)
+        h[i] = tmp[i];
+}
+
 // one page of a search: false and err when the site couldn't be asked
 static bool fetch_page(int site, const char * query, int page, DlHit ** out, int * n, int * total, char * err,
                        size_t err_size)
@@ -590,6 +650,8 @@ static bool fetch_page(int site, const char * query, int page, DlHit ** out, int
         }
         status = rv_page(query, page, out, n, total, err, err_size) ? 200 : 0;
     }
+    if (*out && *n > 1 && query[0])
+        sort_hits(*out, *n, query);
     free(body);
     if (status < 200 || status >= 300) {
         if (status && !err[0])

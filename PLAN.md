@@ -182,6 +182,7 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 - Downloads keep going during a song; only the unpack-and-shrink waits for it to end.
 - Bass reaches x6 and doubles to x12 under Star Power: mkassets composes the x10 and x12 plates GHWT never made (they were the blue-gray squares).
 - The vocal arrow runs 70 ms behind the now line, the same window the pitch matching uses, holds its note between phrases instead of snapping to the phrase's middle, and its wake ages while the strip is away.
+- The download screen now shows genre and the chart author's note before you download, and the results are sorted by how well the words fit (exact name, then name prefix, then artist, then the rest) instead of the site's order. The library sorts the same way, and numbers sort by value ("Track 2" before "Track 10").
 
 ## Settings, career, drums (2026-10-31)
 - Options has tabs (L/R: GAME, CONTROLS, LOOK, SOUND; opt_tabs in main.c). New: highway camera (World Tour, Close, High), highway solid, venue brightness, screen flashes, streak messages, timing bar (under the highway, ticks by hit offset), live percent + FC, vanishing notes, wrong note sounds, rear pad whammy, whammy bends the sound, countdown on resume, Reset settings (keeps offset and last song).

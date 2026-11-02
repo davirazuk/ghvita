@@ -15,6 +15,8 @@ typedef struct {
     int site;
     char id[80];                    // "chorus:<md5>" or "rv:<file id>" (ghvita.ini keeps it: the library knows it)
     char name[96], artist[96], album[96], year[16], charter[64];
+    char genre[32];                 // what the site says it is
+    char comment[160];              // the chart author's note about it
     int length_ms;
     int64_t size;                   // bytes, 0 when unknown
     char url[600];                  // what to fetch ("gdrive-folder:<id>", "mediafire:<page>", "mega:<link>" are looked up)
