@@ -454,8 +454,8 @@ static void draw_rig(double beat, float pulse)
             angle = from + 0.3f * swing;
         float a = level;
         if (G.focus >= 0 && i == spot) {
-            // the focused lamp points at the band: atan2(y, x), not the axes swapped
-            angle = atan2f(ty - lamp_y[i], tx - lamp_x[i]);
+            // the beam hangs straight down at zero, so the angle is from +y, not from +x
+            angle = atan2f(-(tx - lamp_x[i]), ty - lamp_y[i]);
             a = 0.5f + 0.3f * pulse;
         }
         sprite_rot(beam, lamp_x[i], lamp_y[i], 200 * G.cam_z, 450 * G.cam_z, beam->w / 2.0f, 0, angle,
@@ -2671,15 +2671,6 @@ static void draw_zones(void)
 
 static void lay(float x, float y, float z, float w, float d, const Sprite * s, uint32_t c);
 
-// is this lane ringing a sustain the player's still on?
-static bool lane_sustain(int l)
-{
-    for (int i = 0; i < MAX_SUS; i++)
-        if (G.sus[i].note >= 0 && (G.part->notes[G.sus[i].note].frets & (1 << l)))
-            return true;
-    return false;
-}
-
 static void draw_cups(bool caps)
 {
     const float cw = 1.02f, cup_d = 0.84f;        // 128x64 art lying on the neck: 2.9 to 1 on the screen, as World Tour's
@@ -2732,7 +2723,6 @@ static void draw_rail_meter(void)
     int lit = base_m >= max_m ? 5 : (G.streak % 10) / 2;
     bool half = base_m < max_m && G.streak % 2;
     const char * hue = G.sp_active ? "_blue" : base_m >= 3 ? "_purple" : base_m == 2 ? "_green" : "";
-    const float gap = (z1 - z0) / 5;
     gfx_blend(BLEND_ALPHA);
     gfx_2d();
     for (int i = 0; i < 5; i++) {
