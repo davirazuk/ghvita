@@ -2778,26 +2778,11 @@ static void lay(float x, float y, float z, float w, float d, const Sprite * s, u
     flat(x + w / 2, x - w / 2, z - d / 2, z + d / 2, y, s, 1, 0, c, c);
 }
 
-// a gem is round, so the perspective hardly leans it, where a flat picture on the board would be skewed the further out
-// it lies: green and orange worst. Most of that is taken back, about its centre, so it stays on its string
-static float view_depth(float z)
-{
-    return -(G.view[10] * z + G.view[14]);
-}
-
 static void lay_gem(float x, float y, float z, float w, float d, const Sprite * s, uint32_t c)
 {
-    if (!cfg.flat_notes) {
-        lay(x, y, z, w, d, s, c);
-        return;
-    }
-    const float keep = 0.75f, mid = view_depth(z), z0 = z - d / 2, z1 = z + d / 2;
-    float x0 = x * (1 + keep * (view_depth(z0) / mid - 1)), x1 = x * (1 + keep * (view_depth(z1) / mid - 1));
-    const float p[4][3] = {{x0 + w / 2, y, z0}, {x0 - w / 2, y, z0}, {x1 - w / 2, y, z1}, {x1 + w / 2, y, z1}};
-    const float uv[4][2] = {{s->u0, s->v1}, {s->u1, s->v1}, {s->u1, s->v0}, {s->u0, s->v0}};
-    const uint32_t cc[4] = {c, c, c, c};
-    gfx_tex(s->tex);
-    gfx_quad(p, uv, cc);
+    // square in its lane, like the cups: the old depth spread pulled each gem's far edge (the button's white cap)
+    // towards the middle of the screen, so only the middle lane's cap sat centered on its gem
+    lay(x, y, z, w, d, s, c);
 }
 
 static void draw_gems(void)
@@ -2991,21 +2976,7 @@ static void draw_keys(void)
         project(lane_x(lane), 0, 0, &x, &y);
         for (size_t k = 0; k < sizeof(keys) / sizeof(keys[0]); k++)
             if (b & keys[k].button) {
-                // the D-pad arrows point in the button's direction, which reads as off-centre on every lane but
-                // the up arrow on the yellow one; stand them all up so they sit in the lane the way that one does
-                const Sprite * sp = atlas_get(res.hud, keys[k].name);
-                if (b & (BTN_LEFT | BTN_RIGHT | BTN_DOWN)) {
-                    float ang = 0;
-                    if (b & BTN_LEFT)
-                        ang = 1.5707963f;
-                    else if (b & BTN_RIGHT)
-                        ang = -1.5707963f;
-                    else if (b & BTN_DOWN)
-                        ang = 3.14159265f;
-                    sprite_rot(sp, x, y + 28 + size / 2, size, size, sp->w / 2.0f, sp->h / 2.0f, ang,
-                               with_alpha(WHITE, a));
-                } else
-                    gfx_sprite(sp, x - size / 2, y + 28, size, size, with_alpha(WHITE, a));
+                gfx_sprite(atlas_get(res.hud, keys[k].name), x - size / 2, y + 28, size, size, with_alpha(WHITE, a));
                 break;
             }
     }
