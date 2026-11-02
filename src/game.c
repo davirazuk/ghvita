@@ -3001,7 +3001,21 @@ static void draw_keys(void)
         project(lane_x(lane), 0, 0, &x, &y);
         for (size_t k = 0; k < sizeof(keys) / sizeof(keys[0]); k++)
             if (b & keys[k].button) {
-                gfx_sprite(atlas_get(res.hud, keys[k].name), x - size / 2, y + 28, size, size, with_alpha(WHITE, a));
+                // the D-pad arrows point in the button's direction, which reads as off-centre on every lane but
+                // the up arrow on the yellow one; stand them all up so they sit in the lane the way that one does
+                const Sprite * sp = atlas_get(res.hud, keys[k].name);
+                if (b & (BTN_LEFT | BTN_RIGHT | BTN_DOWN)) {
+                    float ang = 0;
+                    if (b & BTN_LEFT)
+                        ang = 1.5707963f;
+                    else if (b & BTN_RIGHT)
+                        ang = -1.5707963f;
+                    else if (b & BTN_DOWN)
+                        ang = 3.14159265f;
+                    sprite_rot(sp, x, y + 28 + size / 2, size, size, sp->w / 2.0f, sp->h / 2.0f, ang,
+                               with_alpha(WHITE, a));
+                } else
+                    gfx_sprite(sp, x - size / 2, y + 28, size, size, with_alpha(WHITE, a));
                 break;
             }
     }

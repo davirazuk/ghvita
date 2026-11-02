@@ -2823,10 +2823,11 @@ static void news_screen(void)
         "Vocals: clap notes (any noise plays them), and \"Singing starts Star Power\" (off by default).",
         "Download queue survives closing the game: waiting jobs carry on, failed ones wait on SELECT's queue for X.",
         "Bass 10x and 12x multiplier badges (no more gray squares).",
-        "The vocal arrow lines up with the notes; lamps point the right way.",
+        "The vocal arrow lines up with the notes; lamps and the button hints point the right way.",
         "Search and library sort by relevance; genre and the chart author's note show before downloading.",
         "Practice mode now goes up to 150% speed.",
         "Shrinking shows which song it's on and runs faster.",
+        "Settings reorganised: a LIBRARY tab, sing-to-activate in CONTROLS.",
     };
     int n = (int)(sizeof(lines) / sizeof(lines[0]));
     gfx_begin(0, 0, 0);
