@@ -597,7 +597,8 @@ static void sort_hits(DlHit * h, int n, const char * query)
         return;
     snprintf(sort_query, sizeof(sort_query), "%s", query);
     // order[] keeps it stable: equal ranks keep the site's order
-    int order[256];
+    static int order[256];
+    static DlHit tmp[256];
     for (int i = 0; i < n; i++)
         order[i] = i;
     for (int i = 1; i < n; i++) {
@@ -609,7 +610,6 @@ static void sort_hits(DlHit * h, int n, const char * query)
             j--;
         }
     }
-    DlHit tmp[256];
     for (int i = 0; i < n; i++)
         tmp[i] = h[order[i]];
     for (int i = 0; i < n; i++)
