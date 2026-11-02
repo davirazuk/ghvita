@@ -48,6 +48,9 @@ static char cover_done_url[400];
 
 // ---------------------------------------------------------------------------------------------------- the queue
 
+static void dl_save_locked(void);       // the queue's file, called with the lock held
+static void dl_load(void);              // what the last run left, once at the start
+
 typedef struct {
     DlHit hit;
     volatile JobState state;
@@ -728,6 +731,7 @@ static void start(void)
     char p[400];
     snprintf(p, sizeof(p), "%s/covers", tmp_dir());
     mkdir(p, 0777);
+    dl_load();
     plat_thread("dl_search", search_thread, NULL, PLAT_BACKGROUND);
     plat_thread("dl_jobs", job_thread, NULL, PLAT_BACKGROUND);
 }
@@ -819,7 +823,69 @@ const char * dl_cover(const DlHit * h)
     return NULL;
 }
 
-void dl_queue(const DlHit * h)
+// one line of a saved job: tabs would break the columns
+static void one_line(const char * s, char * out, size_t size)
+{
+    size_t n = 0;
+    for (; *s && n + 1 < size; s++)
+        out[n++] = *s == '\t' || *s == '\n' || *s == '\r' ? ' ' : *s;
+    out[n] = 0;
+}
+
+// the queue survives the game: what's waiting and what failed, so the next run carries on and can retry
+static void dl_save_locked(void)
+{
+    char path[400], id[80], name[96], artist[96], url[600], art[400], msg[96];
+    snprintf(path, sizeof(path), "%sdl.txt", plat_data_dir());
+    FILE * f = fopen(path, "w");
+    if (!f)
+        return;
+    for (int i = 0; i < job_count; i++) {
+        const Job * j = &jobs[i];
+        int st = j->state == JOB_DOWNLOADING || j->state == JOB_INSTALLING ? JOB_QUEUED : j->state;
+        if (st != JOB_QUEUED && st != JOB_FAILED)
+            continue;
+        one_line(j->hit.id, id, sizeof(id));
+        one_line(j->hit.name, name, sizeof(name));
+        one_line(j->hit.artist, artist, sizeof(artist));
+        one_line(j->hit.url, url, sizeof(url));
+        one_line(j->hit.art, art, sizeof(art));
+        one_line(j->msg, msg, sizeof(msg));
+        fprintf(f, "%d\t%s\t%s\t%s\t%s\t%s\t%lld\t%s\n", st, id, name, artist, url, art, (long long)j->hit.size, msg);
+    }
+    fclose(f);
+}
+
+static void dl_load(void)
+{
+    char path[400];
+    snprintf(path, sizeof(path), "%sdl.txt", plat_data_dir());
+    FILE * f = fopen(path, "r");
+    if (!f)
+        return;
+    char line[1700];
+    int carried = 0;
+    while (fgets(line, sizeof(line), f) && job_count < MAX_JOBS) {
+        Job * j = &jobs[job_count];
+        memset(j, 0, sizeof(*j));
+        char size[32] = "", msg[96] = "";
+        int st;
+        int got = sscanf(line, "%d\t%79[^\t]\t%95[^\t]\t%95[^\t]\t%599[^\t]\t%399[^\t]\t%31[^\t]\t%95[^\n]",
+                         &st, j->hit.id, j->hit.name, j->hit.artist, j->hit.url, j->hit.art, size, msg);
+        if (got < 6 || (st != JOB_QUEUED && st != JOB_FAILED) || !j->hit.id[0] || !j->hit.url[0])
+            continue;
+        j->hit.size = atoll(size);
+        snprintf(j->msg, sizeof(j->msg), "%s", msg);
+        j->state = st;
+        job_count++;
+        carried++;
+    }
+    fclose(f);
+    if (carried)
+        plat_log("dl: %d jobs carried over from the last run", carried);
+}
+
+bool dl_queue(const DlHit * h)
 {
     start();
     pthread_mutex_lock(&lock);
@@ -829,28 +895,54 @@ void dl_queue(const DlHit * h)
             j = &jobs[i];
     if (j && (j->state == JOB_QUEUED || j->state == JOB_DOWNLOADING || j->state == JOB_INSTALLING)) {
         pthread_mutex_unlock(&lock);
-        return;
+        return true;
     }
     if (!j) {
-        if (job_count == MAX_JOBS) {
-            // the oldest finished one makes room
-            int k = 0;
-            while (k < job_count && (jobs[k].state == JOB_QUEUED || jobs[k].state == JOB_DOWNLOADING ||
-                                     jobs[k].state == JOB_INSTALLING))
-                k++;
-            if (k == job_count) {
-                pthread_mutex_unlock(&lock);
-                return;
-            }
-            memmove(&jobs[k], &jobs[k + 1], (job_count - k - 1) * sizeof(Job));
-            job_count--;
+        // a finished, failed or emptied slot makes room, in place: nothing in the array ever shifts, so the job
+        // thread's pointer to the one running stays good
+        for (int i = 0; i < job_count && !j; i++)
+            if (jobs[i].state == JOB_DONE || jobs[i].state == JOB_FAILED || jobs[i].state == JOB_NONE)
+                j = &jobs[i];
+        if (!j && job_count < MAX_JOBS)
+            j = &jobs[job_count++];
+        if (!j) {
+            pthread_mutex_unlock(&lock);
+            return false;
         }
-        j = &jobs[job_count++];
     }
     memset(j, 0, sizeof(*j));
     j->hit = *h;
     j->state = JOB_QUEUED;
+    dl_save_locked();
     pthread_mutex_unlock(&lock);
+    return true;
+}
+
+void dl_forget(const char * id)
+{
+    pthread_mutex_lock(&lock);
+    for (int i = 0; i < job_count; i++)
+        if (!strcmp(jobs[i].hit.id, id) && jobs[i].state != JOB_DOWNLOADING && jobs[i].state != JOB_INSTALLING) {
+            jobs[i].state = JOB_NONE;
+            dl_save_locked();
+        }
+    pthread_mutex_unlock(&lock);
+}
+
+int dl_jobs_list(DlJob * out, int max)
+{
+    int n = 0;
+    pthread_mutex_lock(&lock);
+    for (int i = 0; i < job_count && n < max; i++)
+        if (jobs[i].state != JOB_NONE) {
+            out[n].hit = jobs[i].hit;
+            out[n].state = jobs[i].state;
+            out[n].percent = jobs[i].total > 0 ? (int)(jobs[i].done * 100 / jobs[i].total) : -1;
+            snprintf(out[n].msg, sizeof(out[n].msg), "%s", jobs[i].msg);
+            n++;
+        }
+    pthread_mutex_unlock(&lock);
+    return n;
 }
 
 void dl_cancel(const char * id)
@@ -1480,8 +1572,12 @@ static int job_thread(void * arg)
             if (jobs[i].state == JOB_QUEUED)
                 next = &jobs[i];
         pthread_mutex_unlock(&lock);
-        if (next)
+        if (next) {
             run_job(next);
+            pthread_mutex_lock(&lock);
+            dl_save_locked();               // what it became is what the next run picks up
+            pthread_mutex_unlock(&lock);
+        }
         else
             plat_sleep_us(50000);
     }

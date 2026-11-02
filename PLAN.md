@@ -176,6 +176,13 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 - Hardware log before this: pictures 6.1 s of about 8 s. tools/rawtex.py and gfx.c load_raw cut the decoding. The vita time hasn't been measured yet: read "loaded: pictures" in log.txt.
 - library.bin: Song records keyed on the folder's time. On the Vita the listing has the time, so a known song costs no file access at all. Songs edited in place can keep the folder's time: the list menu's "Read the whole card again" drops the file.
 
+## Downloads and vocals fixes (2026-11-01)
+- The download queue never shifts its array: finished and failed slots are reused in place, so the job thread's pointer to the one running stays good, and a full queue says so instead of doing nothing.
+- The queue is saved to dl.txt when it changes: waiting jobs carry on at the next start by themselves, failed ones wait on the queue screen. SELECT on the download screen opens it: X retries a failed one, Square removes.
+- Downloads keep going during a song; only the unpack-and-shrink waits for it to end.
+- Bass reaches x6 and doubles to x12 under Star Power: mkassets composes the x10 and x12 plates GHWT never made (they were the blue-gray squares).
+- The vocal arrow runs 70 ms behind the now line, the same window the pitch matching uses, holds its note between phrases instead of snapping to the phrase's middle, and its wake ages while the strip is away.
+
 ## Settings, career, drums (2026-10-31)
 - Options has tabs (L/R: GAME, CONTROLS, LOOK, SOUND; opt_tabs in main.c). New: highway camera (World Tour, Close, High), highway solid, venue brightness, screen flashes, streak messages, timing bar (under the highway, ticks by hit offset), live percent + FC, vanishing notes, wrong note sounds, rear pad whammy, whammy bends the sound, countdown on resume, Reset settings (keeps offset and last song).
 - "Check songs are shrunk" (O_SHRINKCHECK) now shrinks too: X counts, and with unshrunk songs found, X again runs them through shrink_song() on a background thread, a song at a time, waiting for any song being played to end. The menus' music is a preview, so it never blocks it.

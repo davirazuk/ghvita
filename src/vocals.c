@@ -515,8 +515,13 @@ void vox_draw(double t)
     bool near = false;
     for (int p = V.cur > 0 ? V.cur - 1 : 0; p < V.phrase_count && p < V.cur + 2; p++)
         near |= ms > V.phrases[p].start - 2500 && ms < V.phrases[p].end + 800;
-    if (!near)
+    if (!near) {
+        // the strip is away: the wake still ages, so it doesn't resume stale when it comes back
+        memmove(wake_y + 1, wake_y, sizeof(wake_y) - sizeof(wake_y[0]));
+        memmove(wake_hit + 1, wake_hit, sizeof(wake_hit) - sizeof(wake_hit[0]));
+        wake_y[0] = -1;
         return;
+    }
     gfx_blend(BLEND_ALPHA);
     // World Tour's strip: dark glass with a teal hairline, the words on a darker band under it
     gfx_rect_grad(0, LANE_Y, SCREEN_W, LANE_H, RGBA(6, 16, 24, 190), RGBA(4, 10, 16, 170));
@@ -544,13 +549,16 @@ void vox_draw(double t)
     bool hit = false;
     float voice_y = -1;
     if (voice >= 0) {
-        int want = V.target ? V.target : (scale->low + scale->high) / 2;
+        // what the mic just heard was sung a detection window ago: the matching runs 70 ms behind, and so does the
+        // arrow, or it would trail the note it's on
+        int want = V.target ? V.target : (V.shown > 0 ? (int)(V.shown + 0.5f) : (scale->low + scale->high) / 2);
         float shown = want + off_pitch(voice, want);
         V.shown = V.shown > 0 ? V.shown + (shown - V.shown) * 0.4f : shown;
         voice_y = pitch_y(V.shown, scale);
         hit = V.target && fabsf(off_pitch(voice, V.target)) <= V.tolerance;
     } else
         V.shown = 0;
+    float voice_x = NOW_X - 70.0f * PX_PER_S / 1000.0f;
     // the voice leaves a wake running back from the now line, green where it was on the note
     memmove(wake_y + 1, wake_y, sizeof(wake_y) - sizeof(wake_y[0]));
     memmove(wake_hit + 1, wake_hit, sizeof(wake_hit) - sizeof(wake_hit[0]));
@@ -560,12 +568,12 @@ void vox_draw(double t)
         if (wake_y[i] >= 0) {
             float a = 1 - (float)i / WAKE;
             uint32_t c = wake_hit[i] ? RGBA(140, 255, 160, 255) : RGBA(255, 130, 90, 255);
-            gfx_rect(NOW_X - i * 3.0f - 3, wake_y[i] - 2 * a - 1, 3, 4 * a + 2, (c & 0xFFFFFF) | ((uint32_t)(a * 170) << 24));
+            gfx_rect(voice_x - i * 3.0f - 3, wake_y[i] - 2 * a - 1, 3, 4 * a + 2, (c & 0xFFFFFF) | ((uint32_t)(a * 170) << 24));
         }
     if (voice_y >= 0) {
         uint32_t c = hit ? RGBA(140, 255, 160, 255) : RGBA(255, 130, 90, 255);
         for (int i = 0; i < 6; i++)
-            gfx_rect(NOW_X - 18 + i * 3, voice_y - (6 - i), 3, (6 - i) * 2, c);
+            gfx_rect(voice_x - 18 + i * 3, voice_y - (6 - i), 3, (6 - i) * 2, c);
     }
 
     if (V.cur < V.phrase_count) {

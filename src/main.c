@@ -30,6 +30,7 @@ static double now_s, screen_t;
 static double gap_s;                // since the frame before
 static int screen_frames;           // frames since the screen changed
 static bool overlay_on;             // the system's quick menu just came up
+static volatile bool shrink_running;    // the settings' shrink is working through the songs (menu_music stands down)
 static Pad pad;
 static uint32_t pressed, repeat;    // repeat: pressed, plus held directions repeating
 static bool autoplay;
@@ -342,7 +343,7 @@ static bool menu_tune;
 static double menu_tune_end;
 static void menu_music(void)
 {
-    if (preview_for >= 0 || !songs_count() || cfg.no_menu_music)
+    if (preview_for >= 0 || !songs_count() || cfg.no_menu_music || shrink_running)
         return;
     if (menu_tune && audio_song_time() < menu_tune_end)
         return;
@@ -478,6 +479,8 @@ static char dl_query[DL_SITES][128];
 static bool dl_started, dl_typing;
 static char dl_typed[128];
 static bool kb_library;             // the keyboard's searching the song list, not the sites
+static bool dl_queue_view;          // the queue's own screen: what's waiting, what failed, the retry
+static int dl_jobs_sel;
 static Tex * dl_art;
 static char dl_art_id[80];          // the result the cover is for
 static double dl_sel_t;
@@ -612,15 +615,113 @@ static void kb_draw(void)
               RGBA(220, 220, 230, 255), ALIGN_CENTER);
 }
 
+// the queue: what's waiting, what's under way, what failed, and the retry. It's saved with the game closed, so this
+// is also where a failed download is picked back up after a restart
+static void dl_queue_screen(void)
+{
+    static DlJob jobs[24];
+    int n = dl_jobs_list(jobs, 24);
+    if (dl_jobs_sel >= n)
+        dl_jobs_sel = n - 1;
+    if (dl_jobs_sel < 0)
+        dl_jobs_sel = 0;
+    if ((repeat & BTN_UP) && dl_jobs_sel > 0) {
+        dl_jobs_sel--;
+        ui_sound(SND_UI_MOVE);
+    }
+    if ((repeat & BTN_DOWN) && dl_jobs_sel < n - 1) {
+        dl_jobs_sel++;
+        ui_sound(SND_UI_MOVE);
+    }
+    bool has = n > 0;
+    DlJob * j = has ? &jobs[dl_jobs_sel] : NULL;
+    if ((pressed & BTN_CROSS) && has && j->state == JOB_FAILED) {
+        dl_queue(&j->hit);
+        ui_sound(SND_UI_SELECT);
+    }
+    if ((pressed & BTN_SQUARE) && has) {
+        if (j->state == JOB_QUEUED || j->state == JOB_DOWNLOADING || j->state == JOB_INSTALLING)
+            dl_cancel(j->hit.id);
+        else
+            dl_forget(j->hit.id);
+        ui_sound(SND_UI_BACK);
+    }
+    if (pressed & (BTN_CIRCLE | BTN_SELECT)) {
+        dl_queue_view = false;
+        ui_sound(SND_UI_BACK);
+    }
+
+    char t[200];
+    gfx_begin(0, 0, 0);
+    gfx_2d();
+    draw_background(res.bg_menu, WHITE);
+    banner("DOWNLOAD QUEUE");
+    int rows = n < 7 ? n : 7, top = dl_jobs_sel - 3;
+    if (top > n - rows)
+        top = n - rows;
+    if (top < 0)
+        top = 0;
+    for (int r = 0; r < rows; r++) {
+        const DlJob * q = &jobs[top + r];
+        float y = 130 + r * 56;
+        bool on = top + r == dl_jobs_sel;
+        gfx_sprite(atlas_get(res.hud, on ? "wor_select" : "wor_row"), 14, y, 580, 54, WHITE);
+        font_draw_fit(res.ui, q->hit.name, 42, y + 6, 22, 380, on ? RGBA(255, 220, 160, 255) : RGBA(220, 220, 225, 255),
+                      ALIGN_LEFT);
+        const char * badge = "WAITING";
+        uint32_t bc = RGBA(210, 210, 210, 255);
+        if (q->state == JOB_DOWNLOADING) {
+            bc = RGBA(140, 220, 255, 255);
+            if (q->percent < 0)
+                badge = "DOWNLOADING";
+            else
+                snprintf(t, sizeof(t), "%d%%", q->percent), badge = t;
+        } else if (q->state == JOB_INSTALLING) {
+            badge = "ADDING";
+            bc = RGBA(140, 220, 255, 255);
+        } else if (q->state == JOB_DONE) {
+            badge = "ADDED";
+            bc = RGBA(120, 230, 120, 255);
+        } else if (q->state == JOB_FAILED) {
+            badge = "FAILED";
+            bc = RGBA(255, 110, 90, 255);
+        }
+        font_draw_shadow(res.ui, badge, 572, y + 8, 20, bc, ALIGN_RIGHT);
+        if (q->msg[0])
+            font_draw_fit(res.ui, q->msg, 42, y + 30, 18, 500, q->state == JOB_FAILED ? RGBA(255, 150, 110, 255)
+                                                                                    : RGBA(170, 170, 175, 255), ALIGN_LEFT);
+    }
+    if (!n)
+        font_draw_fit(res.ui, "Nothing waiting, nothing failed", 304, 260, 26, 560, RGBA(230, 225, 215, 255),
+                      ALIGN_CENTER);
+    snprintf(t, sizeof(t), "The queue carries over when the game closes; failed ones wait here for X");
+    font_draw_fit(res.ui, t, 24, 470, 19, 900, RGBA(160, 175, 185, 255), ALIGN_LEFT);
+    static const char * const help[] = {"btn_cross", "Retry", "btn_square", "Remove", "btn_select", "Songs",
+                                        "btn_circle", "Back"};
+    help_bar(help, 8);
+    draw_toast();
+    gfx_end();
+}
+
 static void download_screen(void)
 {
     if (!dl_started) {
         dl_started = true;
+        dl_queue_view = false;
         dl_new_search();            // the newest charts
     }
     if (dl_typing) {
         kb_update();
         pressed = repeat = 0;       // the keyboard has the buttons
+    }
+    if (pressed & BTN_SELECT) {
+        dl_queue_view = true;
+        dl_jobs_sel = 0;
+        ui_sound(SND_UI_SELECT);
+    }
+    if (dl_queue_view) {
+        dl_queue_screen();
+        return;
     }
     if (dl_marked != dl_version())
         dl_mark();
@@ -697,8 +798,10 @@ static void download_screen(void)
         } else if (st == JOB_QUEUED || st == JOB_DOWNLOADING || st == JOB_INSTALLING) {
             say("It's on its way");
             ui_sound(SND_UI_BACK);
+        } else if (!dl_queue(&cur)) {
+            say("The queue is full: one has to finish first");
+            ui_sound(SND_UI_BACK);
         } else {
-            dl_queue(&cur);
             ui_sound(SND_UI_SELECT);
         }
     }
@@ -860,8 +963,8 @@ static void download_screen(void)
         font_draw_fit(res.ui, t, 204, 264, 28, 552, WHITE, ALIGN_LEFT);
     }
     static const char * help[] = {"btn_cross", "Download", "btn_triangle", "Search", "btn_l", "Site",
-                                  "btn_square", "Cancel", "btn_circle", "Back"};
-    help_bar(help, 10);
+                                  "btn_square", "Cancel", "btn_select", "Queue", "btn_circle", "Back"};
+    help_bar(help, 12);
     draw_toast();
     if (dl_typing)
         kb_draw();
@@ -2242,11 +2345,12 @@ static const int opt_tabs[OPT_TABS][OPT_TAB_MAX + 1] = {
 };
 static int opt_tab, opt_top;
 static bool opt_reset_armed;
-// the shrink check: a song a frame, so the menu keeps moving. X then shrinks what the check found, on a background
-// thread; each song waits for a song being played to end before its files are swapped
+// the shrink check: a song a frame, so the menu keeps moving. X then shrinks what the check found, on a worker
+// thread; each song waits for a song being played to end before its files are swapped. The menus' tune is a preview
+// whose decode would eat the worker's cores, so it rests while this runs
 static int shrink_next = -1, shrink_left, shrink_seen;
-static volatile bool shrink_running;
 static volatile int shrink_done_n, shrink_all_n;
+static char shrink_cur[96];
 
 static void shrink_check_step(void)
 {
@@ -2276,10 +2380,12 @@ static int shrink_worker(void * arg)
         const Song * so = songs_get(i);
         if (shrink_done(so->folder))
             continue;
+        snprintf(shrink_cur, sizeof(shrink_cur), "%s", so->name);
         shrink_song(so->folder);
         shrink_done_n++;
     }
     plat_log("shrink: %d of %d songs shrunk", shrink_done_n, shrink_all_n);
+    shrink_cur[0] = 0;
     shrink_running = false;
     shrink_next = shrink_left = shrink_seen = 0;    // the walk counts them again from the top
     return 0;
@@ -2375,7 +2481,8 @@ static void option_text(int i, char * name, char * value, size_t n)
     case O_SHRINKCHECK:
         strcpy(name, "Check songs are shrunk");
         if (shrink_running)
-            snprintf(value, n, "shrinking %d of %d", shrink_done_n, shrink_all_n);
+            snprintf(value, n, "shrinking %d of %d: %s", shrink_done_n + 1 <= shrink_all_n ? shrink_done_n + 1 : shrink_all_n,
+                     shrink_all_n, shrink_cur);
         else if (shrink_next >= 0)
             snprintf(value, n, "%d/%d", shrink_seen, songs_count());
         else if (!shrink_seen)
@@ -2494,8 +2601,10 @@ static void options_screen(void)
     if (opt == O_SHRINKCHECK && (pressed & BTN_CROSS) && !shrink_running) {
         if (shrink_seen && shrink_left) {
             shrink_done_n = 0;
+            shrink_cur[0] = 0;
             shrink_running = true;
-            plat_thread("shrink", shrink_worker, NULL, PLAT_BACKGROUND);
+            menu_music_stop();                          // its decode would eat the worker's cores
+            plat_thread("shrink", shrink_worker, NULL, 1);      // a worker's place, not the downloader's crawl
         } else
             shrink_next = shrink_left = shrink_seen = 0;
         ui_sound(SND_UI_SELECT);

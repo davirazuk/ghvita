@@ -161,6 +161,39 @@ def lamp(state, hue):
     return Image.fromarray(a, 'RGBA').resize((64, 64), Image.LANCZOS)
 
 
+def mult_extra(m, G):
+    """GHWT's multiplier plates stop at x8: its bass never went past x4. Ours goes to x6 and doubles under Star
+    Power, so x10 and x12 are composed here: the real cross from the x8 plate, the real 2 from the x2 plate, and a
+    1 and a 0 drawn to match - white with the plate's dark outline"""
+    plate = Image.open(G + '/mult_x8.png').convert('RGBA')
+    ImageDraw.Draw(plate).rectangle((56, 0, 192, 96), fill=(0, 0, 0, 0))
+    two = Image.open(G + '/mult_x2.png').convert('RGBA').crop((55, 10, 124, 86))
+    pad = 10
+    def digit(kind):
+        msk = Image.new('L', (58 + 2 * pad, 66 + 2 * pad), 0)
+        d = ImageDraw.Draw(msk)
+        if kind == '1':
+            d.polygon([(pad + 30, pad + 16), (pad + 44, pad), (pad + 56, pad), (pad + 56, pad + 66),
+                       (pad + 30, pad + 66)], fill=255)
+            d.polygon([(pad + 4, pad + 28), (pad + 30, pad + 2), (pad + 30, pad + 24), (pad + 16, pad + 36)], fill=255)
+            left = 4
+        else:
+            d.ellipse((pad + 2, pad, pad + 56, pad + 66), fill=255)
+            d.ellipse((pad + 21, pad + 19, pad + 37, pad + 47), fill=0)
+            left = 2
+        out = Image.new('RGBA', msk.size, (0, 0, 0, 0))
+        out.paste(Image.new('RGBA', msk.size, (10, 10, 14, 255)), (0, 0), msk.filter(ImageFilter.MaxFilter(11)))
+        out.paste(Image.new('RGBA', msk.size, (255, 255, 255, 255)), (0, 0), msk)
+        return out, left
+    for k, cell in (('1', 58), ('2' if m == 12 else '0', 118)):
+        if k == '2':
+            plate.paste(two, (cell - 5, 5))
+            continue
+        g, left = digit(k)
+        plate.paste(g, (cell - left - pad, 15 - pad))
+    return plate
+
+
 def game_atlas():
     A = Atlas(2048)
     colours = LANES + [SP]
@@ -226,8 +259,9 @@ def game_atlas():
     A.add('spark', Image.open(G + '/JOW_ButtonStar02.png'))
     A.add('smoke', Image.open(G + '/PH_Smoke_SinglePuff_Blend_02.png').resize((128, 128), Image.LANCZOS))
     A.add('whammy_cap', Image.open(G + '/WhammyBAR_Grey.png'))
-    for m in (2, 3, 4, 5, 6, 8):
-        A.add('mult_x%d' % m, Image.open(G + '/mult_x%d.png' % m))
+    for m in (2, 3, 4, 5, 6, 8, 10, 12):
+        p = G + '/mult_x%d.png' % m
+        A.add('mult_x%d' % m, Image.open(p) if os.path.exists(p) else mult_extra(m, G))
     A.add('lcd_green', Image.open(G + '/lcd_green.png'))
     A.add('lcd_orange', Image.open(G + '/lcd_orange.png'))
     # the sustain beam: a bright core with soft edges (white, tinted when drawn)

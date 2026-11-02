@@ -40,13 +40,23 @@ int dl_count(void);
 DlHit * dl_hit(int i);
 int dl_version(void);                               // changes with the results
 void dl_status(char * buf, size_t size);           // what the last search found (or why it failed)
-// downloads, one at a time, in the order asked
-void dl_queue(const DlHit * h);
+// downloads, one at a time, in the order asked. The queue is saved with the game closed: waiting and failed jobs come
+// back at the next start, the waiting ones carrying on by themselves
+bool dl_queue(const DlHit * h);                    // false: every slot is busy, try again when one's done
+void dl_forget(const char * id);                   // a failed or finished job leaves the list
 void dl_cancel(const char * id);
 JobState dl_job_state(const char * id, int * percent, char * msg, size_t msg_size);
 int dl_jobs_active(void);                           // queued or under way
 int dl_jobs_done(void);                             // songs added since the start
 void dl_now(char * buf, size_t size);               // "Reptilia  42%   (2 more)", or "" when nothing is going
+
+typedef struct {
+    DlHit hit;
+    JobState state;
+    int percent;                    // -1 unknown
+    char msg[96];
+} DlJob;
+int dl_jobs_list(DlJob * out, int max);             // the whole queue, waiting and finished, for the queue screen
 // a song folder installed since the last call (the main thread adds it to the library)
 bool dl_take_installed(char * folder, size_t size);
 // the cover of a hit, fetched in the background: the file once it's there, else NULL (asks for it)
