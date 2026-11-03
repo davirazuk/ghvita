@@ -25,6 +25,7 @@
 #define MAX_JOBS 64
 
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t install_lock = PTHREAD_MUTEX_INITIALIZER;    // the unpacking and converting, one at a time
 static bool started;
 
 // ---------------------------------------------------------------------------------------------------- the search
@@ -50,6 +51,22 @@ static const DlWord word_instr[] = {{"guitar", "guitar", "Guitar"}, {"guitar_coo
                                     {"rhythm", "rhythm", "Rhythm Guitar"}, {"bass", "bass", "Bass"},
                                     {"guitarghl", "guitarghl", "Guitar 6-Fret"}, {"keys", "keys", "Keys"},
                                     {"drums", "drums", "Drums"}};
+// the sorts: 0 the sites' own best match; the rest are ordered here after the fetch, except the last two, which the
+// sites know (the ones fetched before the rest, so the pages hold the right charts to begin with)
+typedef struct {
+    const char * rv, * order, * chorus, * cdir, * label;
+} DlSort;
+static const DlSort word_sort[] = {
+    {"", "", "", "", "Best match"},
+    {"", "", "", "", "Title A to Z"},
+    {"", "", "", "", "Title Z to A"},
+    {"", "", "", "", "Artist A to Z"},
+    {"", "", "", "", "Newest first"},
+    {"", "", "", "", "Oldest first"},
+    {"", "", "", "", "Longest first"},
+    {"author", "ASC", "charter", "asc", "Charter A to Z"},
+    {"update_date", "DESC", "modifiedTime", "desc", "Recently added"},
+};
 // each site's own filters: what the screen holds (dl_get/dl_set_filter) and what the request builder reads
 static DlFilter filt[DL_SITES];
 static pthread_mutex_t filt_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -87,6 +104,44 @@ bool dl_quit_filters(void)
             return true;
     }
     return false;
+}
+
+int dl_sort_count(void)
+{
+    return sizeof(word_sort) / sizeof(word_sort[0]);
+}
+
+const char * dl_sort_label(int i)
+{
+    return i >= 0 && i < (int)(sizeof(word_sort) / sizeof(word_sort[0])) ? word_sort[i].label : "?";
+}
+
+// the filters and the sort as one dim line for the bottom of the screen ("" when nothing is on)
+void dl_filter_text(int site, char * buf, size_t size)
+{
+    DlFilter f;
+    dl_get_filter(site, &f);
+    buf[0] = 0;
+    if (f.charter[0])
+        snprintf(buf + strlen(buf), size - strlen(buf), "%sCharter %s", buf[0] ? "  " : "",
+                 f.charter_name[0] ? f.charter_name : f.charter);
+    if (f.artist[0])
+        snprintf(buf + strlen(buf), size - strlen(buf), "%sArtist %s", buf[0] ? "  " : "",
+                 f.artist_name[0] ? f.artist_name : f.artist);
+    if (f.genre >= 0)
+        snprintf(buf + strlen(buf), size - strlen(buf), "%s%s", buf[0] ? "  " : "", dl_genre_name(f.genre));
+    if (f.instrument >= 0)
+        snprintf(buf + strlen(buf), size - strlen(buf), "%s%s", buf[0] ? "  " : "", word_instr[f.instrument].label);
+    if (f.difficulty >= 0)
+        snprintf(buf + strlen(buf), size - strlen(buf), "%s%s", buf[0] ? "  " : "", word_diff[f.difficulty].label);
+    if (f.decade)
+        snprintf(buf + strlen(buf), size - strlen(buf), "%s%d0s", buf[0] ? "  " : "", f.decade / 10);
+    else if (f.year)
+        snprintf(buf + strlen(buf), size - strlen(buf), "%s%d", buf[0] ? "  " : "", f.year);
+    if (f.stems)
+        snprintf(buf + strlen(buf), size - strlen(buf), "%sstems only", buf[0] ? "  " : "");
+    if (f.sort > 0 && f.sort < (int)(sizeof(word_sort) / sizeof(word_sort[0])))
+        snprintf(buf + strlen(buf), size - strlen(buf), "%sSort: %s", buf[0] ? "  " : "", word_sort[f.sort].label);
 }
 
 int dl_instru_count(void)
@@ -213,6 +268,7 @@ typedef struct {
     volatile JobState state;
     volatile int64_t done, total;
     volatile bool cancel;
+    volatile long long bumps;       // "downloads next" marks theirs: the smallest mark goes first
     char msg[120];
 } Job;
 
@@ -671,17 +727,25 @@ static bool rv_fetch(const char * text, int page, int records, DlHit ** out, int
     bool any = false;
     static const char * const systems[3] = {"ch", "ps", "rb3xbox"};
     for (int sys = 0; sys < (text[0] ? 3 : 2); sys++) {
-        char q[400], post[860], url[200], tail[300];
+        char q[400], post[1100], url[200], tail[300];
         url_escape(q, sizeof(q), text);
         DlFilter flat;
         dl_get_filter(DL_RHYTHMVERSE, &flat);
         if (text[0])
             snprintf(post, sizeof(post), "text=%s&data_type=full&records=%d&page=%d", q, records, page);
         else
-            snprintf(post, sizeof(post), "data_type=full&records=%d&page=%d&sort%%5B0%%5D%%5Bsort_by%%5D="
-                     "update_date&sort%%5B0%%5D%%5Bsort_order%%5D=DESC", records, page);
+            snprintf(post, sizeof(post), "data_type=full&records=%d&page=%d", records, page);
         rv_filters(tail, sizeof(tail), &flat);
         snprintf(post + strlen(post), sizeof(post) - strlen(post), "%s", tail);
+        // two of the orders are the sites' own (the pages arrive already in them), the rest are sorted here
+        const char * rv_key = flat.sort >= 0 && flat.sort < (int)(sizeof(word_sort) / sizeof(word_sort[0])) ?
+                              word_sort[flat.sort].rv : "";
+        if (rv_key[0])
+            snprintf(post + strlen(post), sizeof(post) - strlen(post),
+                     "&sort%%5B0%%5D%%5Bsort_by%%5D=%s&sort%%5B0%%5D%%5Bsort_order%%5D=%s", rv_key, word_sort[flat.sort].order);
+        else if (!text[0])
+            snprintf(post + strlen(post), sizeof(post) - strlen(post),
+                     "&sort%%5B0%%5D%%5Bsort_by%%5D=update_date&sort%%5B0%%5D%%5Bsort_order%%5D=DESC");
         snprintf(url, sizeof(url), "https://rhythmverse.co/api/%s/songfiles/%s", systems[sys], text[0] ? "search/live" : "list");
         const char * headers[] = {"X-Requested-With: XMLHttpRequest", NULL};
         HttpReq r = {.url = url, .post = post, .headers = headers, .stall_s = 20};
@@ -823,6 +887,51 @@ static void sort_hits(DlHit * h, int n, const char * query)
 }
 
 // one page of a search: false and err when the site couldn't be asked
+// do_search's orders over the whole loaded set (the last two aren't here: the sites already ordered them)
+static int hit_sort_key;
+
+static int hit_sort_cmp(const void * a, const void * b)
+{
+    const DlHit * x = a, * y = b;
+    int c = 0;
+    switch (hit_sort_key) {
+    case 1:     // Title A to Z
+        c = strcasecmp(x->name, y->name);
+        break;
+    case 2:     // Title Z to A
+        c = strcasecmp(y->name, x->name);
+        break;
+    case 3:     // Artist A to Z
+        c = strcasecmp(x->artist, y->artist);
+        break;
+    case 4: {   // Newest first; a year the site didn't say sits at the end, both ways
+        int xa = atoi(x->year), ya = atoi(y->year);
+        if (!xa)
+            xa = -99999;
+        if (!ya)
+            ya = -99999;
+        c = ya - xa;
+        break;
+    }
+    case 5: {   // Oldest first
+        int xa = atoi(x->year), ya = atoi(y->year);
+        if (!xa)
+            xa = -99999;
+        if (!ya)
+            ya = -99999;
+        c = xa - ya;
+        break;
+    }
+    case 6:     // Longest first
+        c = y->length_ms - x->length_ms;
+        break;
+    case 7:     // Charter A to Z
+        c = strcasecmp(x->charter, y->charter);
+        break;
+    }
+    return c != 0 ? c : (x->order < y->order ? -1 : x->order > y->order ? 1 : 0);
+}
+
 static bool fetch_page(int site, const char * query, int page, DlHit ** out, int * n, int * total, char * err,
                        size_t err_size)
 {
@@ -884,8 +993,15 @@ static bool fetch_page(int site, const char * query, int page, DlHit ** out, int
                          ",\"minYear\":%d,\"maxYear\":%d", flat.decade, flat.decade + 9);
             }
         }
-        char post[1200];
-        snprintf(post, sizeof(post), "{\"search\":\"%s\",\"page\":%d,\"per_page\":%d%s}", q, page, PAGE, extra);
+        char post[1400];
+        const char * c_key = flat.sort >= 0 && flat.sort < (int)(sizeof(word_sort) / sizeof(word_sort[0])) ?
+                             word_sort[flat.sort].chorus : "";
+        if (c_key[0])
+            snprintf(post, sizeof(post), "{\"search\":\"%s\",\"page\":%d,\"per_page\":%d%s"
+                     ",\"sort\":{\"type\":\"%s\",\"direction\":\"%s\"}}", q, page, PAGE, extra,
+                     c_key, word_sort[flat.sort].cdir);
+        else
+            snprintf(post, sizeof(post), "{\"search\":\"%s\",\"page\":%d,\"per_page\":%d%s}", q, page, PAGE, extra);
         const char * headers[] = {"Content-Type: application/json", NULL};
         HttpReq r = {.url = deep ? "https://api.enchor.us/search/advanced" : "https://api.enchor.us/search",
                      .post = post, .headers = headers, .stall_s = 20};
@@ -976,6 +1092,18 @@ static void do_search(void)
     }
     free(got);
     plat_log("search: %d hits kept", hit_count);
+    // the order chosen in the panel, over everything loaded so far: the sites' systems come in mixed streams,
+    // and the results re-tie themselves as more pages are asked for
+    DlFilter flat;
+    dl_get_filter(site, &flat);
+    if (hit_count > 1 && flat.sort > 0 && flat.sort < (int)(sizeof(word_sort) / sizeof(word_sort[0])) &&
+        flat.sort < 8) {
+        hit_sort_key = flat.sort;
+        for (int i = 0; i < hit_count; i++)
+            hits[i].order = i;
+        qsort(hits, hit_count, sizeof(DlHit), hit_sort_cmp);
+        plat_log("search: ordered by %s", word_sort[flat.sort].label);
+    }
     cur_site = site;
     cur_page = page;
     cur_total = page > 1 && hit_count == before ? hit_count : total;
@@ -1044,7 +1172,11 @@ static void start(void)
     mkdir(p, 0777);
     dl_load();
     plat_thread("dl_search", search_thread, NULL, PLAT_BACKGROUND);
-    plat_thread("dl_jobs", job_thread, NULL, PLAT_BACKGROUND);
+    // three of them: the downloads share the line, the converting takes its turn (the slow host of one song no
+    // longer holds the others back)
+    plat_thread("dl_job 1", job_thread, NULL, PLAT_BACKGROUND);
+    plat_thread("dl_job 2", job_thread, NULL, PLAT_BACKGROUND);
+    plat_thread("dl_job 3", job_thread, NULL, PLAT_BACKGROUND);
 }
 
 void dl_search(int site, const char * query)
@@ -1249,6 +1381,8 @@ int dl_jobs_list(DlJob * out, int max)
             out[n].hit = jobs[i].hit;
             out[n].state = jobs[i].state;
             out[n].percent = jobs[i].total > 0 ? (int)(jobs[i].done * 100 / jobs[i].total) : -1;
+            out[n].done = jobs[i].done;
+            out[n].total = jobs[i].total;
             snprintf(out[n].msg, sizeof(out[n].msg), "%s", jobs[i].msg);
             n++;
         }
@@ -1267,6 +1401,33 @@ void dl_cancel(const char * id)
             } else if (jobs[i].state == JOB_DOWNLOADING)
                 jobs[i].cancel = true;
         }
+    pthread_mutex_unlock(&lock);
+}
+
+// one of the waiting ones goes before the others: it gets the smallest mark there is
+void dl_prioritize(const char * id)
+{
+    static long long last_mark;
+    pthread_mutex_lock(&lock);
+    for (int i = 0; i < job_count; i++)
+        if (!strcmp(jobs[i].hit.id, id) && jobs[i].state == JOB_QUEUED) {
+            jobs[i].bumps = --last_mark;
+            break;
+        }
+    pthread_mutex_unlock(&lock);
+}
+
+void dl_clear_done(void)
+{
+    bool any = false;
+    pthread_mutex_lock(&lock);
+    for (int i = 0; i < job_count; i++)
+        if (jobs[i].state == JOB_DONE) {
+            jobs[i].state = JOB_NONE;
+            any = true;
+        }
+    if (any)
+        dl_save_locked();
     pthread_mutex_unlock(&lock);
 }
 
@@ -1744,8 +1905,11 @@ static bool drive_folder(Job * j, const char * id, const char * dir, int depth, 
 
 static void run_job(Job * j)
 {
-    char base[300], file[400], xdir[400], err[200] = "";
-    snprintf(base, sizeof(base), "%s", tmp_dir());
+    // each job its own corner of tmp/: more than one download can be running (the conversion is one at a time)
+    char base[300], file[400], xdir[400], err[200] = "", tag[96];
+    snprintf(tag, sizeof(tag), "%s", j->hit.id);
+    dl_safe_part(tag);
+    snprintf(base, sizeof(base), "%s/job-%s", tmp_dir(), tag);
     snprintf(file, sizeof(file), "%s/download.bin", base);
     snprintf(xdir, sizeof(xdir), "%s/unpacked", base);
     dl_remove_tree(xdir);
@@ -1761,7 +1925,7 @@ static void run_job(Job * j)
     const char * url = j->hit.url;
     char page_url[600];
     bool ok = true, folder = false;
-    static DlHit landed;        // (the job thread's alone)
+    DlHit landed;               // the short link's landing: each job thread's own
     if (!strncmp(url, "short:", 6)) {
         // a short link: the same hosts as the rest, once it's been followed
         char to[600];
@@ -1824,6 +1988,11 @@ static void run_job(Job * j)
     }
     Install in = {j, 0, ""};
     if (ok) {
+        // the unpacking and converting is one at a time (its decoders were built for it); the downloads keep
+        // moving beside it. A song being played doesn't hold this up either: what can't convert now stays as
+        // it came, and the library's shrink gets it another time
+        shrink_defer(true);
+        pthread_mutex_lock(&install_lock);
         pthread_mutex_lock(&lock);
         j->state = JOB_INSTALLING;
         pthread_mutex_unlock(&lock);
@@ -1857,6 +2026,8 @@ static void run_job(Job * j)
     }
     dl_remove_tree(xdir);
     remove(file);
+    pthread_mutex_unlock(&install_lock);
+    shrink_defer(false);
     pthread_mutex_lock(&lock);
     if (in.added) {
         j->state = JOB_DONE;
@@ -1879,8 +2050,9 @@ static int job_thread(void * arg)
     for (;;) {
         Job * next = NULL;
         pthread_mutex_lock(&lock);
-        for (int i = 0; i < job_count && !next; i++)
-            if (jobs[i].state == JOB_QUEUED)
+        // "downloads next" is the smallest mark; the others go in the order they were asked for
+        for (int i = 0; i < job_count; i++)
+            if (jobs[i].state == JOB_QUEUED && (!next || jobs[i].bumps < next->bumps))
                 next = &jobs[i];
         pthread_mutex_unlock(&lock);
         if (next) {

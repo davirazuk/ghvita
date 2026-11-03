@@ -11,6 +11,8 @@
 #include "whammybar.h"
 
 #define WINDOW 0.095            // seconds early or late a note can still be hit (Warriors of Rock-ish lenient)
+#define ANCHOR_GRACE 0.15       // held frets play a note only for this long after a finger last moved (the anchor
+                                // is for fingers arriving early or late, not for keys held through the song)
 #define Z_FAR 11.0f             // the highway's far end (the strikeline is at 0)
 #define Z_NEAR -3.4f
 #define HALF_W 2.62f            // half the highway's width (lanes are 1 wide)
@@ -143,6 +145,7 @@ static struct {
     bool big_section;                   // a chorus or a solo: the band goes harder
     float mult_pop;                     // the multiplier jumps as it goes up
     double press_t[6];                  // when each lane last went down
+    double act_t;                       // when any finger last moved: held frets anchor only for a while after this
     float hit_log[HIT_LOG];             // the last hits, seconds off the note
     int hit_log_n;
     int section, section_pal;           // the chart's section now, and its colours
@@ -1111,24 +1114,27 @@ static uint8_t drum_frets(const Note * n)
     return n->frets & 0x80 ? (n->frets & 0x1f) | FRET_OPEN : n->frets;
 }
 
-// as YARG lays four pads on five: toms on blue and green, cymbals on yellow and orange
-static uint8_t five_pads(uint8_t frets, uint8_t flags)
+// as YARG lays four pads on five: cymbals on yellow and orange, the toms on blue and green. A chart that says
+// nothing of toms and cymbals (plain) keeps its pads on their own colours, green up to the fifth lane
+static uint8_t five_pads(uint8_t frets, uint8_t flags, bool plain)
 {
+    if (plain)
+        return (uint8_t)((frets & ~0x08u) | (frets & 0x08 ? 0x10 : 0));
     uint8_t out = frets & (1 | FRET_OPEN);
     bool yt = (frets & 2) && (flags & NOTE_TOM_Y), bt = (frets & 4) && (flags & NOTE_TOM_B);
     bool gt = (frets & 8) && (flags & NOTE_TOM_G), yc = (frets & 2) && !yt, bc = (frets & 4) && !bt, gc = (frets & 8) && !gt;
     if (yc)
-        out |= 2;
-    if (bc)
-        out |= 8;
-    if (gc)
-        out |= out & 8 ? 2 : 8;
+        out |= 2;                       // the yellow cymbal on the yellow
     if (yt)
-        out |= 4;
+        out |= out & 4 ? 16 : 4;        // the yellow tom moves to blue's lane, or green's when blue's taken
+    if (bc)
+        out |= 8;                       // the blue cymbal lives on the orange
     if (bt)
-        out |= out & 4 ? 16 : 4;
+        out |= out & 4 ? 16 : 4;        // the blue tom on blue, or green's lane
     if (gt)
-        out |= out & 16 ? 4 : 16;
+        out |= out & 16 ? 4 : 16;       // the green tom on green, or blue's lane
+    if (gc)
+        out |= out & 8 ? 16 : 8;        // the green cymbal on the orange, or green's own lane
     return out;
 }
 
@@ -1136,13 +1142,14 @@ static void split_drums(void)
 {
     const Part * p = G.part;
     int total = 0, used = 0;
-    bool five = false;
+    bool five = false, plain = true;        // plain: no note in the chart says tom or cymbal
     for (int i = 0; i < p->note_count; i++) {
         total += frets_count(drum_frets(&p->notes[i]));
         five |= (drum_frets(&p->notes[i]) & 0x10) != 0;
+        plain &= (p->notes[i].flags & (NOTE_TOM_Y | NOTE_TOM_B | NOTE_TOM_G)) == 0;
     }
-    // World Tour's kit from a 4-pad chart, which needs the charts that know toms from cymbals
-    bool to_five = cfg.five_pads && !five && G.chart->version >= 2;
+    // World Tour's kit from a 4-pad chart
+    bool to_five = cfg.five_pads && !five;
     G.drum_notes = calloc(total + 1, sizeof(Note));
     if (!G.drum_notes)
         return;
@@ -1152,7 +1159,7 @@ static void split_drums(void)
         if ((flags & NOTE_KICK2) && !cfg.double_kick)
             frets &= ~FRET_OPEN;
         if (to_five) {
-            frets = five_pads(frets, flags);
+            frets = five_pads(frets, flags, plain);
             flags = (flags & ~(NOTE_TOM_Y | NOTE_TOM_G)) | NOTE_TOM_B;
         }
         // a phrase's last gem gone with its kick: the one before ends it
@@ -1298,6 +1305,7 @@ static void reset_play(void)
     G.hit_log_n = 0;
     for (int i = 0; i < 6; i++)
         G.press_t[i] = -100;
+    G.act_t = -100;
     G.sp = 0;
     G.rock = G.needle = 0.5f;
     G.sp_active = G.sp_ready_told = false;
@@ -1365,7 +1373,9 @@ static void reset_play(void)
         if (G.vox_stem >= 0 && G.vocal)
             audio_stem_volume(G.vox_stem, 0.5f);
         G.vox_run = 0;
-        vox_start(G.diff, G.autoplay);
+        // singing over an instrument is judged at the voice's own difficulty, the instrument's would be
+        // Expert just because the hands chose Expert
+        vox_start(G.vocal ? G.diff : cfg.sing_diff, G.autoplay);
         if (practice.on)
             vox_seek(G.t);
     }
@@ -2059,6 +2069,10 @@ static void activate_sp(void)
 // repeat of the last note's own frets the finger must have come back down since it, so a held fret never plays a run
 static void anchored_note(void)
 {
+    // frets held through the song stay just what they are: the anchor carries a note only while fingers are
+    // still moving about (a key held from always was the whole song playing itself without this)
+    if (G.t - G.act_t > ANCHOR_GRACE)
+        return;
     const Part * p = G.part;
     int i = G.first;
     while (i < p->note_count && G.state[i] != PENDING)
@@ -2088,6 +2102,8 @@ static void anchored_note(void)
 static void judge(uint32_t pressed_lanes, uint32_t let_go)
 {
     const Part * p = G.part;
+    if (pressed_lanes || let_go)
+        G.act_t = G.t;
     for (int lane = 0; lane < 6; lane++)
         if (pressed_lanes & (1 << lane)) {
             G.press_t[lane] = G.t;

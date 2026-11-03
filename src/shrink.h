@@ -6,5 +6,7 @@
 bool shrink_mogg(const char * folder);
 // every stem of a song folder that isn't Opus yet. What fails stays as it was
 void shrink_song(const char * folder);
+// the caller's conversions run beside a song being played instead of waiting for it to end (the downloader's queue)
+void shrink_defer(bool defer);
 // every stem of a song folder is Opus already
 bool shrink_done(const char * folder);

@@ -125,9 +125,19 @@ static bool out_close(Out * o)
     return ok;
 }
 
-// a song being played comes first
+// a song being played comes first. The downloader's installs set defer instead: a held-up job stops the whole
+// queue, so what can't be converted now stays as it came and the library's shrink gets it another time
+static bool defer_during_play;
+
+void shrink_defer(bool defer)
+{
+    defer_during_play = defer;
+}
+
 static void wait_for_game(void)
 {
+    if (defer_during_play)
+        return;
     while (audio_song_active())
         plat_sleep_us(200000);
 }

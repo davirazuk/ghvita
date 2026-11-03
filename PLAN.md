@@ -242,3 +242,39 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   checks: charter 273, +rock 21, +2010s 109).
 - Genres come once from GET /api/ch/dictionary/list -> data.filters.genre (slug->label), fetched on a thread the
   first time the panel opens; the same list serves both sites.
+
+## Singing along, the vocal strip, and the anchor (2026-11-03)
+- Sing along judged the voice at the INSTRUMENT's difficulty: vox_start(G.diff) took Expert guitar to Expert
+  vocal strictness (tolerance 1.0, need 57.5%). Now cfg.sing_diff (Medium default) in Settings -> GAME ->
+  "Sing along vocals" is used when singing over an instrument; playing the Vocals part still uses the chosen
+  difficulty. Persisted as sing_diff in settings.txt.
+- The mic was never the problem: SCE_AUDIO_IN_PORT_TYPE_VOICE 16 kHz mono, 512-sample grains, and the
+  "vocals: pitch avg ... ms of 32 ms" log line shows it keeping up.
+- vox_draw folded the whole strip away between phrases ("leaves the top of the picture to the band"); the user
+  hated it. The strip stays: an instrumental break doesn't take the highway away.
+- TFatF played itself: anchored_note() ran from judge() EVERY frame, so frets held through the song chained the
+  whole chart (any note whose frets all held and the previous hit). G.act_t now marks the last frame a finger
+  moved; held frets anchor a note only for ANCHOR_GRACE (0.15 s, just over WINDOW) after that. A tap slightly
+  before its note still carries; holding everything plays nothing.
+
+## Sort by, queue polish, parallel downloads (2026-11-03)
+- DlFilter.sort, a Sort row in the filter panel (chorus keeps its no-stems skip by sorting it last before
+  Sound). 0 best match; 1-7 sorted here over everything loaded so far (stable by DlHit.order, qsort in
+  do_search after each page); 7 charter A-Z and 8 recently added also ask the sites: RV
+  sort[0][sort_by]=author/update_date (verified live: 2DHumanity -> Zantor; record_updated descending),
+  Chorus {"type":"charter"/"modifiedTime"}. The sites' own systems still come in mixed streams, which is why
+  the client re-sorts. dl_filter_text draws the active filters and sort as a dim line under the site tabs.
+- The queue: three job threads (downloads share the line; the unpack/convert is serialized by install_lock
+  since the decoders were built for one). Each job gets its own tmp/job-<id> corner (download.bin and unpacked
+  were shared). shrink_defer: the downloader's installs run beside a song being played instead of waiting for
+  it to end — what can't convert then stays as it came, the library's shrink catches it later.
+- The queue screen shows RV/CH tags, MB left and a frame-sampled MB/s, Triangle = "downloads next"
+  (Job.bumps, smallest mark first, dl_prioritize), START clears the finished (dl_clear_done).
+- Speed is measured in main.c from the DlJob done/total bytes (dl_jobs_list now fills them), no clock in dl.c.
+
+## Drums on five pads (2026-11-03)
+- five_pads() only ran on chart version >= 2 (charts that store tom/cymbal flags), and its no-flag mapping
+  stacked the green cymbal onto yellow. Now: a chart that says nothing of toms (plain) keeps its pads on their
+  own colours, green up to the fifth lane; a chart with flags keeps pro-drums semantics (default cymbal, tom
+  flags move pads to the tom lanes, collisions fall to green's or orange's lane). The version gate is gone;
+  true 5-lane charts (fifth-pad notes) were already 5 lanes. 4-lane stays the default; "Drum pads" toggles.

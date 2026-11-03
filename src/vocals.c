@@ -510,18 +510,11 @@ void vox_lyrics(double t)
 
 void vox_draw(double t)
 {
-    int ms = (int)(t * 1000);
-    // nothing to sing for a while: the strip leaves the top of the picture to the band
-    bool near = false;
-    for (int p = V.cur > 0 ? V.cur - 1 : 0; p < V.phrase_count && p < V.cur + 2; p++)
-        near |= ms > V.phrases[p].start - 2500 && ms < V.phrases[p].end + 800;
-    if (!near) {
-        // the strip is away: the wake still ages, so it doesn't resume stale when it comes back
-        memmove(wake_y + 1, wake_y, sizeof(wake_y) - sizeof(wake_y[0]));
-        memmove(wake_hit + 1, wake_hit, sizeof(wake_hit) - sizeof(wake_hit[0]));
-        wake_y[0] = -1;
+    if (!V.phrase_count)
         return;
-    }
+    int ms = (int)(t * 1000);
+    // the strip stays through the quiet: an instrumental break doesn't take the highway away, the next phrase
+    // is always on its way along it
     gfx_blend(BLEND_ALPHA);
     // World Tour's strip: dark glass with a teal hairline, the words on a darker band under it
     gfx_rect_grad(0, LANE_Y, SCREEN_W, LANE_H, RGBA(6, 16, 24, 190), RGBA(4, 10, 16, 170));

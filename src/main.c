@@ -491,8 +491,8 @@ static double dl_sel_t;
 // (the picker), and the choice carries that name
 static bool dl_panel;               // the filter panel is over the results
 static int dl_panel_row;            // which row is being looked at
-enum { FROW_CHARTER, FROW_ARTIST, FROW_GENRE, FROW_INSTRUMENT, FROW_DIFFICULTY, FROW_DECADE, FROW_YEAR, FROW_STEMS,
-       FROWS };
+enum { FROW_CHARTER, FROW_ARTIST, FROW_GENRE, FROW_INSTRUMENT, FROW_DIFFICULTY, FROW_DECADE, FROW_YEAR, FROW_SORT,
+       FROW_STEMS, FROWS };
 static void (*kb_apply)(const char * text);     // when set, the keyboard hands its words here instead of the search
 
 static void dl_panel_search(void)   // filters changed, the results must know
@@ -589,6 +589,9 @@ static void dl_panel_clear(int row)
     case FROW_STEMS:
         f.stems = false;
         break;
+    case FROW_SORT:
+        f.sort = 0;
+        break;
     }
     dl_panel_set(row, &f);
     ui_sound(SND_UI_BACK);
@@ -603,7 +606,7 @@ static int dl_panel_rows(void)
 static const char * dl_panel_title(int row)
 {
     static const char * const titles[FROWS] = {"Charter", "Artist", "Genre", "Instrument", "Difficulty",
-                                               "Released in", "Year", "Sound"};
+                                               "Released in", "Year", "Sort", "Sound"};
     return titles[row];
 }
 
@@ -642,6 +645,8 @@ static const char * dl_panel_value(int row, const DlFilter * f)
             return buf;
         }
         return "";
+    case FROW_SORT:
+        return dl_sort_label(f->sort);
     case FROW_STEMS:
         return f->stems ? "multitrack only" : "";
     }
@@ -723,6 +728,15 @@ static void dl_panel_input(void)
             dl_panel_open_kb(dl_panel_row);
         } else if (pressed & BTN_SQUARE && f.year)
             dl_panel_clear(dl_panel_row);
+        break;
+    case FROW_SORT:
+        if (repeat & (BTN_LEFT | BTN_RIGHT)) {
+            int n = dl_sort_count();
+            f.sort = (f.sort + (repeat & BTN_RIGHT ? 1 : n - 1)) % n;
+            dl_panel_set(FROW_SORT, &f);
+            ui_sound(SND_UI_MOVE);
+        } else if (pressed & BTN_SQUARE && f.sort)
+            dl_panel_clear(FROW_SORT);
         break;
     case FROW_STEMS:
         sel = f.stems ? 1 : 0;
@@ -1089,6 +1103,18 @@ static void dl_queue_screen(void)
             dl_forget(j->hit.id);
         ui_sound(SND_UI_BACK);
     }
+    if ((pressed & BTN_TRIANGLE) && has && j->state == JOB_QUEUED) {
+        dl_prioritize(j->hit.id);
+        char msg[128];
+        snprintf(msg, sizeof(msg), "%s downloads next", j->hit.name);
+        say(msg);
+        ui_sound(SND_UI_SELECT);
+    }
+    if ((pressed & BTN_START) && has) {
+        dl_clear_done();
+        say("The finished ones left the list");
+        ui_sound(SND_UI_BACK);
+    }
     if (pressed & (BTN_CIRCLE | BTN_SELECT)) {
         dl_queue_view = false;
         ui_sound(SND_UI_BACK);
@@ -1099,6 +1125,35 @@ static void dl_queue_screen(void)
     gfx_2d();
     draw_background(res.bg_menu, WHITE);
     banner("DOWNLOAD QUEUE");
+    // the running one's speed, from the byte counts a third of a second apart
+    static struct {
+        char id[80];
+        int64_t done;
+        double t, speed;
+    } speed[16];
+    for (int i = 0; i < n; i++) {
+        if (jobs[i].state != JOB_DOWNLOADING || jobs[i].total <= 0)
+            continue;
+        int slot = 0;
+        while (slot < 16 && speed[slot].id[0] && strcmp(speed[slot].id, jobs[i].hit.id))
+            slot++;
+        if (slot == 16)
+            continue;
+        if (!speed[slot].id[0]) {
+            snprintf(speed[slot].id, sizeof(speed[slot].id), "%s", jobs[i].hit.id);
+            speed[slot].t = speed[slot].speed = 0;
+        }
+        if (jobs[i].done < speed[slot].done)        // it started over
+            speed[slot].t = 0;
+        double dt = now_s - speed[slot].t;
+        if (dt >= 0.3) {
+            speed[slot].speed = dt > 0 ? (double)(jobs[i].done - speed[slot].done) / dt : 0;
+            if (speed[slot].speed < 0)
+                speed[slot].speed = 0;
+            speed[slot].done = jobs[i].done;
+            speed[slot].t = now_s;
+        }
+    }
     int rows = n < 7 ? n : 7, top = dl_jobs_sel - 3;
     if (top > n - rows)
         top = n - rows;
@@ -1109,7 +1164,9 @@ static void dl_queue_screen(void)
         float y = 130 + r * 56;
         bool on = top + r == dl_jobs_sel;
         gfx_sprite(atlas_get(res.hud, on ? "wor_select" : "wor_row"), 14, y, 580, 54, WHITE);
-        font_draw_fit(res.ui, q->hit.name, 42, y + 6, 22, 380, on ? RGBA(255, 220, 160, 255) : RGBA(220, 220, 225, 255),
+        font_draw_fit(res.ui, q->hit.site == DL_CHORUS ? "CH" : "RV", 42, y + 9, 16, 40, RGBA(135, 140, 150, 255),
+                      ALIGN_LEFT);
+        font_draw_fit(res.ui, q->hit.name, 80, y + 6, 22, 380, on ? RGBA(255, 220, 160, 255) : RGBA(220, 220, 225, 255),
                       ALIGN_LEFT);
         const char * badge = "WAITING";
         uint32_t bc = RGBA(210, 210, 210, 255);
@@ -1130,18 +1187,33 @@ static void dl_queue_screen(void)
             bc = RGBA(255, 110, 90, 255);
         }
         font_draw_shadow(res.ui, badge, 572, y + 8, 20, bc, ALIGN_RIGHT);
+        char line2[190];
+        line2[0] = 0;
         if (q->msg[0])
-            font_draw_fit(res.ui, q->msg, 42, y + 30, 18, 500, q->state == JOB_FAILED ? RGBA(255, 150, 110, 255)
+            snprintf(line2, sizeof(line2), "%s", q->msg);
+        if (q->state == JOB_DOWNLOADING) {
+            if (q->total > 0)
+                snprintf(line2 + strlen(line2), sizeof(line2) - strlen(line2), "%s%.0f of %.1f MB", line2[0] ? "  " : "",
+                         (double)(q->done > 0 ? q->done : 0) / 1048576, (double)q->total / 1048576);
+            double sp = 0;
+            for (int k = 0; k < 8; k++)
+                if (speed[k].id[0] && !strcmp(speed[k].id, q->hit.id))
+                    sp = speed[k].speed;
+            if (sp > 1)
+                snprintf(line2 + strlen(line2), sizeof(line2) - strlen(line2), "  %.1f MB/s", sp / 1048576);
+        }
+        if (line2[0])
+            font_draw_fit(res.ui, line2, 42, y + 30, 18, 500, q->state == JOB_FAILED ? RGBA(255, 150, 110, 255)
                                                                                     : RGBA(170, 170, 175, 255), ALIGN_LEFT);
     }
     if (!n)
         font_draw_fit(res.ui, "Nothing waiting, nothing failed", 304, 260, 26, 560, RGBA(230, 225, 215, 255),
                       ALIGN_CENTER);
-    snprintf(t, sizeof(t), "The queue carries over when the game closes; failed ones wait here for X");
+    snprintf(t, sizeof(t), "RV RhythmVerse, CH Chorus. The queue carries over when the game closes; failed ones wait here for X");
     font_draw_fit(res.ui, t, 24, 470, 19, 900, RGBA(160, 175, 185, 255), ALIGN_LEFT);
-    static const char * const help[] = {"btn_cross", "Retry", "btn_square", "Remove", "btn_select", "Songs",
-                                        "btn_circle", "Back"};
-    help_bar(help, 8);
+    static const char * const help[] = {"btn_cross", "Retry", "btn_square", "Remove", "btn_triangle", "Next",
+                                        "btn_start", "Clear done", "btn_select", "Songs", "btn_circle", "Back"};
+    help_bar(help, 12);
     draw_toast();
     gfx_end();
 }
@@ -1313,6 +1385,11 @@ static void download_screen(void)
         snprintf(t, sizeof(t), "Newest charts");
     font_draw_fit(res.ui, t, 24, 98, 24, 560, RGBA(255, 236, 200, 255), ALIGN_LEFT);
     font_draw_fit(res.ui, status, SCREEN_W - 24, 98, 22, 340, RGBA(200, 200, 200, 255), ALIGN_RIGHT);
+    // what's filtering or ordering this site, when anything is
+    char filt[192];
+    dl_filter_text(dl_site, filt, sizeof(filt));
+    if (filt[0])
+        font_draw_fit(res.ui, filt, 24, 64, 18, 900, RGBA(150, 165, 180, 255), ALIGN_LEFT);
     // the results
     for (int r = 0; r < nrows; r++) {
         const DlHit * h = &rows[r];
@@ -2805,7 +2882,7 @@ static void tour_screen(void)
 
 // ------------------------------------------------------------------------------------------------------- options
 
-enum { O_SPEED, O_HIGHWAY, O_VENUE, O_BAND, O_SING, O_OFFSET, O_LAYOUT, O_DRUMKEYS, O_DRUMHITS, O_TILT, O_NOFAIL, O_LEFTY, O_MUSIC, O_SFX, O_CROWD, O_FPS,
+enum { O_SPEED, O_HIGHWAY, O_VENUE, O_BAND, O_SING, O_SINGDIFF, O_OFFSET, O_LAYOUT, O_DRUMKEYS, O_DRUMHITS, O_TILT, O_NOFAIL, O_LEFTY, O_MUSIC, O_SFX, O_CROWD, O_FPS,
        O_CAMERA, O_HWALPHA, O_VLIGHT, O_FLASH, O_POPUPS, O_TIMING, O_LIVE, O_VANISH, O_MISSSND, O_REAR, O_BEND, O_COUNTDOWN,
        O_RESET, O_FIVEPADS, O_DOUBLEKICK, O_EASYSUS, O_COUNTIN, O_SCREENS, O_PROGRESS, O_CUPS, O_AUTOREPRESS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, O_CROWDHANDS, O_VIGNETTE, O_LYRICS, O_MENUMUSIC, O_SINGSP, O_SHRINKCHECK, O_COUNT };
 
@@ -2813,7 +2890,7 @@ enum { O_SPEED, O_HIGHWAY, O_VENUE, O_BAND, O_SING, O_OFFSET, O_LAYOUT, O_DRUMKE
 enum { OPT_TABS = 7, OPT_TAB_MAX = 11 };
 static const char * opt_tab_names[OPT_TABS] = {"GAME", "CONTROLS", "HIGHWAY", "STAGE", "SCREEN", "SOUND", "LIBRARY"};
 static const int opt_tabs[OPT_TABS][OPT_TAB_MAX + 1] = {
-    {O_SPEED, O_OFFSET, O_NOFAIL, O_EASYSUS, O_AUTOREPRESS, O_VANISH, O_COUNTDOWN, O_SING, O_RESET, -1},
+    {O_SPEED, O_OFFSET, O_NOFAIL, O_EASYSUS, O_AUTOREPRESS, O_VANISH, O_COUNTDOWN, O_SING, O_SINGDIFF, O_RESET, -1},
     {O_LAYOUT, O_DRUMKEYS, O_FIVEPADS, O_DOUBLEKICK, O_LEFTY, O_TILT, O_REAR, O_SINGSP, -1},
     {O_HIGHWAY, O_HWALPHA, O_CAMERA, O_CUPS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, -1},
     {O_VENUE, O_VLIGHT, O_BAND, O_CROWDHANDS, O_VIGNETTE, O_SCREENS, O_FLASH, -1},
@@ -2906,6 +2983,10 @@ static void option_text(int i, char * name, char * value, size_t n)
         break;
     case O_BAND: strcpy(name, "Band on stage"); snprintf(value, n, "%s", cfg.no_band ? "Off" : "On"); break;
     case O_SING: strcpy(name, "Sing along"); snprintf(value, n, "%s", cfg.sing_along ? "On" : "Off"); break;
+    case O_SINGDIFF:
+        strcpy(name, "Sing along vocals");
+        snprintf(value, n, "%s", diff_name(cfg.sing_diff));
+        break;
     case O_SINGSP: strcpy(name, "Singing starts Star Power"); snprintf(value, n, "%s", cfg.sing_sp ? "On" : "Off"); break;
     case O_OFFSET: strcpy(name, "Audio offset"); snprintf(value, n, "%+d ms", cfg.offset_ms); break;
     case O_LAYOUT: strcpy(name, "Buttons"); snprintf(value, n, "%s", cfg.layout ? "Layout B" : "Layout A"); break;
@@ -3010,6 +3091,7 @@ static void change_option(int i, int d)
     }
     case O_BAND: cfg.no_band = !cfg.no_band; break;
     case O_SING: cfg.sing_along = !cfg.sing_along; break;
+    case O_SINGDIFF: cfg.sing_diff = (cfg.sing_diff + d + DIFF_COUNT) % DIFF_COUNT; break;
     case O_SINGSP: cfg.sing_sp = !cfg.sing_sp; break;
     case O_OFFSET: cfg.offset_ms = clampi(cfg.offset_ms + d * 5, -300, 300); break;
     case O_LAYOUT: cfg.layout = !cfg.layout; break;
@@ -3285,17 +3367,13 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
-        "Downloader: START opens Filters — search by charter, artist, genre, instrument, difficulty, "
-        "year or decade, multitrack stems, on both sites.",
-        "Searching by charter on RhythmVerse picks the author from a live list of names.",
-        "Highway gems sit where the streak below them says (the orange cap had drifted by up to 18 pixels).",
-        "Fixed a crash searching the sites with a short word.",
-        "D-pad button hints are back the way they were.",
-        "Practice mode now goes up to 150% speed.",
-        "Shrinking shows which song it's on and runs faster.",
-        "Settings reorganised: a LIBRARY tab, sing-to-activate in CONTROLS.",
-        "Songs shrink on the Vita: Settings -> GAME -> \"Check songs are shrunk\" counts, then X shrinks, no card.",
-        "Vocals: clap notes (any noise plays them), and \"Singing starts Star Power\" (off by default).",
+        "Sing along judges the voice at Medium now, or pick its own difficulty: Settings -> GAME -> \"Sing along vocals\".",
+        "The vocal strip stays up through instrumental breaks — it doesn't disappear between phrases.",
+        "Fixed: holding the frets through a song played it by itself (Through the Fire and Flames).",
+        "Searches can be sorted: title, artist, year, length, charter, recently added — in the filter panel's Sort row.",
+        "Three downloads run at once, and unpacking and converting keep going while you play.",
+        "The queue shows MB left and speed; Triangle brings a waiting one to the front, START clears the finished.",
+        "Drums: \"Drum pads: Five, as World Tour\" now works on every 4-pad chart, not just the new ones.",
     };
     int n = (int)(sizeof(lines) / sizeof(lines[0]));
     gfx_begin(0, 0, 0);

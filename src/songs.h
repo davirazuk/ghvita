@@ -105,6 +105,7 @@ typedef struct {
     bool five_pads;         // 4-pad charts laid out on World Tour's five
     bool sing_along;        // the mic and the lyrics on top of any instrument, when the song has vocals
     bool sing_sp;           // singing in tune starts Star Power, like YARG's voice-activated option
+    int sing_diff;          // the singing along is judged at: the instrument's would be Expert (MEDIUM as set)
     int last_part, last_diff;
     int sort;
     char last_song[256];

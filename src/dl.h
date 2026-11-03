@@ -25,6 +25,7 @@ typedef struct {
     bool any_parts, rock_band;      // the site told them; a Rock Band package
     char unplayable[64];            // why it can't be had ("drums and vocals only"), else empty
     bool have, have_name;           // (the screen's) in the library: this very chart / a song of the same name
+    int order;                      // the hits' own order: the sorts' tiebreak (not saved, not shown)
 } DlHit;
 
 void dl_search(int site, const char * query);       // "" lists the newest charts
@@ -39,10 +40,15 @@ typedef struct {
     int difficulty;                         // 0 expert 1 hard 2 medium 3 easy, -1 all
     int decade, year;                       // 1990, 1974 or 0 all
     bool stems;                             // only the full multitracks (RhythmVerse takes it)
+    int sort;                               // which of the sorts (dl_sort*), 0 the sites' best match
 } DlFilter;
 void dl_get_filter(int site, DlFilter * f);
 void dl_set_filter(int site, const DlFilter * f);
 bool dl_quit_filters(void);                         // anything on either site?
+void dl_filter_text(int site, char * buf, size_t size);   // the filters and the sort, as one line ("" all off)
+
+int dl_sort_count(void);
+const char * dl_sort_label(int i);                  // "Best match", "Title A to Z", ...
 
 // the genres RhythmVerse knows (both sites search them), fetched when first asked. -1 while it's loading, 0 when the
 // site didn't answer
@@ -76,6 +82,8 @@ void dl_status(char * buf, size_t size);           // what the last search found
 bool dl_queue(const DlHit * h);                    // false: every slot is busy, try again when one's done
 void dl_forget(const char * id);                   // a failed or finished job leaves the list
 void dl_cancel(const char * id);
+void dl_prioritize(const char * id);               // a waiting one downloads before the rest of its kind
+void dl_clear_done(void);                          // the finished ones leave the list
 JobState dl_job_state(const char * id, int * percent, char * msg, size_t msg_size);
 int dl_jobs_active(void);                           // queued or under way
 int dl_jobs_done(void);                             // songs added since the start
@@ -85,6 +93,7 @@ typedef struct {
     DlHit hit;
     JobState state;
     int percent;                    // -1 unknown
+    int64_t done, total;            // bytes of the download under way (total 0 unknown)
     char msg[96];
 } DlJob;
 int dl_jobs_list(DlJob * out, int max);             // the whole queue, waiting and finished, for the queue screen

@@ -715,6 +715,7 @@ void config_defaults(void)
     cfg.flat_notes = true;
     cfg.note_size = 1;
     cfg.last_diff = DIFF_MEDIUM;
+    cfg.sing_diff = DIFF_MEDIUM;    // singing along judges the voice at Medium, not at the instrument's own
 }
 
 void config_load(void)
@@ -804,6 +805,10 @@ void config_load(void)
             cfg.no_band = atoi(v) != 0;
         else if (strcmp(k, "sing_along") == 0)
             cfg.sing_along = atoi(v) != 0;
+        else if (strcmp(k, "sing_diff") == 0) {
+            int d = atoi(v);
+            cfg.sing_diff = d < 0 ? DIFF_MEDIUM : d > DIFF_EXPERT ? DIFF_EXPERT : d;
+        }
         else if (strcmp(k, "offset_ms") == 0)
             cfg.offset_ms = n;
         else if (strcmp(k, "layout") == 0)
@@ -856,8 +861,8 @@ void config_save(void)
                "last_song = %s\nvenue = %s\nno_band = %d\nsing_along = %d\ndrum_layout = %d\ndrum_hits = %d\n",
             cfg.speed, cfg.highway, cfg.offset_ms, cfg.layout, cfg.tilt, cfg.nofail, cfg.music_vol, cfg.sfx_vol,
             cfg.crowd_vol, cfg.lefty, cfg.show_fps, cfg.last_part, cfg.last_diff, cfg.sort, cfg.last_song, cfg.venue, cfg.no_band, cfg.sing_along, cfg.drum_layout, cfg.drum_hits);
-    fprintf(f, "board_look = 1\nno_lyrics = %d\nauto_repress = %d\nflat_notes = %d\nno_wobble = %d\nfire = %d\nnote_size = %d\nno_crowd = %d\nno_vignette = %d\nno_menu_music = %d\n",
-            cfg.no_lyrics, cfg.auto_repress, cfg.flat_notes, cfg.no_wobble, cfg.fire, cfg.note_size, cfg.no_crowd, cfg.no_vignette, cfg.no_menu_music);
+    fprintf(f, "board_look = 1\nno_lyrics = %d\nauto_repress = %d\nflat_notes = %d\nno_wobble = %d\nfire = %d\nnote_size = %d\nno_crowd = %d\nno_vignette = %d\nno_menu_music = %d\nsing_diff = %d\n",
+            cfg.no_lyrics, cfg.auto_repress, cfg.flat_notes, cfg.no_wobble, cfg.fire, cfg.note_size, cfg.no_crowd, cfg.no_vignette, cfg.no_menu_music, cfg.sing_diff);
     fprintf(f, "camera = %d\nhighway_alpha = %d\nvenue_light = %d\nflashes = %d\n",
             cfg.camera, cfg.highway_alpha, cfg.venue_light, cfg.flashes);
     fprintf(f, "no_popups = %d\ntiming_bar = %d\nlive_stats = %d\nvanish = %d\n"
