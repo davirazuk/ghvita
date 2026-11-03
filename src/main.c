@@ -2,6 +2,7 @@
 // GH Vita: the screens (title, song list, part and difficulty, the song, pause, results, options, calibration, the
 // song downloader)
 #include <math.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -485,6 +486,440 @@ static Tex * dl_art;
 static char dl_art_id[80];          // the result the cover is for
 static double dl_sel_t;
 
+// the SEARCH FILTERS: a panel on start. Text rows go through the keyboard (kb_apply picks up what was typed); on
+// RhythmVerse a charter or artist needs the site's own name for it, so what's typed is looked up and shown as a list
+// (the picker), and the choice carries that name
+static bool dl_panel;               // the filter panel is over the results
+static int dl_panel_row;            // which row is being looked at
+enum { FROW_CHARTER, FROW_ARTIST, FROW_GENRE, FROW_INSTRUMENT, FROW_DIFFICULTY, FROW_DECADE, FROW_YEAR, FROW_STEMS,
+       FROWS };
+static void (*kb_apply)(const char * text);     // when set, the keyboard hands its words here instead of the search
+
+static void dl_panel_search(void)   // filters changed, the results must know
+{
+    dl_search(dl_site, dl_query[dl_site]);
+    dl_sel = dl_top = 0;
+    dl_sel_t = now_s;
+}
+
+// the picker: the names a lookup found
+static DlLookup picks[12];
+static volatile int pick_state;     // -1 it's being looked up, N: how many came back, -2 none asked for
+static volatile bool pick_run;      // one at a time
+static char pick_words[96];
+static int pick_kind;               // 0 charter, 1 artist
+static int pick_sel;
+static void * pick_thread(void * arg)
+{
+    (void)arg;
+    int n = dl_lookup(pick_kind, pick_words, picks, (int)(sizeof(picks) / sizeof(picks[0])));
+    pick_state = n;
+    pick_run = false;
+    return NULL;
+}
+static void pick_start(int kind, const char * words)
+{
+    static pthread_t t;
+    snprintf(pick_words, sizeof(pick_words), "%s", words);
+    pick_kind = kind;
+    pick_state = -1;
+    pick_sel = 0;
+    if (pick_run)
+        return;
+    pick_run = true;
+    if (pthread_create(&t, NULL, pick_thread, NULL) == 0)
+        pthread_detach(t);
+    else
+        pick_run = false, pick_state = -2;
+}
+
+// the words and what they're for, drawn over the keyboard's line
+static void dl_panel_open_kb(int row)
+{
+    DlFilter f;
+    dl_get_filter(dl_site, &f);
+    char buf[96] = "";
+    if (row == FROW_CHARTER)
+        snprintf(buf, sizeof(buf), "%s", f.charter_name[0] ? f.charter_name : f.charter);
+    else if (row == FROW_ARTIST)
+        snprintf(buf, sizeof(buf), "%s", f.artist_name[0] ? f.artist_name : f.artist);
+    else if (row == FROW_YEAR) {
+        if (f.year)
+            snprintf(buf, sizeof(buf), "%d", f.year);
+    }
+    snprintf(dl_typed, sizeof(dl_typed), "%s", buf);
+    dl_typing = true;
+    kb_library = false;
+    ui_sound(SND_UI_SELECT);
+}
+
+static void dl_panel_set(int row, const DlFilter * f)
+{
+    dl_set_filter(dl_site, f);
+    (void)row;
+    dl_panel_search();
+}
+
+static void dl_panel_clear(int row)
+{
+    DlFilter f;
+    dl_get_filter(dl_site, &f);
+    switch (row) {
+    case FROW_CHARTER:
+        f.charter[0] = f.charter_name[0] = 0;
+        break;
+    case FROW_ARTIST:
+        f.artist[0] = f.artist_name[0] = 0;
+        break;
+    case FROW_GENRE:
+        f.genre = -1;
+        break;
+    case FROW_INSTRUMENT:
+        f.instrument = -1;
+        break;
+    case FROW_DIFFICULTY:
+        f.difficulty = -1;
+        break;
+    case FROW_DECADE:
+        f.decade = 0;
+        break;
+    case FROW_YEAR:
+        f.year = 0;
+        break;
+    case FROW_STEMS:
+        f.stems = false;
+        break;
+    }
+    dl_panel_set(row, &f);
+    ui_sound(SND_UI_BACK);
+}
+
+static int dl_panel_rows(void)
+{
+    return dl_site == DL_CHORUS ? FROWS - 1 : FROWS;
+}
+
+// the panel's glyphs: what each row shows at its right
+static const char * dl_panel_title(int row)
+{
+    static const char * const titles[FROWS] = {"Charter", "Artist", "Genre", "Instrument", "Difficulty",
+                                               "Released in", "Year", "Sound"};
+    return titles[row];
+}
+
+static const char * dl_panel_value(int row, const DlFilter * f)
+{
+    static char buf[140];
+    static const char * const diff_names[] = {"Expert", "Hard", "Medium", "Easy"};
+    switch (row) {
+    case FROW_CHARTER:
+        return f->charter_name[0] ? f->charter_name : f->charter;
+    case FROW_ARTIST:
+        return f->artist_name[0] ? f->artist_name : f->artist;
+    case FROW_GENRE:
+        if (f->genre < 0)
+            return "";
+        return dl_genre_name(f->genre)[0] ? dl_genre_name(f->genre) : dl_genre_slug(f->genre);
+    case FROW_INSTRUMENT:
+        if (f->instrument < 0)
+            return "";
+        {
+            const char * a, * b, * c;
+            dl_instru(f->instrument, &a, &b, &c);
+            return c;
+        }
+    case FROW_DIFFICULTY:
+        return f->difficulty < 0 ? "" : diff_names[f->difficulty];
+    case FROW_DECADE:
+        if (f->decade) {
+            snprintf(buf, sizeof(buf), "the %ds", f->decade / 10 % 100);
+            return buf;
+        }
+        return "";
+    case FROW_YEAR:
+        if (f->year) {
+            snprintf(buf, sizeof(buf), "%d", f->year);
+            return buf;
+        }
+        return "";
+    case FROW_STEMS:
+        return f->stems ? "multitrack only" : "";
+    }
+    return "";
+}
+
+// what a typed row does with its words; declared here, made below the panel draw (with the picker)
+static void apply_kb(const char * text);
+
+static bool pick_open;              // the names list is over the panel
+
+// the something the panel hears each frame while it's up
+static void dl_panel_input(void)
+{
+    DlFilter f;
+    dl_get_filter(dl_site, &f);
+    // the names a lookup returned? they hold the buttons until a name is picked or it's dropped
+    if (pick_open) {
+        if (pressed & BTN_START) {
+            pick_open = false;
+            pick_state = -2;
+            ui_sound(SND_UI_BACK);
+            return;
+        }
+        if (pick_state > 0) {
+            if (repeat & BTN_UP)
+                pick_sel--;
+            if (repeat & BTN_DOWN)
+                pick_sel++;
+            if (pick_sel < 0)
+                pick_sel = 0;
+            if (pick_sel >= pick_state)
+                pick_sel = pick_state - 1;
+            if (pressed & BTN_CROSS) {
+                DlFilter set = f;
+                if (pick_kind) {
+                    snprintf(set.artist, sizeof(set.artist), "%s", picks[pick_sel].id);
+                    snprintf(set.artist_name, sizeof(set.artist_name), "%s", picks[pick_sel].name);
+                } else {
+                    snprintf(set.charter, sizeof(set.charter), "%s", picks[pick_sel].id);
+                    snprintf(set.charter_name, sizeof(set.charter_name), "%s", picks[pick_sel].name);
+                }
+                pick_open = false;
+                dl_panel_set(pick_kind ? FROW_ARTIST : FROW_CHARTER, &set);
+                ui_sound(SND_UI_SELECT);
+            } else if (pressed & BTN_CIRCLE) {
+                pick_open = false;
+                pick_state = -2;
+                ui_sound(SND_UI_BACK);
+            }
+        }
+        return;
+    }
+    if (pressed & (BTN_START | BTN_CIRCLE)) {
+        dl_panel = false;
+        pick_state = -2;
+        ui_sound(SND_UI_BACK);
+        return;
+    }
+    // left and right mustn't switch sites under the panel: the results they'd shuffle are behind it
+    int rows = dl_panel_rows();
+    if (repeat & BTN_UP)
+        dl_panel_row = dl_panel_row == 0 ? rows - 1 : dl_panel_row - 1;
+    if (repeat & BTN_DOWN)
+        dl_panel_row = dl_panel_row == rows - 1 ? 0 : dl_panel_row + 1;
+    int sel;
+    switch (dl_panel_row) {
+    case FROW_CHARTER:
+    case FROW_ARTIST:
+        if (pressed & BTN_CROSS) {
+            kb_apply = apply_kb;
+            dl_panel_open_kb(dl_panel_row);
+        } else if (pressed & BTN_SQUARE)
+            dl_panel_clear(dl_panel_row);
+        break;
+    case FROW_YEAR:
+        if (pressed & BTN_CROSS) {
+            kb_apply = apply_kb;
+            dl_panel_open_kb(dl_panel_row);
+        } else if (pressed & BTN_SQUARE && f.year)
+            dl_panel_clear(dl_panel_row);
+        break;
+    case FROW_STEMS:
+        sel = f.stems ? 1 : 0;
+        if (repeat & (BTN_LEFT | BTN_RIGHT))
+            sel = !sel;
+        else if (pressed & BTN_SQUARE && f.stems) {
+            dl_panel_clear(FROW_STEMS);
+            break;
+        } else
+            break;
+        f.stems = sel != 0;
+        dl_panel_set(FROW_STEMS, &f);
+        ui_sound(SND_UI_MOVE);
+        break;
+    case FROW_GENRE:
+        if (dl_genre_count() > 0) {
+            int n = dl_genre_count();
+            sel = f.genre;
+            if (repeat & BTN_RIGHT)
+                sel = sel >= n - 1 ? -1 : sel + 1;
+            else if (repeat & BTN_LEFT)
+                sel = sel == -1 ? n - 1 : sel - 1;
+            else if (pressed & BTN_SQUARE && f.genre >= 0) {
+                dl_panel_clear(FROW_GENRE);
+                break;
+            } else
+                break;
+            if (sel != f.genre) {
+                f.genre = sel;
+                dl_panel_set(FROW_GENRE, &f);
+                ui_sound(SND_UI_MOVE);
+            }
+        }
+        break;
+    default: {
+        // instrument, difficulty, decade: the same cycle through a list, each with its own count
+        int n = 0;
+        switch (dl_panel_row) {
+        case FROW_INSTRUMENT:
+            n = dl_instru_count();
+            break;
+        case FROW_DIFFICULTY:
+            n = dl_diff_count();
+            break;
+        default:
+            n = 6;                      // the decades
+        }
+        sel = -1;
+        switch (dl_panel_row) {
+        case FROW_INSTRUMENT:
+            sel = f.instrument;
+            break;
+        case FROW_DIFFICULTY:
+            sel = f.difficulty;
+            break;
+        default:
+            sel = -1;
+            if (f.decade) {
+                static const int decades[] = {1970, 1980, 1990, 2000, 2010, 2020};
+                for (int i = 0; i < (int)(sizeof(decades) / sizeof(decades[0])); i++)
+                    if (f.decade == decades[i])
+                        sel = i;
+            }
+        }
+        if (repeat & BTN_RIGHT)
+            sel = sel >= n - 1 ? -1 : sel + 1;
+        else if (repeat & BTN_LEFT)
+            sel = sel == -1 ? n - 1 : sel - 1;
+        else if (pressed & BTN_SQUARE && sel >= 0) {
+            dl_panel_clear(dl_panel_row);
+            break;
+        } else
+            break;
+        int v;
+        if (dl_panel_row == FROW_INSTRUMENT)
+            v = sel;
+        else if (dl_panel_row == FROW_DIFFICULTY)
+            v = sel;
+        else {
+            static const int decades[] = {1970, 1980, 1990, 2000, 2010, 2020};
+            v = sel < 0 ? 0 : decades[sel];
+        }
+        DlFilter set = f;
+        if (dl_panel_row == FROW_INSTRUMENT)
+            set.instrument = v;
+        else if (dl_panel_row == FROW_DIFFICULTY)
+            set.difficulty = v;
+        else
+            set.decade = v;
+        dl_panel_set(dl_panel_row, &set);
+        ui_sound(SND_UI_MOVE);
+        break;
+    }
+    }
+}
+
+// the words a text row typed: a year goes in as a number, on Chorus a charter or artist's words go straight into the
+// filter, on RhythmVerse they first need the site's own names, so the picker is asked
+static void apply_kb(const char * text)
+{
+    DlFilter f;
+    dl_get_filter(dl_site, &f);
+    if (dl_panel_row == FROW_YEAR) {
+        const char * s = text;
+        while (*s == ' ')
+            s++;
+        bool digits = *s;
+        for (const char * p = s; *p; p++)
+            if (*p < '0' || *p > '9')
+                digits = false;
+        int y = atoi(s);
+        if (y && (y < 1050 || y > 2100))
+            y = 0;
+        f.year = digits && y ? y : 0;
+        dl_panel_set(FROW_YEAR, &f);
+        return;
+    }
+    if (!text[0]) {
+        dl_panel_clear(dl_panel_row);
+        return;
+    }
+    if (dl_site == DL_RHYTHMVERSE) {
+        if (pick_run) {
+            say("Still finding names, one moment");
+            return;
+        }
+        pick_open = true;
+        pick_start(dl_panel_row == FROW_CHARTER ? 0 : 1, text);
+        return;
+    }
+    // Chorus searches the words as they are
+    DlFilter set = f;
+    if (dl_panel_row == FROW_CHARTER) {
+        snprintf(set.charter, sizeof(set.charter), "%s", text);
+        snprintf(set.charter_name, sizeof(set.charter_name), "%s", text);
+    } else {
+        snprintf(set.artist, sizeof(set.artist), "%s", text);
+        snprintf(set.artist_name, sizeof(set.artist_name), "%s", text);
+    }
+    dl_panel_set(dl_panel_row, &set);
+}
+
+static void dl_panel_draw(void)
+{
+    gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(6, 6, 10, 246));
+    panel(110, 48, 740, 452);
+    font_draw_shadow(res.ui, "SEARCH FILTERS", SCREEN_W / 2, 66, 28, RGBA(255, 230, 150, 255), ALIGN_CENTER);
+    DlFilter f;
+    dl_get_filter(dl_site, &f);
+    int rows = dl_panel_rows();
+    for (int r = 0; r < rows; r++) {
+        float y = 104 + r * 44;
+        bool on = r == dl_panel_row;
+        gfx_rect(126, y, 708, 40, on ? RGBA(60, 52, 30, 255) : RGBA(0, 0, 0, 60));
+        font_draw(res.ui, dl_panel_title(r), 140, y + 9, 22, on ? WHITE : RGBA(180, 180, 190, 255), ALIGN_LEFT);
+        const char * v = dl_panel_value(r, &f);
+        if (r == FROW_GENRE && f.genre >= 0 && dl_genre_count() < 0)
+            v = "...";              // the genre list is still coming from the site
+        font_draw_fit(res.ui, v, 560, y + 9, 22, 260, on ? RGBA(255, 236, 170, 255) : RGBA(230, 225, 215, 255),
+                      ALIGN_RIGHT);
+    }
+    font_draw_shadow(res.ui,
+                     dl_site == DL_CHORUS ? "Cross edit   Left/Right change   Square clear   Start done"
+                                          : "Cross edit   Left/Right change   Square clear   Start done",
+                     SCREEN_W / 2, 104 + rows * 44 + 16, 18, RGBA(170, 170, 180, 255), ALIGN_CENTER);
+}
+
+// the names a lookup found, over the panel
+static void dl_picker_draw(void)
+{
+    gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(6, 6, 10, 246));
+    panel(130, 64, 700, 340);
+    font_draw_shadow(res.ui, pick_kind ? "ARTISTS" : "CHARTERS", SCREEN_W / 2, 82, 28, RGBA(255, 230, 150, 255),
+                     ALIGN_CENTER);
+    char t[160];
+    if (pick_state < 0)
+        snprintf(t, sizeof(t), "Asking RhythmVerse who \"%s\" is...", pick_words);
+    else if (!pick_state)
+        snprintf(t, sizeof(t), "No one the site knows by \"%s\"", pick_words);
+    else
+        snprintf(t, sizeof(t), "%d found (Cross picks, Circle drops)", pick_state);
+    font_draw_fit(res.ui, t, SCREEN_W / 2, 116, 20, 640,
+                  pick_state ? RGBA(190, 190, 200, 255) : RGBA(255, 150, 110, 255), ALIGN_CENTER);
+    if (pick_state > 0)
+        for (int i = 0; i < pick_state; i++) {
+            float y = 152 + i * 40;
+            bool on = i == pick_sel;
+            char line[200];
+            if (picks[i].releases > 0)
+                snprintf(line, sizeof(line), "%s%s  (%d charts)", on ? "> " : "", picks[i].name,
+                         picks[i].releases);
+            else
+                snprintf(line, sizeof(line), "%s%s", on ? "> " : "", picks[i].name);
+            font_draw_fit(res.ui, line, 170, y, 22, 540, on ? RGBA(255, 236, 170, 255) : WHITE, ALIGN_LEFT);
+        }
+}
+
 static void dl_new_search(void)
 {
     dl_search(dl_site, dl_query[dl_site]);
@@ -577,7 +1012,7 @@ static void kb_update(void)
     if (pressed & BTN_CIRCLE)
         dl_typing = false;
     if (pressed & BTN_START) {
-        dl_typing = false;
+        ui_sound(SND_UI_SELECT);
         // the words, without spaces around them
         char * t = dl_typed;
         while (*t == ' ')
@@ -585,7 +1020,15 @@ static void kb_update(void)
         l = strlen(t);
         while (l && t[l - 1] == ' ')
             t[--l] = 0;
-        ui_sound(SND_UI_SELECT);
+        dl_typing = false;
+        if (kb_apply) {
+            // the filter panel asked for them
+            void (*apply)(const char *) = kb_apply;
+            kb_apply = NULL;
+            plat_log("typed for a filter \"%s\"", t);
+            apply(t);
+            return;
+        }
         if (kb_library) {
             snprintf(find_text, sizeof(find_text), "%s", t);
             view_stale = true;
@@ -724,6 +1167,11 @@ static void download_screen(void)
         dl_queue_screen();
         return;
     }
+    // the filters' panel over the results: its buttons don't reach the list behind it
+    if (dl_panel && !dl_typing) {
+        dl_panel_input();
+        pressed = repeat = 0;
+    }
     if (dl_marked != dl_version())
         dl_mark();
 
@@ -766,6 +1214,15 @@ static void download_screen(void)
     if (more && n && dl_sel >= n - 3)
         dl_more();
 
+    if (pressed & BTN_START) {
+        // the filter panel: which charter, which kind of song, and so on
+        dl_panel = true;
+        dl_panel_row = 0;
+        pick_open = false;
+        pick_state = -2;
+        dl_genre_count();           // the list gets asked of the site the first time it's needed
+        ui_sound(SND_UI_SELECT);
+    }
     if (pressed & (BTN_L | BTN_R)) {
         dl_site = (dl_site + 1) % DL_SITES;
         dl_new_search();
@@ -778,10 +1235,13 @@ static void download_screen(void)
         snprintf(dl_typed, sizeof(dl_typed), "%s", dl_query[dl_site]);
         dl_typing = true;
         kb_library = false;
+        kb_apply = NULL;            // these words are for the search itself
         ui_sound(SND_UI_SELECT);
     }
     if (pressed & BTN_CIRCLE) {
         ui_sound(SND_UI_BACK);
+        dl_panel = false;
+        pick_open = false;
         go(S_MAIN);
         menu_index = 2;             // back on DOWNLOAD SONGS
         return;
@@ -963,6 +1423,12 @@ static void download_screen(void)
             mc = RGBA(170, 230, 160, 255);
         draw_wrapped(t, 630, y + 2, 18, 300, 3, mc);
     }
+    // the filters over everything (the keyboard still goes on top of them)
+    if (dl_panel) {
+        dl_panel_draw();
+        if (pick_open)
+            dl_picker_draw();
+    }
     if (dl_typing) {
         // the desktop build's keyboard (the Vita's draws itself over this)
         panel(150, 190, 660, 150);
@@ -972,9 +1438,10 @@ static void download_screen(void)
         snprintf(t, sizeof(t), "%s%s", dl_typed, fmod(now_s, 1.0) < 0.5 ? "_" : " ");
         font_draw_fit(res.ui, t, 204, 264, 28, 552, WHITE, ALIGN_LEFT);
     }
-    static const char * help[] = {"btn_cross", "Download", "btn_triangle", "Search", "btn_l", "Site",
-                                  "btn_square", "Cancel", "btn_select", "Queue", "btn_circle", "Back"};
-    help_bar(help, 12);
+    static const char * help[] = {"btn_cross", "Download", "btn_triangle", "Search", "btn_start", "Filters",
+                                  "btn_l", "Site", "btn_square", "Cancel", "btn_select", "Queue",
+                                  "btn_circle", "Back"};
+    help_bar(help, 14);
     draw_toast();
     if (dl_typing)
         kb_draw();
@@ -2818,16 +3285,17 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
-        "Star Power's gems burn blue instead of silver.",
-        "Songs shrink on the Vita: Settings -> GAME -> \"Check songs are shrunk\" counts, then X shrinks, no card.",
-        "Vocals: clap notes (any noise plays them), and \"Singing starts Star Power\" (off by default).",
-        "Download queue survives closing the game: waiting jobs carry on, failed ones wait on SELECT's queue for X.",
-        "Bass 10x and 12x multiplier badges (no more gray squares).",
-        "The vocal arrow lines up with the notes; lamps and the button hints point the right way.",
-        "Search and library sort by relevance; genre and the chart author's note show before downloading.",
+        "Downloader: START opens Filters — search by charter, artist, genre, instrument, difficulty, "
+        "year or decade, multitrack stems, on both sites.",
+        "Searching by charter on RhythmVerse picks the author from a live list of names.",
+        "Highway gems sit where the streak below them says (the orange cap had drifted by up to 18 pixels).",
+        "Fixed a crash searching the sites with a short word.",
+        "D-pad button hints are back the way they were.",
         "Practice mode now goes up to 150% speed.",
         "Shrinking shows which song it's on and runs faster.",
         "Settings reorganised: a LIBRARY tab, sing-to-activate in CONTROLS.",
+        "Songs shrink on the Vita: Settings -> GAME -> \"Check songs are shrunk\" counts, then X shrinks, no card.",
+        "Vocals: clap notes (any noise plays them), and \"Singing starts Star Power\" (off by default).",
     };
     int n = (int)(sizeof(lines) / sizeof(lines[0]));
     gfx_begin(0, 0, 0);

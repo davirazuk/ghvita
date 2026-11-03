@@ -28,6 +28,35 @@ typedef struct {
 } DlHit;
 
 void dl_search(int site, const char * query);       // "" lists the newest charts
+
+// The filters a search carries ("by charter", genre, ...). RhythmVerse needs the charter and artist as the site's own
+// ids (as the lookup pickers return them), Chorus takes what's typed.
+typedef struct {
+    char charter[72], charter_name[96];     // the id and what the screen shows
+    char artist[72], artist_name[96];
+    int genre;                              // which of dl_genres(), -1 all
+    int instrument;                         // which of dl_instru(), -1 all
+    int difficulty;                         // 0 expert 1 hard 2 medium 3 easy, -1 all
+    int decade, year;                       // 1990, 1974 or 0 all
+    bool stems;                             // only the full multitracks (RhythmVerse takes it)
+} DlFilter;
+void dl_get_filter(int site, DlFilter * f);
+void dl_set_filter(int site, const DlFilter * f);
+bool dl_quit_filters(void);                         // anything on either site?
+
+// the genres RhythmVerse knows (both sites search them), fetched when first asked. -1 while it's loading, 0 when the
+// site didn't answer
+int dl_genre_count(void);
+const char * dl_genre_slug(int i);
+const char * dl_genre_name(int i);
+int dl_diff_count(void);                            // 0 expert .. 3 easy
+// the instruments the two sites share, one name for each: dl_instru's two slugs (theirs and Chorus's)
+int dl_instru_count(void);
+void dl_instru(int i, const char ** rv, const char ** chorus, const char ** label);
+
+typedef struct { char id[80], name[96]; int releases; } DlLookup;
+// "who is that?" for the pickers: 0 charter, 1 artist, both RhythmVerse's live lookups. Returns how many were found
+int dl_lookup(int kind, const char * text, DlLookup * out, int max);
 void dl_remove_tree(const char * path);
 bool dl_extract_archive(const char * file, const char * dir, char * err, size_t err_size);
 void dl_mkdirs(const char * path);

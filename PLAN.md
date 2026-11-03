@@ -223,3 +223,22 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 - A manifest may only name eboot.bin, updater.bin and assets/. LiveArea files aren't updated: a new icon still needs the VPK.
 - PC test: GHV_UPDATE_API, GHV_UPDATE_TOKEN and GHV_APP stand in for GitHub, the token and the install. The updater app itself has only been run on a Vita.
 
+
+## Search filters (downloader, 2026-11-03)
+- START on the download screen opens a filter panel over the results: charter, artist, genre, instrument,
+  difficulty, decade, year and multitrack stems. Chorus gets one row fewer (it has no stems flag). Every
+  change re-runs the search; Square clears the row; Start or Circle closes. Rows cycle with Left/Right, text
+  rows open the keyboard (kb_apply carries the words back out of kb_update).
+- RhythmVerse: POST /api/<sys>/songfiles/search/live with text always 3+ chars, plus author=<shortname> for the
+  charter; artist, genre[0], instrument[0], difficulties[0], year, decade=1990 (the decade's first year), audio=full
+  all verified live. With no text the /api/<sys>/songfiles/list endpoint takes the same filters and a sort[0]
+  (what the newest-charts view already does). rating= is broken server-side and vocals/vocal_parts are rejected.
+- The charter and artist need the site's own names: POST /api/all/authors/search/live and /api/all/artists/search/live
+  {text,page,records} give shortname/artist_s ids with display names and counts. The panel shows them as a picker
+  thread (dl_lookup), Cross picks, Circle drops.
+- Chorus Encore: POST api.enchor.us/search/advanced (plain /search otherwise), search="*" when empty, the words
+  each as {"value",exact,exclude} objects, instrument as its own spelling (guitarcoop etc), difficulty single
+  enum, a decade as minYear..maxYear+9. All verified live against the site (bundled with youtube-dl-era count
+  checks: charter 273, +rock 21, +2010s 109).
+- Genres come once from GET /api/ch/dictionary/list -> data.filters.genre (slug->label), fetched on a thread the
+  first time the panel opens; the same list serves both sites.

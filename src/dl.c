@@ -35,6 +35,163 @@ static char status_text[200];
 static volatile bool searching;
 static int cur_site, cur_page, cur_total;
 static char cur_query[128];
+
+// later in this file, needed here
+static void copy_str(char * out, size_t size, const Json * j);
+
+// the search filters: words the two sites use, one spelling each (RhythmVerse's first, Chorus's second)
+typedef struct {
+    const char * rv, * chorus, * label;
+} DlWord;
+
+static const DlWord word_diff[] = {{"x", "expert", "Expert"}, {"h", "hard", "Hard"}, {"m", "medium", "Medium"},
+                                   {"e", "easy", "Easy"}};
+static const DlWord word_instr[] = {{"guitar", "guitar", "Guitar"}, {"guitar_coop", "guitarcoop", "Co-Op Guitar"},
+                                    {"rhythm", "rhythm", "Rhythm Guitar"}, {"bass", "bass", "Bass"},
+                                    {"guitarghl", "guitarghl", "Guitar 6-Fret"}, {"keys", "keys", "Keys"},
+                                    {"drums", "drums", "Drums"}};
+// each site's own filters: what the screen holds (dl_get/dl_set_filter) and what the request builder reads
+static DlFilter filt[DL_SITES];
+static pthread_mutex_t filt_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+// the genres, asked of RhythmVerse's dictionary the first time the panel opens
+typedef struct { char slug[48], label[64]; } GenrePair;
+static GenrePair genres[96];
+static volatile int genre_n = -2;         // -2 not asked, -1 being asked, 0 the site had nothing, N got them
+
+void dl_get_filter(int site, DlFilter * f)
+{
+    pthread_mutex_lock(&filt_mutex);
+    *f = filt[site];
+    pthread_mutex_unlock(&filt_mutex);
+}
+
+void dl_set_filter(int site, const DlFilter * f)
+{
+    pthread_mutex_lock(&filt_mutex);
+    filt[site] = *f;
+    pthread_mutex_unlock(&filt_mutex);
+}
+
+bool dl_quit_filters(void)
+{
+    // is anything on at either site? the display names don't decide: what's filtered does
+    for (int s = 0; s < DL_SITES; s++) {
+        DlFilter f;
+        dl_get_filter(s, &f);
+        if (f.charter[0] || f.artist[0])
+            return true;
+        if (f.genre >= 0 || f.instrument >= 0 || f.difficulty >= 0)
+            return true;
+        if (f.decade || f.year || f.stems)
+            return true;
+    }
+    return false;
+}
+
+int dl_instru_count(void)
+{
+    return sizeof(word_instr) / sizeof(word_instr[0]);
+}
+
+int dl_diff_count(void)
+{
+    return sizeof(word_diff) / sizeof(word_diff[0]);
+}
+
+void dl_instru(int i, const char ** rv, const char ** chorus, const char ** label)
+{
+    *rv = word_instr[i].rv, *chorus = word_instr[i].chorus, *label = word_instr[i].label;
+}
+
+static void * dict_thread(void * arg)
+{
+    (void)arg;
+    char err[128] = "";
+    char * body = NULL;
+    size_t len = 0;
+    // the lists are the same across the systems: the CH one is the shape the search takes
+    const HttpReq r = {.url = "https://rhythmverse.co/api/ch/dictionary/list", .stall_s = 20};
+    int st = http_fetch(&r, &body, &len, err, sizeof(err));
+    int n = 0;
+    if (st >= 200 && st < 300) {
+        Json * root = json_parse(body, len);
+        // the genre pairs sit in the dictionary as slug -> label ("rock": "Rock", ...)
+        const Json * list = json_get(json_get(json_get(root, "data"), "filters"), "genre");
+        const Json * pair = list ? list->child : NULL;
+        for (; pair && n < (int)(sizeof(genres) / sizeof(genres[0])) && pair->key; pair = pair->next) {
+            snprintf(genres[n].slug, sizeof(genres[0].slug), "%s", pair->key);
+            copy_str(genres[n].label, sizeof(genres[0].label), pair);
+            n++;
+        }
+        json_free(root);
+    }
+    free(body);
+    genre_n = n;
+    return NULL;
+}
+
+int dl_genre_count(void)
+{
+    if (genre_n == -2) {
+        genre_n = -1;
+        pthread_t t;
+        if (pthread_create(&t, NULL, dict_thread, NULL) == 0)
+            pthread_detach(t);
+        else
+            genre_n = 0;
+        return -1;
+    }
+    return genre_n;
+}
+
+const char * dl_genre_slug(int i)
+{
+    static const char * empty = "";
+    return i >= 0 && i < genre_n ? genres[i].slug : empty;
+}
+
+const char * dl_genre_name(int i)
+{
+    static const char * empty = "";
+    return i >= 0 && i < genre_n ? genres[i].label : empty;
+}
+
+// the pickers' lists: "who are you looking at?" 0 charter, 1 artist. Both are live lookups on the site, and the words
+// typed come back as the site's own id (the search filter carries that)
+int dl_lookup(int kind, const char * text, DlLookup * out, int max)
+{
+    char err[128] = "";
+    char * body = NULL;
+    size_t len = 0;
+    char q[400], post[700];
+    url_escape(q, sizeof(q), text);
+    snprintf(post, sizeof(post), "text=%s&page=1&records=%d", q, max);
+    char url[200];
+    snprintf(url, sizeof(url), "https://rhythmverse.co/api/all/%s/search/live", kind ? "artists" : "authors");
+    const char * headers[] = {"X-Requested-With: XMLHttpRequest", NULL};
+    const HttpReq r = {.url = url, .post = post, .headers = headers, .stall_s = 20};
+    int st = http_fetch(&r, &body, &len, err, sizeof(err));
+    int n = -1;
+    if (st >= 200 && st < 300) {
+        Json * root = json_parse(body, len);
+        const Json * list = json_get(json_get(root, "data"), kind ? "artists" : "authors");
+        n = 0;
+        for (const Json * a = list && list->child ? list->child : NULL; a && n < max; a = a->next) {
+            copy_str(out[n].id, sizeof(out[0].id), json_get(a, kind ? "artist_s" : "shortname"));
+            copy_str(out[n].name, sizeof(out[0].name), json_get(a, kind ? "artist" : "name"));
+            int rel = (int)json_num(json_get(a, kind ? "songs" : "releases"), 0);
+            if (!out[n].id[0])
+                continue;
+            out[n].releases = rel;
+            n++;
+        }
+        json_free(root);
+    }
+    free(body);
+    return n;
+}
+
 static struct {
     volatile bool pending;
     int site, page;
@@ -460,6 +617,52 @@ static int parse_rv(const char * body, size_t len, DlHit ** out, int * total, ch
     return k;
 }
 
+// what the filters ask for, as RhythmVerse wants them ("author=<id>&genre[0]=rock..."). Slugs are escaped; kept,
+// because RhythmVerse itself takes its ids like that
+static void rv_filters(char * out, size_t size, const DlFilter * f)
+{
+    char piece[256];
+    out[0] = 0;
+    if (f->charter[0]) {
+        url_escape(piece, sizeof(piece), f->charter);
+        snprintf(out, size, "&author=%s", piece);
+    }
+    if (f->artist[0]) {
+        char head[220];
+        url_escape(piece, sizeof(piece), f->artist);
+        snprintf(head, sizeof(head), "%s&artist=%s", out, piece);
+        snprintf(out, size, "%s", head);
+    }
+    if (f->genre >= 0) {
+        char head[220];
+        url_escape(piece, sizeof(piece), dl_genre_slug(f->genre));
+        snprintf(head, sizeof(head), "%s&genre%%5B0%%5D=%s", out, piece);
+        snprintf(out, size, "%s", head);
+    }
+    if (f->instrument >= 0) {
+        char head[220];
+        url_escape(piece, sizeof(piece), word_instr[f->instrument].rv);
+        snprintf(head, sizeof(head), "%s&instrument%%5B0%%5D=%s", out, piece);
+        snprintf(out, size, "%s", head);
+    }
+    if (f->difficulty >= 0)
+        // one difficulty: the lowest of the ones asked? the site takes one, and the charts it lists also have the
+        // harder ones beside it
+        snprintf(out + strlen(out), size - strlen(out), "&difficulties%%5B0%%5D=%s", word_diff[f->difficulty].rv);
+    if (f->decade && !f->year)
+        snprintf(out + strlen(out), size - strlen(out), "&decade=%d", f->decade);
+    if (f->year)
+        snprintf(out + strlen(out), size - strlen(out), "&year=%d", f->year);
+    if (f->stems)
+        snprintf(out + strlen(out), size - strlen(out), "&audio=full");
+}
+
+static bool filter_set(const DlFilter * f)
+{
+    return f->charter[0] || f->artist[0] || f->genre >= 0 || f->instrument >= 0 || f->difficulty >= 0 || f->decade ||
+           f->year || f->stems;
+}
+
 // one page of a RhythmVerse search (nothing typed: the newest), Clone Hero and Phase Shift uploads (the same song
 // folders) together, and asked for by name its Rock Band customs; false when none answered
 static bool rv_fetch(const char * text, int page, int records, DlHit ** out, int * n, int * total, char * err,
@@ -468,15 +671,18 @@ static bool rv_fetch(const char * text, int page, int records, DlHit ** out, int
     bool any = false;
     static const char * const systems[3] = {"ch", "ps", "rb3xbox"};
     for (int sys = 0; sys < (text[0] ? 3 : 2); sys++) {
-        char q[400], post[700], url[200];
+        char q[400], post[860], url[200], tail[300];
         url_escape(q, sizeof(q), text);
+        DlFilter flat;
+        dl_get_filter(DL_RHYTHMVERSE, &flat);
         if (text[0])
             snprintf(post, sizeof(post), "text=%s&data_type=full&records=%d&page=%d", q, records, page);
         else
             snprintf(post, sizeof(post), "data_type=full&records=%d&page=%d&sort%%5B0%%5D%%5Bsort_by%%5D="
                      "update_date&sort%%5B0%%5D%%5Bsort_order%%5D=DESC", records, page);
-        snprintf(url, sizeof(url), "https://rhythmverse.co/api/%s/songfiles/%s", systems[sys],
-                 text[0] ? "search/live" : "list");
+        rv_filters(tail, sizeof(tail), &flat);
+        snprintf(post + strlen(post), sizeof(post) - strlen(post), "%s", tail);
+        snprintf(url, sizeof(url), "https://rhythmverse.co/api/%s/songfiles/%s", systems[sys], text[0] ? "search/live" : "list");
         const char * headers[] = {"X-Requested-With: XMLHttpRequest", NULL};
         HttpReq r = {.url = url, .post = post, .headers = headers, .stall_s = 20};
         char * body = NULL;
@@ -627,19 +833,62 @@ static bool fetch_page(int site, const char * query, int page, DlHit ** out, int
     *n = 0;
     *total = 0;
     if (site == DL_CHORUS) {
+        DlFilter flat;
+        dl_get_filter(DL_CHORUS, &flat);
+        bool deep = filter_set(&flat);
+        const char * words2 = deep && !query[0] ? "*" : query;
         char q[400];
         size_t k = 0;
-        for (const char * s = query; *s && k + 3 < sizeof(q); s++) {
+        for (const char * s = words2; *s && k + 3 < sizeof(q); s++) {
             if (*s == '"' || *s == '\\')
                 q[k++] = '\\';
             if ((unsigned char)*s >= 0x20)
                 q[k++] = *s;
         }
         q[k] = 0;
-        char post[600];
-        snprintf(post, sizeof(post), "{\"search\":\"%s\",\"page\":%d,\"per_page\":%d}", q, page, PAGE);
+        char extra[500];
+        extra[0] = 0;
+        if (deep) {
+            // Chorus asks for the words each in a {value, exact, exclude} object, its own instrument spellings,
+            // and the year as min and max (a decade spans the ten years it starts on)
+            const struct { const char * key, * value; } words[] = {
+                {"charter", flat.charter}, {"artist", flat.artist}};
+            for (int i = 0; i < 2; i++) {
+                if (!words[i].value[0])
+                    continue;
+                char e[140];
+                size_t ek = 0;
+                for (const char * s = words[i].value; *s && ek + 2 < sizeof(e); s++) {
+                    if (*s == '"' || *s == '\\')
+                        e[ek++] = '\\';
+                    e[ek++] = *s;
+                }
+                e[ek] = 0;
+                snprintf(extra + strlen(extra), sizeof(extra) - strlen(extra),
+                         ",\"%s\":{\"value\":\"%s\",\"exact\":false,\"exclude\":false}", words[i].key, e);
+            }
+            if (flat.genre >= 0)
+                snprintf(extra + strlen(extra), sizeof(extra) - strlen(extra),
+                         ",\"genre\":{\"value\":\"%s\",\"exact\":false,\"exclude\":false}", dl_genre_slug(flat.genre));
+            if (flat.instrument >= 0)
+                snprintf(extra + strlen(extra), sizeof(extra) - strlen(extra), ",\"instrument\":\"%s\"",
+                         word_instr[flat.instrument].chorus);
+            if (flat.difficulty >= 0)
+                snprintf(extra + strlen(extra), sizeof(extra) - strlen(extra), ",\"difficulty\":\"%s\"",
+                         word_diff[flat.difficulty].chorus);
+            if (flat.year) {
+                snprintf(extra + strlen(extra), sizeof(extra) - strlen(extra), ",\"minYear\":%d,\"maxYear\":%d",
+                         flat.year, flat.year);
+            } else if (flat.decade) {
+                snprintf(extra + strlen(extra), sizeof(extra) - strlen(extra),
+                         ",\"minYear\":%d,\"maxYear\":%d", flat.decade, flat.decade + 9);
+            }
+        }
+        char post[1200];
+        snprintf(post, sizeof(post), "{\"search\":\"%s\",\"page\":%d,\"per_page\":%d%s}", q, page, PAGE, extra);
         const char * headers[] = {"Content-Type: application/json", NULL};
-        HttpReq r = {.url = "https://api.enchor.us/search", .post = post, .headers = headers, .stall_s = 20};
+        HttpReq r = {.url = deep ? "https://api.enchor.us/search/advanced" : "https://api.enchor.us/search",
+                     .post = post, .headers = headers, .stall_s = 20};
         status = http_fetch(&r, &body, &len, err, err_size);
         if (status >= 200 && status < 300)
             *n = parse_chorus(body, len, out, total);
