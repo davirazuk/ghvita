@@ -7,7 +7,7 @@ Builds the VPK from a clean tree, tags v<commit count>, and uploads:
   update-from-<last>.zip   only what changed since the last release
   manifest.txt             what the next release compares itself with
 The VPK holds art made from your own games: the repository has to stay private."""
-import argparse, json, os, subprocess, sys, tempfile, zipfile, zlib
+import argparse, json, os, shutil, subprocess, sys, tempfile, zipfile, zlib
 
 ap = argparse.ArgumentParser(); ap.add_argument('--notes', default=''); ap.add_argument('--dry', action='store_true')
 a = ap.parse_args()
@@ -21,14 +21,17 @@ n = int(run('git', 'rev-list', '--count', 'HEAD')); tag = f'v{n}'
 if subprocess.run(['gh', 'release', 'view', tag], capture_output=True).returncode == 0:
     sys.exit(f'{tag} is out already')
 sdk = os.environ.get('VITASDK', os.path.expanduser('~/opt/vitasdk'))
-# the toolchain's cmake and ninja are foreign builds: they need their own libraries pointed at, and
-# /run/host/usr/bin on the path ahead of whatever the shell has
+# the build tree was configured from a sandbox whose tools live under /run/host: those paths don't
+# exist out on the machine itself, so pin the make program to a ninja this machine can actually run
 hostlibs = '/run/host/usr/lib/x86_64-linux-gnu:/run/host/lib/x86_64-linux-gnu'
 env = dict(os.environ, VITASDK=sdk,
            PATH=sdk + '/bin:/run/host/usr/bin:' + os.environ['PATH'],
            LD_LIBRARY_PATH='/tmp/opencode/hostlibs2' if os.path.isdir('/tmp/opencode/hostlibs2') else hostlibs)
-subprocess.run(['cmake', '-S', '.', '-B', 'build-vita', '-G', 'Ninja', f'-DCMAKE_TOOLCHAIN_FILE={sdk}/share/vita.toolchain.cmake', f'-DGHV_BUILD={n}'], check=True, env=env, stdout=subprocess.DEVNULL)
-subprocess.run(['ninja', '-C', 'build-vita'], check=True, env=env, stdout=subprocess.DEVNULL)
+ninja = shutil.which('ninja', path=env['PATH'])
+if not ninja:
+    sys.exit('ninja not found on the path: install it (apt install ninja-build, or pip install ninja)')
+subprocess.run(['cmake', '-S', '.', '-B', 'build-vita', '-G', 'Ninja', f'-DCMAKE_TOOLCHAIN_FILE={sdk}/share/vita.toolchain.cmake', f'-DCMAKE_MAKE_PROGRAM={ninja}', f'-DGHV_BUILD={n}'], check=True, env=env, stdout=subprocess.DEVNULL)
+subprocess.run([ninja, '-C', 'build-vita'], check=True, env=env, stdout=subprocess.DEVNULL)
 vpk = 'build-vita/GHVita.vpk'
 updater_vpk = 'build-vita/GHVitaUpdater.vpk'
 tmp = tempfile.mkdtemp()
