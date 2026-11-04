@@ -1881,16 +1881,18 @@ static void overhit(void)
     G.miss_flash = 0.7f;
 }
 
-// Left and Up for one thumb, Triangle and Circle for the other, the kick under the fingers
-// Or the snare under one finger and the kick under the other, so the snare and the hi-hat are on two hands as they are
-// on a kit: they're the chord most charts are made of
+// Thumbs: Left and Up for one thumb, Triangle and Circle for the other, the kick under the fingers.
+// Shoulders: the snare on L and the kick on R, and the other pads in pairs, one pair per cluster: the
+// hi-hat up-left on the D-pad and the low pad down-right, the blue pads up-left on the buttons and the
+// green down-right — every pad but the snare has two buttons, like the 4-pad layout
 static uint32_t drum_buttons(int lane)
 {
     const uint32_t dpad = BTN_UP | BTN_LEFT | BTN_RIGHT | BTN_DOWN;
     static const uint32_t four[4] = {BTN_LEFT, BTN_UP, BTN_TRIANGLE, BTN_CIRCLE};
     static const uint32_t five[5] = {BTN_LEFT, BTN_UP, BTN_TRIANGLE, BTN_SQUARE, BTN_CIRCLE};
     const uint32_t four_s[4] = {BTN_L, dpad, BTN_TRIANGLE | BTN_SQUARE, BTN_CIRCLE | BTN_CROSS};
-    const uint32_t five_s[5] = {BTN_L, dpad, BTN_TRIANGLE, BTN_SQUARE, BTN_CIRCLE | BTN_CROSS};
+    const uint32_t five_s[5] = {BTN_L, BTN_UP | BTN_LEFT, BTN_TRIANGLE | BTN_SQUARE, BTN_RIGHT | BTN_DOWN,
+                                BTN_CIRCLE | BTN_CROSS};
     if (lane == LANE_OPEN)
         return cfg.drum_layout ? BTN_R : BTN_L | BTN_R | BTN_CROSS | BTN_DOWN;
     if (lane >= G.lanes)

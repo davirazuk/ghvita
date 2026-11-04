@@ -3300,7 +3300,10 @@ static void options_screen(void)
         text = line;
     }
     if (opt == O_DRUMKEYS)
-        text = cfg.drum_layout ? "Red L, Yellow D-pad, Blue Triangle, Green Circle, Kick R: snare and hi-hat on two hands"
+        text = cfg.drum_layout ? cfg.five_pads ? "Red L, Yellow Up or Left, Blue Triangle or Square, Orange Right or"
+                                " Down, Green Circle or Cross, Kick R"
+                                               : "Red L, Yellow any D-pad, Blue Triangle or Square, Green Circle or"
+                                " Cross, Kick R"
                                : "Red Left, Yellow Up, Blue Triangle, Green Circle, Kick L, R, X or Down";
     font_draw_fit(res.ui, text, SCREEN_W / 2, 462, 22, 820, RGBA(200, 200, 200, 255), ALIGN_CENTER);
     static const char * help[] = {"btn_left", "Change", "btn_l", "Tab", "btn_r", "Tab", "btn_circle", "Done"};
