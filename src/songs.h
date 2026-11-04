@@ -67,7 +67,7 @@ typedef struct {
     char venue[16];         // "song" (each song its own), "random", "classic" (no venue) or a venue's zone
     int offset_ms;          // audio offset: notes are judged and drawn this much later
     int layout;             // 0 default, 1 alternate
-    int drum_layout;        // 0 thumbs on the pads, 1 the shoulders on the snare and the kick
+    int drum_layout;        // 0 thumbs on the pads, 1 the shoulders, 2 the guitar's own buttons per colour
     bool drum_hits;         // every pad hit sounds, not just those in the gaps
     bool tilt;              // Star Power by tilting
     bool nofail;

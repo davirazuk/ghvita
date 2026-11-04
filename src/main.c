@@ -2992,7 +2992,7 @@ static void option_text(int i, char * name, char * value, size_t n)
     case O_LAYOUT: strcpy(name, "Buttons"); snprintf(value, n, "%s", cfg.layout ? "Layout B" : "Layout A"); break;
     case O_TILT: strcpy(name, "Tilt for Star Power"); snprintf(value, n, "%s", cfg.tilt ? "On" : "Off"); break;
     case O_NOFAIL: strcpy(name, "No fail"); snprintf(value, n, "%s", cfg.nofail ? "On" : "Off"); break;
-    case O_DRUMKEYS: strcpy(name, "Drum buttons"); snprintf(value, n, "%s", cfg.drum_layout ? "Shoulders" : "Thumbs"); break;
+    case O_DRUMKEYS: strcpy(name, "Drum buttons"); snprintf(value, n, "%s", cfg.drum_layout == 1 ? "Shoulders" : cfg.drum_layout == 2 ? "Guitar" : "Thumbs"); break;
     case O_DRUMHITS: strcpy(name, "Drum pad sounds"); snprintf(value, n, "%s", cfg.drum_hits ? "Every hit" : "Freestyle only"); break;
     case O_LEFTY: strcpy(name, "Lefty flip"); snprintf(value, n, "%s", cfg.lefty ? "On" : "Off"); break;
     case O_MUSIC: strcpy(name, "Music volume"); snprintf(value, n, "%d", cfg.music_vol); break;
@@ -3095,7 +3095,7 @@ static void change_option(int i, int d)
     case O_SINGSP: cfg.sing_sp = !cfg.sing_sp; break;
     case O_OFFSET: cfg.offset_ms = clampi(cfg.offset_ms + d * 5, -300, 300); break;
     case O_LAYOUT: cfg.layout = !cfg.layout; break;
-    case O_DRUMKEYS: cfg.drum_layout = !cfg.drum_layout; break;
+    case O_DRUMKEYS: cfg.drum_layout = (cfg.drum_layout + d + 3) % 3; break;
     case O_DRUMHITS: cfg.drum_hits = !cfg.drum_hits; break;
     case O_TILT: cfg.tilt = !cfg.tilt; break;
     case O_NOFAIL: cfg.nofail = !cfg.nofail; break;
@@ -3300,11 +3300,13 @@ static void options_screen(void)
         text = line;
     }
     if (opt == O_DRUMKEYS)
-        text = cfg.drum_layout ? cfg.five_pads ? "Red L, Yellow Up or Left, Blue Triangle or Square, Orange Right or"
+        text = cfg.drum_layout == 2 ? "The guitar's own buttons: Red Left, Yellow Up or Triangle, Blue Circle, Green L,"
+                 " Orange R on five pads, Kick X or Down"
+               : cfg.drum_layout == 1 ? cfg.five_pads ? "Red L, Yellow Up or Left, Blue Triangle or Square, Orange Right or"
                                 " Down, Green Circle or Cross, Kick R"
                                                : "Red L, Yellow any D-pad, Blue Triangle or Square, Green Circle or"
                                 " Cross, Kick R"
-                               : "Red Left, Yellow Up, Blue Triangle, Green Circle, Kick L, R, X or Down";
+               : "Red Left, Yellow Up, Blue Triangle, Green Circle, Kick L, R, X or Down";
     font_draw_fit(res.ui, text, SCREEN_W / 2, 462, 22, 820, RGBA(200, 200, 200, 255), ALIGN_CENTER);
     static const char * help[] = {"btn_left", "Change", "btn_l", "Tab", "btn_r", "Tab", "btn_circle", "Done"};
     help_bar(help, 8);

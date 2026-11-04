@@ -814,7 +814,7 @@ void config_load(void)
         else if (strcmp(k, "layout") == 0)
             cfg.layout = n;
         else if (strcmp(k, "drum_layout") == 0)
-            cfg.drum_layout = n;
+            cfg.drum_layout = n < 0 || n > 2 ? 0 : n;
         else if (strcmp(k, "drum_hits") == 0)
             cfg.drum_hits = n != 0;
         else if (strcmp(k, "tilt") == 0)

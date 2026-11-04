@@ -278,3 +278,13 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   own colours, green up to the fifth lane; a chart with flags keeps pro-drums semantics (default cymbal, tom
   flags move pads to the tom lanes, collisions fall to green's or orange's lane). The version gate is gone;
   true 5-lane charts (fifth-pad notes) were already 5 lanes. 4-lane stays the default; "Drum pads" toggles.
+
+## Drum button layouts (2026-11-04)
+- Three of them now (drum_layout 0/1/2): Thumbs as it was, Shoulders reworked so five pads keeps the
+  4-pad rule of two buttons per pad (D-pad splits diagonally: yellow Up/Left, low pad Right/Down), and a
+  new Guitar layout — each pad on the guitar button of its own colour (Red Left, Yellow Up/Triangle,
+  Blue Circle, Green L, Orange R), kick on the open-note buttons X/Down. Colour mapping, not lane
+  position, so 4- and 5-pad charts keep the same buttons.
+- The options crash: option_text's about[] list is indexed by the option enum; adding O_SINGDIFF in the
+  middle shifted every description and left the last one NULL, and the draw doesn't guard. Fixed the
+  list and guarded the draw.
