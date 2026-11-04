@@ -3301,12 +3301,15 @@ static void options_screen(void)
     }
     if (opt == O_DRUMKEYS)
         text = cfg.drum_layout == 2 ? "The guitar's own buttons: Red Left, Yellow Up or Triangle, Blue Circle, Green L,"
-                 " Orange R on five pads, Kick X or Down"
-               : cfg.drum_layout == 1 ? cfg.five_pads ? "Red L, Yellow Up or Left, Blue Triangle or Square, Orange Right or"
-                                " Down, Green Circle or Cross, Kick R"
-                                               : "Red L, Yellow any D-pad, Blue Triangle or Square, Green Circle or"
-                                " Cross, Kick R"
-               : "Red Left, Yellow Up, Blue Triangle, Green Circle, Kick L, R, X or Down";
+                 " Orange R on five pads. Kick R, X or Down — on five pads X or Down"
+               : cfg.drum_layout == 1 ? cfg.five_pads ? "Red L or Down, Yellow Up or Left, Blue Triangle or Square, Orange"
+                                " Right, Green Circle or Cross, Kick R"
+                                               : "Red L or Down, Yellow Up, Left or Right, Blue Triangle or Square, Green"
+                                " Circle or Cross, Kick R"
+               : cfg.five_pads ? "Red Left or Down, Yellow Up or Triangle, Blue Square or Circle, Orange Right, Green L,"
+                                " Kick R or X"
+                                               : "Red Left or Down, Yellow Up or Triangle, Blue Square or Circle, Green L,"
+                                " Kick R or X";
     font_draw_fit(res.ui, text, SCREEN_W / 2, 462, 22, 820, RGBA(200, 200, 200, 255), ALIGN_CENTER);
     static const char * help[] = {"btn_left", "Change", "btn_l", "Tab", "btn_r", "Tab", "btn_circle", "Done"};
     help_bar(help, 8);

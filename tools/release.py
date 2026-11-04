@@ -30,10 +30,12 @@ env = dict(os.environ, VITASDK=sdk,
 ninja = shutil.which('ninja', path=env['PATH'])
 if not ninja:
     sys.exit('ninja not found on the path: install it (apt install ninja-build, or pip install ninja)')
-subprocess.run(['cmake', '-S', '.', '-B', 'build-vita', '-G', 'Ninja', f'-DCMAKE_TOOLCHAIN_FILE={sdk}/share/vita.toolchain.cmake', f'-DCMAKE_MAKE_PROGRAM={ninja}', f'-DGHV_BUILD={n}'], check=True, env=env, stdout=subprocess.DEVNULL)
-subprocess.run([ninja, '-C', 'build-vita'], check=True, env=env, stdout=subprocess.DEVNULL)
-vpk = 'build-vita/GHVita.vpk'
-updater_vpk = 'build-vita/GHVitaUpdater.vpk'
+# the release builds in its own tree: the sandbox I develop in and this machine write different tool
+# paths into a build directory, and sharing one meant each side's cache broke the other's next build
+subprocess.run(['cmake', '-S', '.', '-B', 'build-release', '-G', 'Ninja', f'-DCMAKE_TOOLCHAIN_FILE={sdk}/share/vita.toolchain.cmake', f'-DCMAKE_MAKE_PROGRAM={ninja}', f'-DGHV_BUILD={n}'], check=True, env=env, stdout=subprocess.DEVNULL)
+subprocess.run([ninja, '-C', 'build-release'], check=True, env=env, stdout=subprocess.DEVNULL)
+vpk = 'build-release/GHVita.vpk'
+updater_vpk = 'build-release/GHVitaUpdater.vpk'
 tmp = tempfile.mkdtemp()
 z = zipfile.ZipFile(vpk); z.extractall(tmp)
 files = {}

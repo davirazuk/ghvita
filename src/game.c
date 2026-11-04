@@ -1881,26 +1881,29 @@ static void overhit(void)
     G.miss_flash = 0.7f;
 }
 
-// Thumbs: Left and Up for one thumb, Triangle and Circle for the other, the kick under the fingers.
-// Shoulders: the snare on L and the kick on R, and the other pads in pairs, one pair per cluster: the
-// hi-hat up-left on the D-pad and the low pad down-right, the blue pads up-left on the buttons and the
-// green down-right — every pad but the snare has two buttons, like the 4-pad layout.
+// Thumbs: the snare and the hats split the D-pad, the toms the buttons, the kick under the fingers.
+// Shoulders: the snare on L or D-pad down, the kick on R, and the other pads in pairs — the hats on the
+// D-pad's top and left (right too on four pads), the low pad on the right, blue up-left on the buttons
+// and green down-right. Every pad has two buttons but the low one.
 // Guitar: each pad where that colour sits on the guitar, so the fingers already know the way: the snare
-// on Left, the hats on Up or Triangle, blue on Circle, green on L, orange on R, the kick where the open
-// note is
+// on Left, the hats on Up or Triangle, blue on Circle, green on L, orange on R — and the kick wherever
+// it fits, R too when there's no orange
 static uint32_t drum_buttons(int lane)
 {
-    const uint32_t dpad = BTN_UP | BTN_LEFT | BTN_RIGHT | BTN_DOWN;
-    static const uint32_t four[4] = {BTN_LEFT, BTN_UP, BTN_TRIANGLE, BTN_CIRCLE};
-    static const uint32_t five[5] = {BTN_LEFT, BTN_UP, BTN_TRIANGLE, BTN_SQUARE, BTN_CIRCLE};
-    const uint32_t four_s[4] = {BTN_L, dpad, BTN_TRIANGLE | BTN_SQUARE, BTN_CIRCLE | BTN_CROSS};
-    const uint32_t five_s[5] = {BTN_L, BTN_UP | BTN_LEFT, BTN_TRIANGLE | BTN_SQUARE, BTN_RIGHT | BTN_DOWN,
+    static const uint32_t four[4] = {BTN_LEFT | BTN_DOWN, BTN_UP | BTN_TRIANGLE, BTN_SQUARE | BTN_CIRCLE, BTN_L};
+    static const uint32_t five[5] = {BTN_LEFT | BTN_DOWN, BTN_UP | BTN_TRIANGLE, BTN_SQUARE | BTN_CIRCLE, BTN_RIGHT,
+                                     BTN_L};
+    const uint32_t four_s[4] = {BTN_L | BTN_DOWN, BTN_UP | BTN_LEFT | BTN_RIGHT, BTN_TRIANGLE | BTN_SQUARE,
+                                BTN_CIRCLE | BTN_CROSS};
+    const uint32_t five_s[5] = {BTN_L | BTN_DOWN, BTN_UP | BTN_LEFT, BTN_TRIANGLE | BTN_SQUARE, BTN_RIGHT,
                                 BTN_CIRCLE | BTN_CROSS};
     static const uint32_t four_g[4] = {BTN_LEFT, BTN_UP | BTN_TRIANGLE, BTN_CIRCLE, BTN_L};
     static const uint32_t five_g[5] = {BTN_LEFT, BTN_UP | BTN_TRIANGLE, BTN_CIRCLE, BTN_R, BTN_L};
     if (lane == LANE_OPEN)
         return cfg.drum_layout == 1 ? BTN_R
-                                    : cfg.drum_layout == 2 ? BTN_CROSS | BTN_DOWN : BTN_L | BTN_R | BTN_CROSS | BTN_DOWN;
+                                    : cfg.drum_layout == 2 ? (G.lanes == 4 ? BTN_R | BTN_CROSS | BTN_DOWN
+                                                                           : BTN_CROSS | BTN_DOWN)
+                                                           : BTN_R | BTN_CROSS;
     if (lane >= G.lanes)
         return 0;
     if (cfg.drum_layout == 1)
@@ -3162,10 +3165,9 @@ static void draw_hud(void)
     if (G.drums && G.t < 4.5) {
         // which thumb goes where
         char hint[80];
-        snprintf(hint, sizeof(hint), "Kick: %s   Star Power: %s + %s, or Select",
-                 cfg.drum_layout == 1 ? "R" : cfg.drum_layout == 2 ? "X or Down" : "L, R, X or Down",
-                 cfg.drum_layout == 1 ? "D-pad" : "Up",
-                 cfg.drum_layout == 2 ? (G.lanes == 4 ? "Circle" : "R") : G.lanes == 4 ? "Circle" : "Square");
+        snprintf(hint, sizeof(hint), "Kick: %s   Star Power: both cymbals together, or Select",
+                 cfg.drum_layout == 1 ? "R"
+                                      : cfg.drum_layout == 2 ? (G.lanes == 4 ? "R, X or Down" : "X or Down") : "R or X");
         font_draw_shadow(res.ui, hint, SCREEN_W / 2, 164, 22, RGBA(210, 170, 255, 255), ALIGN_CENTER);
     }
     if (G.t < 4.5 && !G.vocal)

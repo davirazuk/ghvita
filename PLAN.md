@@ -288,3 +288,14 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 - The options crash: option_text's about[] list is indexed by the option enum; adding O_SINGDIFF in the
   middle shifted every description and left the last one NULL, and the draw doesn't guard. Fixed the
   list and guarded the draw.
+
+## Drum layouts reworked (2026-11-04)
+- All three, on the same ideas: pairs wherever a button is free, the kick on a trigger wherever one is
+  free, and yellow on Up/Triangle so guitar fingers carry over. Thumbs: snare Left/Down, hats
+  Up/Triangle, toms Square/Circle, green L, kick R/X. Shoulders: snare L/Down (it was the only
+  single-button pad), hats Up/Left (Right too on four pads), the low pad on Right alone on five pads,
+  kick R. Guitar: as colour-for-colour with the guitar, kick R/X/Down on four pads (R is free there),
+  X/Down on five.
+- The build directory is shared between the sandbox and the machine: each side's cmake wrote its own
+  tool paths into the cache and manifest, so every other build re-ran cmake and failed on the other
+  side's paths. release.py now builds in build-release, the sandbox keeps build-vita.
