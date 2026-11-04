@@ -21,7 +21,12 @@ n = int(run('git', 'rev-list', '--count', 'HEAD')); tag = f'v{n}'
 if subprocess.run(['gh', 'release', 'view', tag], capture_output=True).returncode == 0:
     sys.exit(f'{tag} is out already')
 sdk = os.environ.get('VITASDK', os.path.expanduser('~/opt/vitasdk'))
-env = dict(os.environ, VITASDK=sdk, PATH=sdk + '/bin:' + os.environ['PATH'])
+# the toolchain's cmake and ninja are foreign builds: they need their own libraries pointed at, and
+# /run/host/usr/bin on the path ahead of whatever the shell has
+hostlibs = '/run/host/usr/lib/x86_64-linux-gnu:/run/host/lib/x86_64-linux-gnu'
+env = dict(os.environ, VITASDK=sdk,
+           PATH=sdk + '/bin:/run/host/usr/bin:' + os.environ['PATH'],
+           LD_LIBRARY_PATH='/tmp/opencode/hostlibs2' if os.path.isdir('/tmp/opencode/hostlibs2') else hostlibs)
 subprocess.run(['cmake', '-S', '.', '-B', 'build-vita', '-G', 'Ninja', f'-DCMAKE_TOOLCHAIN_FILE={sdk}/share/vita.toolchain.cmake', f'-DGHV_BUILD={n}'], check=True, env=env, stdout=subprocess.DEVNULL)
 subprocess.run(['ninja', '-C', 'build-vita'], check=True, env=env, stdout=subprocess.DEVNULL)
 vpk = 'build-vita/GHVita.vpk'

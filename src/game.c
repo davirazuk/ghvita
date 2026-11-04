@@ -74,6 +74,7 @@ static struct {
     Zone rolls[MAX_ROLLS], gaps[MAX_ZONES];     // where the highway marks them
     int roll_count, gap_count;
     double pad_t[6];                    // when each pad was last hit
+    int8_t * roll_mate;                 // a trade roll's other pad, which keeps it going as well
     double slip_t;                      // the last stray press
     bool run_told;                      // the first tremolo says what to do
     int free_hits;                      // in this gap
@@ -1101,6 +1102,7 @@ static void setup_camera(void)
 #define ROLL_GAP 0.11                   // gems this close on a pad are a roll: no thumb keeps up with them
 #define ROLL_RUN 4                      // that many in a row
 #define ROLL_HOLD 0.18                  // a roll goes on while its pad was hit this recently
+#define ROLL_TRADE 6                    // gems trading between two pads this fast are a roll as well
 #define SPAM_GAP 0.12                   // the same frets again this soon: no thumb keeps up, it's a tremolo
 #define SPAM_RUN 4                      // that many in a row
 #define SPAM_HOLD 0.2                   // a tremolo goes on while its frets were hit this recently
@@ -1227,6 +1229,46 @@ static void split_drums(void)
         }
     }
     plat_log("drums: %d rolls", G.roll_count);
+    // two pads traded faster than thumbs trade them: the same roll, kept going by either pad (the highway marks
+    // both of its lanes)
+    G.roll_mate = calloc(used + 1, 1);
+    if (G.roll_mate)
+        memset(G.roll_mate, -1, used + 1);
+    for (int i = 0; G.roll && G.roll_mate && i < used;) {
+        uint8_t fa = G.drum_notes[i].frets;
+        if ((fa & FRET_OPEN) || G.roll[i]) {
+            i++;
+            continue;
+        }
+        int la = __builtin_ctz(fa), pb = -1, j = i + 1;
+        while (j < used) {
+            uint8_t fj = G.drum_notes[j].frets;
+            if ((fj & FRET_OPEN) || (G.drum_notes[j].time - G.drum_notes[j - 1].time) / 1e6 > ROLL_GAP)
+                break;
+            int l = __builtin_ctz(fj);
+            if (l == la) {
+                if (pb < 0)
+                    break;              // back on the first pad: a run on one pad, the lane pass already had it
+            } else if (pb < 0)
+                pb = l;
+            else if (l != pb)
+                break;                  // a third pad joins: not a trade
+            j++;
+        }
+        if (j - i >= ROLL_TRADE && pb >= 0) {
+            double t0 = G.drum_notes[i].time / 1e6, t1 = G.drum_notes[j - 1].time / 1e6;
+            for (int k = i + 1; k < j; k++) {
+                G.roll[k] = 1;
+                G.roll_mate[k] = (int8_t)(__builtin_ctz(G.drum_notes[k].frets) == la ? pb : la);
+            }
+            if (G.roll_count + 2 <= MAX_ROLLS) {
+                G.rolls[G.roll_count++] = (Zone){t0, t1, la};
+                G.rolls[G.roll_count++] = (Zone){t0, t1, pb};
+            }
+            i = j;
+        } else
+            i++;
+    }
 }
 
 // What no thumb can play: the same frets over and over, faster than a button goes. As Rock Band's tremolo lanes, the first
@@ -1256,6 +1298,8 @@ static void free_song(void)
 {
     free(G.roll);
     G.roll = NULL;
+    free(G.roll_mate);
+    G.roll_mate = NULL;
     G.roll_count = G.gap_count = 0;
     audio_song_unload();
     vox_free();
@@ -2032,8 +2076,13 @@ static void pull_off(void)
 static bool run_going(int i)
 {
     int frets = G.part->notes[i].frets;
-    if (G.drums)
-        return G.t - G.pad_t[__builtin_ctz(frets)] < ROLL_HOLD;
+    if (G.drums) {
+        int l = __builtin_ctz(frets);
+        if (G.t - G.pad_t[l] < ROLL_HOLD)
+            return true;
+        int m = G.roll_mate ? G.roll_mate[i] : -1;      // a trade roll: either pad keeps it going
+        return m >= 0 && m < 6 && G.t - G.pad_t[m] < ROLL_HOLD;
+    }
     bool struck = false;
     for (int l = 0; l < 6; l++) {
         if (!(frets & (1 << l)))
