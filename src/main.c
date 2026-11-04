@@ -3245,6 +3245,7 @@ static void options_screen(void)
         "The stage behind the highway: Guitar Hero World Tour's venues, lit up with the music.",
         "World Tour's band on the venue's stage. Turn it off if a song runs slow.",
         "Sing into the mic over any instrument, when the song has vocals. Headphones help.",
+        "What difficulty the vocals you sing along to are judged at. Your instrument keeps its own.",
         "Move the notes earlier (-) or later (+) to match the sound. Calibrate sets it for you.",
         NULL,
         NULL,
@@ -3290,6 +3291,8 @@ static void options_screen(void)
     };
     char line[160];
     const char * text = about[opt];
+    if (!text)                  // an option without a description must never crash the draw
+        text = "";
     if (opt == O_LAYOUT) {
         snprintf(line, sizeof(line), "%s   Whammy: right stick, or rub the back", cfg.layout
                  ? "Green L, Red Left, Yellow Up, Blue Triangle, Orange R, open X"
