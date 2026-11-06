@@ -8,7 +8,7 @@ typedef enum { UP_OFF, UP_CHECKING, UP_NONE, UP_AVAILABLE, UP_DOWNLOADING, UP_UN
 // what became of the last update (update_news says). Call before anything's loaded: an update cut short carries on from
 // here, once. If that was cut short too the game starts as it is, so it can never get stuck starting
 void update_boot(void);
-void update_check(void);                // once, on a thread; does nothing with no update.txt
+void update_check(bool now);            // on a thread, at most every 10 min (now: straight away, on waking); needs update.txt
 UpState update_state(void);
 int update_version(void);               // the build on offer
 int64_t update_size(void);

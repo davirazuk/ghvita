@@ -26,6 +26,9 @@ static volatile int64_t got, total;
 static int offered;
 static int64_t offered_size;
 static char asset_url[300], error[160], token[200], news[160];
+static double checked_at = -1e9;        // when the last check started, in seconds
+static volatile bool told_token;        // the token's trouble is said once a run, not every check
+#define RECHECK_S (10 * 60)             // a Vita mostly sleeps instead of quitting, so a run can last days
 static char auth[260];
 static const char * const json_headers[] = {auth, "Accept: application/vnd.github+json", "X-GitHub-Api-Version: 2022-11-28", NULL};
 static const char * const file_headers[] = {auth, "Accept: application/octet-stream", NULL};
@@ -89,6 +92,13 @@ static int check_thread(void * arg)
     free(body);
     if (!j) {
         plat_log("update: the check got %d", status);
+        // a fine-grained token expires, and one without this repository reads it as missing (404): say so, or the game just
+        // quietly stops updating
+        if ((status == 401 || status == 403 || status == 404) && !told_token) {
+            told_token = true;
+            snprintf(news, sizeof(news), status == 401 ? "Updates: GitHub refused update.txt's token (expired?)"
+                                                       : "Updates: update.txt's token can't read the repository");
+        }
         state = UP_NONE;
         return 0;
     }
@@ -96,6 +106,7 @@ static int check_thread(void * arg)
     const char * t = json_str(json_get(j, "tag_name"), "", tag, sizeof(tag));
     int version = t[0] == 'v' ? atoi(t + 1) : 0;
     plat_log("update: this is build %d, the latest release is %s", GHV_BUILD, t);
+    asset_url[0] = 0;
     if (version > GHV_BUILD) {
         snprintf(want, sizeof(want), "update-from-%d.zip", GHV_BUILD);
         const Json * assets = json_get(j, "assets");
@@ -120,9 +131,16 @@ static int check_thread(void * arg)
     return 0;
 }
 
-void update_check(void)
+void update_check(bool now)
 {
-    if (state != UP_OFF || !read_token())
+    // at the first menu, then again every RECHECK_S or on waking (now) while nothing's on offer: before, it asked once a
+    // launch, and a Vita that only ever sleeps never asked again
+    double t = plat_now_us() / 1e6;
+    bool again = state == UP_NONE && (now || t - checked_at >= RECHECK_S);
+    if ((state != UP_OFF && !again) || (state == UP_OFF && t - checked_at < 5))
+        return;
+    checked_at = t;                     // also spaces out looking for update.txt when there isn't one
+    if (!read_token())
         return;
     state = UP_CHECKING;
     plat_thread("update", check_thread, NULL, PLAT_BACKGROUND);
@@ -310,11 +328,11 @@ void update_boot(void)
 
 const char * update_news(void)
 {
-    static bool told;
-    if (told || !news[0])
+    static char said[160];
+    if (!news[0] || !strcmp(news, said))
         return NULL;
-    told = true;
-    return news;
+    snprintf(said, sizeof(said), "%s", news);
+    return said;
 }
 
 UpState update_state(void) { return state; }

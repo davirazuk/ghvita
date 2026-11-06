@@ -376,14 +376,14 @@ static void menu_music_stop(void)
 
 static void main_menu(void)
 {
-    static bool offered;
+    static int offered;                 // the build last put up: a newer one found later is offered too
     menu_music();
-    update_check();
+    update_check(gap_s > 60);           // back from sleep: the Wi-Fi's up again, and builds may have come out
     const char * news = update_news();
     if (news)
         say(news);
-    if (update_state() == UP_AVAILABLE && !offered) {
-        offered = true;
+    if (update_state() == UP_AVAILABLE && offered != update_version()) {
+        offered = update_version();
         go(S_UPDATE);
         return;
     }
