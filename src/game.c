@@ -1814,6 +1814,7 @@ static void hit_note(int i)
         G.beat_best = 0;
         popup("NEW HIGH SCORE!");
         G.cheer = 1;
+        sound_play(res.snd[SND_CHEER1 + rand() % 3], cfg.crowd_vol * 0.08f, false);
     }
     rock_change(0.018f);
     for (int l = 0; l < 6 && struck; l++)

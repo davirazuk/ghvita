@@ -3388,7 +3388,7 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
-        "NEW HIGH SCORE! pops up mid-song the moment you pass your best on that chart.",
+        "NEW HIGH SCORE! pops up mid-song, with the crowd cheering, the moment you pass your best on that chart.",
         "PRESS X TO ROCK on the title no longer fades almost out.",
         "The bassist no longer wanders into the singer on stage.",
         "Button bars at the bottom shrink to fit: \"Back\" was cut off on DOWNLOAD SONGS.",
