@@ -3378,13 +3378,13 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
-        "Sing along judges the voice at Medium now, or pick its own difficulty: Settings -> GAME -> \"Sing along vocals\".",
-        "The vocal strip stays up through instrumental breaks — it doesn't disappear between phrases.",
-        "Fixed: holding the frets through a song played it by itself (Through the Fire and Flames).",
-        "Searches can be sorted: title, artist, year, length, charter, recently added — in the filter panel's Sort row.",
-        "Three downloads run at once, and unpacking and converting keep going while you play.",
-        "The queue shows MB left and speed; Triangle brings a waiting one to the front, START clears the finished.",
-        "Drums: \"Drum pads: Five, as World Tour\" now works on every 4-pad chart, not just the new ones.",
+        "Streak lamps redone after World Tour: a thin rope flush on the rail, short domes, dark red until lit.",
+        "Fixed: lifting a finger early could drop the next note while another fret was still held.",
+        "Holding every fret down still plays nothing: a held fret counts only if a finger moved since the last note.",
+        "Drums: Settings -> \"Drum buttons\" picks Thumbs, Shoulders (every pad on two buttons) or the guitar's own.",
+        "Drum rolls traded between two pads now play like rolls.",
+        "Sing along judges the voice at its own difficulty: Settings -> GAME -> \"Sing along vocals\".",
+        "Three downloads run at once; Triangle in the queue brings a waiting one to the front.",
     };
     int n = (int)(sizeof(lines) / sizeof(lines[0]));
     gfx_begin(0, 0, 0);
@@ -3392,11 +3392,10 @@ static void news_screen(void)
     draw_background(res.bg_menu, WHITE);
     banner("WHAT'S NEW IN THIS BUILD");
     panel(150, 96, 660, 400);
-    float y = 124;
-    for (int i = 0; i < n; i++) {
-        font_draw_fit(res.ui, lines[i], 170, y, 20, 620, RGBA(230, 230, 235, 255), ALIGN_LEFT);
-        y += 44;
-    }
+    // each item on up to two lines
+    float y = 114;
+    for (int i = 0; i < n; i++)
+        y += draw_wrapped(lines[i], 170, y, 18, 620, 2, RGBA(230, 230, 235, 255)) + 11;
     font_draw_shadow(res.ui, "X  continue", SCREEN_W / 2, 498, 20, RGBA(180, 220, 255, 255), ALIGN_CENTER);
     draw_toast();
     gfx_end();
