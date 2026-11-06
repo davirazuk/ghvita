@@ -3388,13 +3388,10 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
-        "Streak lamps redone after World Tour: a thin rope flush on the rail, short domes, dark red until lit.",
-        "Fixed: lifting a finger early could drop the next note while another fret was still held.",
-        "Holding every fret down still plays nothing: a held fret counts only if a finger moved since the last note.",
-        "Drums: Settings -> \"Drum buttons\" picks Thumbs, Shoulders (every pad on two buttons) or the guitar's own.",
-        "Drum rolls traded between two pads now play like rolls.",
-        "Sing along judges the voice at its own difficulty: Settings -> GAME -> \"Sing along vocals\".",
-        "Three downloads run at once; Triangle in the queue brings a waiting one to the front.",
+        "The bassist no longer wanders into the singer on stage.",
+        "Button bars at the bottom shrink to fit: \"Back\" was cut off on DOWNLOAD SONGS.",
+        "Search filters line up on the right; unset ones say Any, and Genre says Loading while the list comes in.",
+        "Earlier: streak lamps after World Tour, three drum layouts, sing along at its own difficulty.",
     };
     int n = (int)(sizeof(lines) / sizeof(lines[0]));
     gfx_begin(0, 0, 0);
