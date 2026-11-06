@@ -21,17 +21,11 @@ n = int(run('git', 'rev-list', '--count', 'HEAD')); tag = f'v{n}'
 if subprocess.run(['gh', 'release', 'view', tag], capture_output=True).returncode == 0:
     sys.exit(f'{tag} is out already')
 sdk = os.environ.get('VITASDK', os.path.expanduser('~/opt/vitasdk'))
-# the build tree was configured from a sandbox whose tools live under /run/host: those paths don't
-# exist out on the machine itself, so pin the make program to a ninja this machine can actually run
-hostlibs = '/run/host/usr/lib/x86_64-linux-gnu:/run/host/lib/x86_64-linux-gnu'
-env = dict(os.environ, VITASDK=sdk,
-           PATH=sdk + '/bin:/run/host/usr/bin:' + os.environ['PATH'],
-           LD_LIBRARY_PATH='/tmp/opencode/hostlibs2' if os.path.isdir('/tmp/opencode/hostlibs2') else hostlibs)
+env = dict(os.environ, VITASDK=sdk, PATH=sdk + '/bin:' + os.environ['PATH'])
 ninja = shutil.which('ninja', path=env['PATH'])
 if not ninja:
     sys.exit('ninja not found on the path: install it (apt install ninja-build, or pip install ninja)')
-# the release builds in its own tree: the sandbox I develop in and this machine write different tool
-# paths into a build directory, and sharing one meant each side's cache broke the other's next build
+# the release builds in its own tree, so a test build's settings never leak into it
 subprocess.run(['cmake', '-S', '.', '-B', 'build-release', '-G', 'Ninja', f'-DCMAKE_TOOLCHAIN_FILE={sdk}/share/vita.toolchain.cmake', f'-DCMAKE_MAKE_PROGRAM={ninja}', f'-DGHV_BUILD={n}'], check=True, env=env, stdout=subprocess.DEVNULL)
 subprocess.run([ninja, '-C', 'build-release'], check=True, env=env, stdout=subprocess.DEVNULL)
 vpk = 'build-release/GHVita.vpk'

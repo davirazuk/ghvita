@@ -11,8 +11,6 @@
 #include "whammybar.h"
 
 #define WINDOW 0.095            // seconds early or late a note can still be hit (Warriors of Rock-ish lenient)
-#define ANCHOR_GRACE 0.15       // held frets play a note only for this long after a finger last moved (the anchor
-                                // is for fingers arriving early or late, not for keys held through the song)
 #define Z_FAR 11.0f             // the highway's far end (the strikeline is at 0)
 #define Z_NEAR -3.4f
 #define HALF_W 2.62f            // half the highway's width (lanes are 1 wide)
@@ -2131,10 +2129,6 @@ static void activate_sp(void)
 // repeat of the last note's own frets the finger must have come back down since it, so a held fret never plays a run
 static void anchored_note(void)
 {
-    // frets held through the song stay just what they are: the anchor carries a note only while fingers are
-    // still moving about (a key held from always was the whole song playing itself without this)
-    if (G.t - G.act_t > ANCHOR_GRACE)
-        return;
     const Part * p = G.part;
     int i = G.first;
     while (i < p->note_count && G.state[i] != PENDING)
@@ -2144,6 +2138,10 @@ static void anchored_note(void)
     const Note * n = &p->notes[i], * prev = &p->notes[i - 1];
     double nt = n->time / 1e6;
     if (G.t < nt || G.t > nt + WINDOW || (n->frets & FRET_OPEN) || G.state[i - 1] != HIT)
+        return;
+    // a finger must have moved since the note before (pressed for it, or lifted after it): frets held through
+    // the song never chain a run on their own, however early the hand let go of the last chord
+    if (G.act_t < prev->time / 1e6 - WINDOW)
         return;
     uint32_t ringing = 0;
     for (int k = 0; k < MAX_SUS; k++)
@@ -2796,7 +2794,7 @@ static void draw_rail_meter(void)
 {
     // the gold rope hugs the outside of the rail with five glass domes along it, stood straight out from it and set
     // apart; yellow up to x2, green to x3, purple on to the top, as the footage has them
-    const float rope0 = -HALF_W + 0.04f, rope1 = -HALF_W - 0.24f, z0 = 0.55f, z1 = 3.0f;
+    const float rope0 = -HALF_W + 0.07f, rope1 = -HALF_W - 0.15f, z0 = 0.55f, z1 = 3.0f;    // flush on the rail
     int m = multiplier(), base_m = 1 + G.streak / 10, max_m = G.part_id == PART_BASS ? 6 : 4;
     int lit = base_m >= max_m ? 5 : (G.streak % 10) / 2;
     bool half = base_m < max_m && G.streak % 2;
@@ -2809,25 +2807,26 @@ static void draw_rail_meter(void)
         snprintf(name, sizeof(name), "lamp_%d%s", state, hue);
         const Sprite * s = atlas_get(res.game, name);
         // where its foot lies on the rope, on the screen; the dome stands square to that, as deep as it's wide
-        const float lz = z0 + 0.52f, lg = (z1 - 0.42f - lz) / 5, fx = rope1 + 0.14f;
+        const float lz = z0 + 0.52f, lg = (z1 - 0.42f - lz) / 5, fx = rope1 + 0.08f;
         const float a3[3] = {fx, 0.016f, lz + lg * (i - 0.02f)}, b3[3] = {fx, 0.016f, lz + lg * (i + 1.02f)};
         float a[2], b[2];
         project(a3[0], a3[1], a3[2], &a[0], &a[1]);
         project(b3[0], b3[1], b3[2], &b[0], &b[1]);
         // a stiff lamp pointing straight out to the side of the screen, as in the footage, not square to the slanted rope
         const float tilt = -0.09f, ux = cosf(tilt), uy = sinf(tilt), wide = hypotf(b[0] - a[0], b[1] - a[1]) * 0.5f;
-        const float len = wide * 2.5f, mx0 = (a[0] + b[0]) / 2, my0 = (a[1] + b[1]) / 2, vx = -uy * wide, vy = ux * wide;
+        const float len = wide * 2.0f, mx0 = (a[0] + b[0]) / 2, my0 = (a[1] + b[1]) / 2, vx = -uy * wide, vy = ux * wide;
         const float p[4][3] = {{mx0 + ux * len - vx, my0 + uy * len - vy, 0}, {mx0 - vx, my0 - vy, 0}, {mx0 + vx, my0 + vy, 0},
                                {mx0 + ux * len + vx, my0 + uy * len + vy, 0}};
         const float uv[4][2] = {{s->u0, s->v0}, {s->u1, s->v0}, {s->u1, s->v1}, {s->u0, s->v1}};
-        const uint32_t c[4] = {WHITE, WHITE, WHITE, WHITE};
+        // unlit, the footage's domes are a dark red glass, not gold
+        const uint32_t lc = state == 0 ? RGBA(235, 120, 95, 255) : WHITE, c[4] = {lc, lc, lc, lc};
         gfx_tex(s->tex);
         gfx_quad(p, uv, c);
         if (state == 2) {
             // lit, it throws light round itself
             const uint32_t light = G.sp_active ? RGBA(95, 225, 255, 255) : base_m >= 3 ? RGBA(255, 130, 225, 255)
                                  : base_m == 2 ? RGBA(90, 245, 110, 255) : RGBA(255, 196, 70, 255);
-            float mx = mx0 + ux * len * 0.72f, my = my0 + uy * len * 0.72f, r = wide * 2.2f;
+            float mx = mx0 + ux * len * 0.8f, my = my0 + uy * len * 0.8f, r = wide * 2.0f;
             gfx_blend(BLEND_ADD);
             gfx_sprite(atlas_get(res.game, "glow"), mx - r, my - r, r * 2, r * 2, with_alpha(light, 0.6f));
             gfx_blend(BLEND_ALPHA);
@@ -2840,7 +2839,7 @@ static void draw_rail_meter(void)
         char name[16];
         snprintf(name, sizeof(name), "mult_x%d", m);
         float pop = 1 + G.mult_pop * 0.45f;
-        board(-HALF_W - 0.42f, 0.02f, z1 + 0.15f, 0.8f * pop, 0.4f * pop, atlas_get(res.game, name), 0, 0, 1, 1,
+        board(-HALF_W - 0.30f, 0.02f, z1 + 0.05f, 0.8f * pop, 0.4f * pop, atlas_get(res.game, name), 0, 0, 1, 1,
               G.sp_active ? RGBA(170, 225, 255, 255) : WHITE);
     }
 }

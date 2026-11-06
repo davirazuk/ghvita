@@ -252,10 +252,13 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   "vocals: pitch avg ... ms of 32 ms" log line shows it keeping up.
 - vox_draw folded the whole strip away between phrases ("leaves the top of the picture to the band"); the user
   hated it. The strip stays: an instrumental break doesn't take the highway away.
-- TFatF played itself: anchored_note() ran from judge() EVERY frame, so frets held through the song chained the
-  whole chart (any note whose frets all held and the previous hit). G.act_t now marks the last frame a finger
-  moved; held frets anchor a note only for ANCHOR_GRACE (0.15 s, just over WINDOW) after that. A tap slightly
-  before its note still carries; holding everything plays nothing.
+- TFatF played itself: frets held through the song chained the whole chart through anchored_note(). G.act_t marks
+  the last time a finger went down or up; a held fret anchors a note only if a finger moved since the note before
+  (act_t >= that note's time - WINDOW). Holding all five through Island in the Sun: 0/595, Auto re-press on or off.
+  (A fixed 0.15 s grace was tried first: it dropped the held note whenever the other finger lifted early, rg.py
+  anchor 12/36 misses; the rule above is 0.)
+- Streak lamps matched to footage again (2026-11-05, lampref crops): rope flush on the rail and thinner, short
+  domes out of its outer edge, unlit domes dark red, the xN just above the strip.
 
 ## Sort by, queue polish, parallel downloads (2026-11-03)
 - DlFilter.sort, a Sort row in the filter panel (chorus keeps its no-stems skip by sorting it last before

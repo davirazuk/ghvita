@@ -16,3 +16,6 @@ test/bot_*.txt
 assets/*
 !assets/cacert.pem
 vita/sce_sys/**/*.png
+
+# screenshots
+*.ppm
