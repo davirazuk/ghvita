@@ -3544,6 +3544,10 @@ int main(void)
         if (s && game_start(s, part, diff)) {
             game_set_autoplay(autoplay);
             go(S_PLAY);
+        } else {
+            // a test asking for a part the song hasn't got would wait at the title until its timeout
+            plat_log("result: can't start %s part %d diff %d", s ? s->folder : want, part, diff);
+            return 1;
         }
     } else {
         // the first time this build starts, say what's new; one press and it never shows again

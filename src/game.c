@@ -306,6 +306,12 @@ static void member_spot(int r, float m[3])
     m[2] *= 1 + b->front * 0.2f;
     // wherever they wander, out of the way of the board and the rock meter
     m[0] = r == 3 ? fminf(fmaxf(m[0], 222), 262) : fminf(fmaxf(m[0], 738), 858);
+    if (r == 3 && G.band[1]) {
+        // and never into the singer, who stands just right of them: half a body's width apart at least
+        float v[3];
+        member_spot(1, v);
+        m[0] = fminf(m[0], v[0] - (v[2] + m[2]) * 0.42f);
+    }
 }
 
 // a guitarist out in a solo of their own part
