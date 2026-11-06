@@ -95,13 +95,21 @@ static void update_repeat(void)
 static void help_bar(const char * const * items, int n)
 {
     gfx_rect_grad(0, SCREEN_H - 42, SCREEN_W, 42, RGBA(0, 0, 0, 140), RGBA(0, 0, 0, 230));
+    // a long row is made smaller to fit, rather than running off the right edge
+    float total = 0;
+    for (int i = 0; i + 1 < n; i += 2) {
+        const Sprite * b = atlas_get(res.hud, items[i]);
+        total += b->w * 28.0f / b->h + 6 + font_width(res.ui, items[i + 1], 26) + 22;
+    }
+    float k = total - 22 > SCREEN_W - 36 ? (SCREEN_W - 36) / (total - 22) : 1;
     float x = 18;
     for (int i = 0; i + 1 < n; i += 2) {
         const Sprite * b = atlas_get(res.hud, items[i]);
-        float w = b->w * 28.0f / b->h;
-        gfx_sprite(b, x, SCREEN_H - 35, w, 28, WHITE);
-        x += w + 6;
-        x += font_draw(res.ui, items[i + 1], x, SCREEN_H - 34, 26, RGBA(230, 230, 230, 255), ALIGN_LEFT) + 22;
+        float w = b->w * 28.0f * k / b->h;
+        gfx_sprite(b, x, SCREEN_H - 21 - 14 * k, w, 28 * k, WHITE);
+        x += w + 6 * k;
+        x += font_draw(res.ui, items[i + 1], x, SCREEN_H - 21 - 13 * k, 26 * k, RGBA(230, 230, 230, 255), ALIGN_LEFT) +
+             22 * k;
     }
 }
 
