@@ -279,7 +279,7 @@ static void title_screen(void)
     gfx_begin(0, 0, 0);
     gfx_2d();
     draw_background(res.bg_title, WHITE);
-    float a = 0.55f + 0.45f * sinf((float)now_s * 4);
+    float a = 0.8f + 0.2f * sinf((float)now_s * 4);   // breathes, never fades out
     gfx_rect_grad(0, 420, SCREEN_W, 90, RGBA(0, 0, 0, 0), RGBA(0, 0, 0, 210));
     font_draw_shadow(res.title, "PRESS X TO ROCK", SCREEN_W * 0.74f, 452, 46, fade_alpha(RGBA(255, 220, 120, 255), a),
                      ALIGN_CENTER);
@@ -3388,6 +3388,8 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "NEW HIGH SCORE! pops up mid-song the moment you pass your best on that chart.",
+        "PRESS X TO ROCK on the title no longer fades almost out.",
         "The bassist no longer wanders into the singer on stage.",
         "Button bars at the bottom shrink to fit: \"Back\" was cut off on DOWNLOAD SONGS.",
         "Search filters line up on the right; unset ones say Any, and Genre says Loading while the list comes in.",

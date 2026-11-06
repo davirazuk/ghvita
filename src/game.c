@@ -89,6 +89,7 @@ static struct {
     bool sp_active, sp_ready_told;
     double sp_last_q;           // where Star Power's drain has got to, in quarter notes
     double base_score;
+    int beat_best;                  // the best score to beat on this chart, 0 when none or already beaten
     double t, lead_in;
     double speed;               // highway units per second
     bool paused, failed, done;
@@ -1466,6 +1467,7 @@ bool game_start(Song * song, int part, int diff)
     G.song = song;
     G.part_id = part;
     G.diff = diff;
+    G.beat_best = song->best[part][diff].score;
     const Part * p = G.part;
     G.state = malloc(p->note_count + 1);
     G.got = malloc(p->note_count + 1);
@@ -1807,6 +1809,12 @@ static void hit_note(int i)
         }
     }
     G.score += 50 * frets_count(n->frets) * multiplier();
+    if (G.beat_best && G.score > G.beat_best && !G.autoplay) {
+        // past your best on this chart, mid-song
+        G.beat_best = 0;
+        popup("NEW HIGH SCORE!");
+        G.cheer = 1;
+    }
     rock_change(0.018f);
     for (int l = 0; l < 6 && struck; l++)
         if (n->frets & (1 << l))
