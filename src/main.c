@@ -901,14 +901,16 @@ static void dl_panel_draw(void)
         gfx_rect(126, y, 708, 40, on ? RGBA(60, 52, 30, 255) : RGBA(0, 0, 0, 60));
         font_draw(res.ui, dl_panel_title(r), 140, y + 9, 22, on ? WHITE : RGBA(180, 180, 190, 255), ALIGN_LEFT);
         const char * v = dl_panel_value(r, &f);
+        bool any = !v || !v[0];
         if (r == FROW_GENRE && f.genre >= 0 && dl_genre_count() < 0)
-            v = "...";              // the genre list is still coming from the site
-        font_draw_fit(res.ui, v, 560, y + 9, 22, 260, on ? RGBA(255, 236, 170, 255) : RGBA(230, 225, 215, 255),
-                      ALIGN_RIGHT);
+            v = "Loading...";       // the genre list is still coming from the site
+        else if (any)
+            v = "Any";              // not filtered
+        uint32_t c = any ? RGBA(120, 120, 130, 255) : on ? RGBA(255, 236, 170, 255) : RGBA(230, 225, 215, 255);
+        font_draw_fit(res.ui, v, 818, y + 9, 22, 420, c, ALIGN_RIGHT);
     }
     font_draw_shadow(res.ui,
-                     dl_site == DL_CHORUS ? "Cross edit   Left/Right change   Square clear   Start done"
-                                          : "Cross edit   Left/Right change   Square clear   Start done",
+                     "Cross edit   Left/Right change   Square clear   Start done",
                      SCREEN_W / 2, 104 + rows * 44 + 16, 18, RGBA(170, 170, 180, 255), ALIGN_CENTER);
 }
 
