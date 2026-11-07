@@ -56,6 +56,8 @@ void game_status(int * song_pct, int * notes_pct);
 void game_section_now(char * out, int size);
 // the part and difficulty being played
 void game_playing(int * part, int * diff);
+// 0 no battle, 1 won, 2 lost, 3 still on
+int game_battle_state(void);
 void game_restart(void);
 void game_stop(void);
 Result game_result(void);

@@ -1711,6 +1711,11 @@ void game_stop(void)
     game_log_whammy();
 }
 
+int game_battle_state(void)
+{
+    return battle.on ? (battle.result ? battle.result : 3) : 0;
+}
+
 void game_playing(int * part, int * diff)
 {
     *part = G.part_id;
