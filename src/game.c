@@ -3782,18 +3782,28 @@ static void draw_hud(void)
     }
     // the song's card at the start
     if (G.t < 4.5 && !G.sing) {
+        // the song's card slides in from the left, the cover beside the name, and fades out as the notes arrive
         float a = G.t < 3.5 ? 1 : (float)(4.5 - G.t);
         if (a > 1)
             a = 1;
-        gfx_rect_grad(0, 40, 520, 110, RGBA(0, 0, 0, (int)(200 * a)), RGBA(0, 0, 0, (int)(120 * a)));
-        font_draw_fit(res.title, G.song->name, 24, 44, 52, 480, with_alpha(RGBA(255, 210, 90, 255), a), ALIGN_LEFT);
-        font_draw_fit(res.ui, G.song->artist, 26, 100, 28, 480, with_alpha(WHITE, a), ALIGN_LEFT);
+        float in = (float)(G.t + G.lead_in) / 0.45f;
+        in = in < 0 ? 0 : in > 1 ? 1 : in;
+        float dx = -560 * (1 - in) * (1 - in) * (1 - in);
+        float tx = G.art ? 128 : 24;
+        gfx_rect_grad(dx, 40, 560, 110, RGBA(0, 0, 0, (int)(200 * a)), RGBA(0, 0, 0, (int)(120 * a)));
+        gfx_rect(dx, 148, 560 * in, 3, with_alpha(RGBA(255, 200, 90, 255), a));
+        if (G.art) {
+            const Sprite art = sprite_whole(G.art);
+            gfx_sprite(&art, dx + 16, 48, 96, 96, with_alpha(WHITE, a));
+        }
+        font_draw_fit(res.title, G.song->name, dx + tx, 44, 52, 540 - tx, with_alpha(RGBA(255, 210, 90, 255), a), ALIGN_LEFT);
+        font_draw_fit(res.ui, G.song->artist, dx + tx + 2, 100, 28, 540 - tx, with_alpha(WHITE, a), ALIGN_LEFT);
         char t[96];
         if (G.venue_title)
             snprintf(t, sizeof(t), "%s  %s   at %s", part_name(G.part_id), diff_name(G.diff), G.venue_title);
         else
             snprintf(t, sizeof(t), "%s  %s", part_name(G.part_id), diff_name(G.diff));
-        font_draw(res.ui, t, 26, 126, 20, with_alpha(RGBA(200, 200, 200, 255), a), ALIGN_LEFT);
+        font_draw_fit(res.ui, t, dx + tx + 2, 126, 20, 540 - tx, with_alpha(RGBA(200, 200, 200, 255), a), ALIGN_LEFT);
     }
     // messages
     if (G.popup[0] && G.t - G.popup_t < 2.0) {
