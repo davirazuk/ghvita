@@ -2388,6 +2388,20 @@ static void song_list(void)
     gfx_begin(0, 0, 0);
     gfx_2d();
     draw_background(res.bg_menu, WHITE);
+    if (art && art_for == sel) {
+        // the chosen song's cover, huge and soft behind the list, fading in as it changes
+        static int cover_for = -1;
+        static double cover_t;
+        if (cover_for != sel) {
+            cover_for = sel;
+            cover_t = now_s;
+        }
+        float a = (float)((now_s - cover_t) / 0.4);
+        a = a > 1 ? 1 : a;
+        gfx_sprite(&(Sprite){art, 0, 0, 1, 1, 256, 256}, 0, (SCREEN_H - SCREEN_W) / 2, SCREEN_W, SCREEN_W,
+                   RGBA(255, 255, 255, (int)(110 * a)));
+        gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(0, 0, 0, 120));
+    }
     banner("QUICKPLAY");
     char t[160];
     if (find_text[0])
@@ -3302,6 +3316,17 @@ static void results_screen(void)
         int shown = (int)(a * result.stars + 0.999f);
         if (shown > result.stars)
             shown = result.stars;
+        // a tick as each star lands
+        static int ticked;
+        static double ticked_for;
+        if (ticked_for != screen_t) {
+            ticked_for = screen_t;
+            ticked = 0;
+        }
+        if (shown > ticked && shown < 6) {
+            ticked = shown;
+            sound_play(res.snd[SND_STAR], 0.35f, false);
+        }
         draw_stars(shown >= 6 || (result.stars >= 6 && a >= 1) ? 6 : shown, 460, 136, 56);
     }
     int pct = result.notes_total ? result.notes_hit * 100 / result.notes_total : 0;
@@ -3309,7 +3334,13 @@ static void results_screen(void)
         const char * label;
         char value[48];
     } rows[6];
-    snprintf(rows[0].value, sizeof(rows[0].value), "%d", result.score);
+    {
+        // the score counts up as the stars come
+        float a = (float)((now_s - screen_t) / 1.2);
+        a = a > 1 ? 1 : a < 0 ? 0 : a;
+        a = 1 - (1 - a) * (1 - a) * (1 - a);
+        snprintf(rows[0].value, sizeof(rows[0].value), "%d", (int)(result.score * a));
+    }
     rows[0].label = "Score";
     snprintf(rows[1].value, sizeof(rows[1].value), "%d%%  (%d / %d)", pct, result.notes_hit, result.notes_total);
     rows[1].label = "Notes hit";
@@ -3430,8 +3461,13 @@ static void results_screen(void)
     if (result_medal) {
         char d[48];
         snprintf(d, sizeof(d), "%s MEDAL!", medal_names[result_medal]);
-        draw_medal(result_medal, 70, 54, 16);
-        font_draw_shadow(res.title, d, 96, 38, 32, medal_cols[result_medal], ALIGN_LEFT);
+        // stamped on once the stars are in: big, then settling
+        float a = (float)((now_s - screen_t - 1.3) / 0.25);
+        if (a > 0) {
+            float k = a > 1 ? 1 : a, sz = 16 * (2.2f - 1.2f * k);
+            draw_medal(result_medal, 70, 54, sz);
+            font_draw_shadow(res.title, d, 96, 38, 32, fade_alpha(medal_cols[result_medal], k), ALIGN_LEFT);
+        }
     }
     for (int i = 0; i < result_ach_n && i < 2; i++) {
         // what this song unlocked, under the stars
@@ -4820,6 +4856,10 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "Every hit flashes and sends a ring of light out; a miss flashes red; held sustains burn; every 50 streak sweeps the neck.",
+        "Star Power: the neck glows blue on the beat and comets run up the rails (no more spiky lightning).",
+        "The band is backlit in the stage's colours; cameras flash in the crowd when you're rocking.",
+        "Results: the score counts up and the stars land one by one. Menus fade in. The song list shows the cover big.",
         "Calibrate shows the beat and where each of your taps landed. Song list: sort by Recently played.",
         "World Tour: each leg ends on a BOSS BATTLE encore against a rival who gets tougher leg by leg.",
         "Battles show a tug-of-war bar across the top. The song list shows every song's cover.",
@@ -5045,6 +5085,7 @@ int main(void)
         pressed = pad.buttons & ~last_buttons;
         last_buttons = pad.buttons;
         update_repeat();
+        int drawn = screen;
         switch (screen) {
         case S_TITLE: title_screen(); break;
         case S_MAIN: main_menu(); break;
@@ -5065,6 +5106,15 @@ int main(void)
         case S_EMPTY: empty_screen(); break;
         case S_DOWNLOAD: download_screen(); break;
         case S_UPDATE: update_screen(); break;
+        }
+        // a menu comes in out of black, quickly, rather than cutting (not the song and its pause: those stay instant)
+        {
+            double in = now_s - screen_t;
+            if (in < 0.16 && drawn == screen && screen != S_PLAY && screen != S_PAUSE && screen != S_RESUME) {
+                gfx_2d();
+                gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(0, 0, 0, (int)(230 * (1 - in / 0.16))));
+                gfx_flush();
+            }
         }
         take_downloads();
         // downloads keep the Vita from sleeping (a second at a time)
