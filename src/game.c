@@ -196,6 +196,7 @@ static struct {
     double rival_hit_until;             // the player's attack still shaking the rival
     float rival_hit;                    // how much it's shaken (off its hit chance)
     float base_speed;
+    int level;                          // the rival's, 0 easy .. 3 brutal
     double sp_until;                    // the rival's own Star Power: its points doubled till then
     int result;                         // 1 won, 2 lost
     unsigned seed;
@@ -1612,9 +1613,12 @@ void game_practice(double from, double to, float speed)
     practice.runs = practice.best = 0;
 }
 
-void game_battle(void)
+static int battle_level = -1;          // the next battle's rival, -1 the Options' choice
+
+void game_battle(int level)
 {
     battle.armed = true;
+    battle_level = level;
 }
 
 void game_practice_ramp(int step_pct, int target_pct)
@@ -1744,6 +1748,7 @@ Result game_result(void)
         r.attacks_thrown = battle.thrown;
         r.attacks_taken = battle.taken;
         r.rival_pct = battle.played ? battle.hits * 100 / battle.played : 0;
+        r.rival_level = battle.level;
         snprintf(r.rival_name, sizeof(r.rival_name), "%s", battle.name);
     }
     r.part = G.part_id;
@@ -3359,7 +3364,8 @@ static void battle_reset(void)
     memset(&battle, 0, sizeof(battle));
     battle.on = on;
     battle.seed = seed ^ (unsigned)(G.part ? G.part->note_count * 2654435761u : 0);
-    battle.skill = skill[G.diff >= 0 && G.diff < DIFF_COUNT ? G.diff : 3] + level[cfg.rival & 3];
+    battle.level = battle_level >= 0 ? battle_level & 3 : cfg.rival & 3;
+    battle.skill = skill[G.diff >= 0 && G.diff < DIFF_COUNT ? G.diff : 3] + level[battle.level];
     battle.rock = 0.5f;
     battle.next = G.first;
     battle.base_speed = base;

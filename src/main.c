@@ -2455,6 +2455,16 @@ static int from_list(void)
 }
 
 static int tour_leg, tour_gig, tour_slot;
+// the last gig of a leg ends on a boss battle: its encore against a rival who's tougher every two legs
+static bool tour_boss(void)
+{
+    return tour_on && tour_slot == TOUR_ENCORE && tour_gig == TOUR_GIGS - 1;
+}
+
+static int tour_boss_level(void)
+{
+    return tour_leg / 2 > 3 ? 3 : tour_leg / 2;
+}
 
 static void draw_select(const Song * s, bool loading)
 {
@@ -2515,7 +2525,7 @@ static void draw_select(const Song * s, bool loading)
         font_draw(res.ui, "Not played yet", 770, 404, 22, RGBA(180, 178, 172, 255), ALIGN_CENTER);
     if (tour_on) {
         char t2[80];
-        snprintf(t2, sizeof(t2), "%s%s", tour_slot == TOUR_ENCORE ? "Encore at " : "Live at ",
+        snprintf(t2, sizeof(t2), "%s%s", tour_boss() ? "Boss battle at " : tour_slot == TOUR_ENCORE ? "Encore at " : "Live at ",
                  res_venue_title(tour_zone(tour_leg, tour_gig)));
         font_draw_fit(res.ui, t2, SCREEN_W / 2, 84, 24, 560, RGBA(255, 200, 120, 255), ALIGN_CENTER);
     }
@@ -2830,6 +2840,8 @@ static void select_screen(void)
     if (select_starting) {
         // the chart, the highway picture and the stems take the Vita a second or so: the screen says so meanwhile
         select_starting = false;
+        if (tour_boss() && sel_part != PART_VOCALS)
+            game_battle(tour_boss_level());
         if (game_start(s, sel_part, sel_diff)) {
             practicing = false;
             game_set_autoplay(autoplay);
@@ -2870,7 +2882,7 @@ static void select_screen(void)
         // a battle with a computer rival on this chart
         stop_preview();
         ui_sound(SND_UI_SELECT);
-        game_battle();
+        game_battle(-1);
         if (game_start(s, sel_part, sel_diff)) {
             practicing = false;
             game_set_autoplay(autoplay);
@@ -2908,7 +2920,7 @@ static void finish_song(int how)
 {
     result = game_result();
     section_title(result.worst);
-    if (tour_on && !result.failed)
+    if (tour_on && !result.failed && result.battle != 2)     // a boss battle lost isn't a gig played
         tour_played();
     plat_log("result: %s, score %d, %d stars, %d/%d notes, best streak %d, %d/%d phrases, %d overhits%s; hits %+d ms "
              "on average, spread %d", how == GAME_DONE ? "done" : "failed", result.score, result.stars,
@@ -2941,7 +2953,7 @@ static void finish_song(int how)
                    result.overhits, result.played_s, result.failed, result.fc);
     AchPlay ap = {result.part, result.diff, result.stars, result.score, result.best_streak, result.overhits, result.sp_hit,
                   result.sp_total, result.notes_total ? result.notes_hit * 100 / result.notes_total : 0, result.failed,
-                  result.fc, practicing, autoplay, daily_streak(), songs_count(), result.battle, cfg.rival};
+                  result.fc, practicing, autoplay, daily_streak(), songs_count(), result.battle, result.rival_level};
     result_ach_n = achieve_check(&ap, result_ach, 6);
     for (int i = 0; i < result_ach_n && i < 6; i++)
         plat_log("achievement: %s", achieve_get(result_ach[i])->name);
@@ -3553,7 +3565,8 @@ static void tour_screen(void)
             const Song * s = tour_ids[i] >= 0 ? songs_get(tour_ids[i]) : NULL;
             uint32_t c = locked ? RGBA(120, 115, 110, 255) : on ? RGBA(255, 230, 150, 255) : RGBA(225, 220, 212, 255);
             if (i == TOUR_ENCORE)
-                font_draw(res.ui, "ENCORE", 900, y - 2, 18, RGBA(255, 200, 120, 255), ALIGN_RIGHT);
+                font_draw(res.ui, tour_gig == TOUR_GIGS - 1 ? "BOSS BATTLE" : "ENCORE", 900, y - 2, 18,
+                          tour_gig == TOUR_GIGS - 1 ? RGBA(255, 120, 90, 255) : RGBA(255, 200, 120, 255), ALIGN_RIGHT);
             font_draw_fit(res.ui, locked ? "???" : s ? s->name : "(no longer on the card)", 466, y, 28, 330, c,
                           ALIGN_LEFT);
             if (s && !locked)
@@ -4904,7 +4917,7 @@ int main(void)
         int part = getenv("GHV_PART") ? atoi(getenv("GHV_PART")) : 0;
         int diff = getenv("GHV_DIFF") ? atoi(getenv("GHV_DIFF")) : 3;
         if (getenv("GHV_BATTLE"))
-            game_battle();          // tests: a battle (GHV_BATTLE=1)
+            game_battle(-1);        // tests: a battle (GHV_BATTLE=1)
         if (s && game_start(s, part, diff)) {
             game_set_autoplay(autoplay);
             go(S_PLAY);
