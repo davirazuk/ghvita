@@ -178,6 +178,7 @@ static struct {
     float laser;                        // the lasers over the crowd: 0 off .. 1 full
     double start_t;                     // the song time the run began at (a practice run starts partway in)
     int metro_next;                     // practice's metronome: the chart's next beat line
+    float song_speed;                   // the music's speed: practice's, or the Options' Song speed
 } G;
 
 static struct {
@@ -585,6 +586,15 @@ static void draw_rig(double beat, float pulse)
         }
         sprite_rot(beam, lamp_x[i], lamp_y[i], 200 * G.cam_z, 450 * G.cam_z, beam->w / 2.0f, 0, angle,
                    col3(G.key_col, a));
+        // where the beam meets the stage it leaves a pool of its light, wider and fainter the further it's come
+        float fx = 480, fy = 305;
+        stage_point(&fx, &fy);
+        float len = 450 * G.cam_z, c = cosf(angle), along = c > 0.2f ? (fy - lamp_y[i]) / c : -1;
+        if (along > 0 && along < len * 0.9f && !cfg.light_fx) {
+            float px = lamp_x[i] - sinf(angle) * along, k = along / len, pw = (90 + 90 * k) * G.cam_z / c;
+            gfx_sprite(atlas_get(res.stage, "dot"), px - pw / 2, fy - pw * 0.13f, pw, pw * 0.26f,
+                       col3(G.key_col, fminf(a * 1.2f * (1 - 0.5f * k), 0.8f)));
+        }
     }
     gfx_blend(BLEND_ALPHA);
     for (int i = 0; i < LAMPS; i++)
@@ -1693,7 +1703,8 @@ static void reset_play(void)
     }
     set_my_stem(1);
     audio_song_fade(1, 0);
-    audio_song_speed(practice.on ? practice.speed : 1);
+    G.song_speed = practice.on ? practice.speed : (cfg.song_speed >= 50 && cfg.song_speed <= 150 ? cfg.song_speed : 100) / 100.0f;
+    audio_song_speed(G.song_speed);
     battle_reset();
     audio_song_play(from, G.lead_in);
     if (G.sing) {
@@ -1956,6 +1967,11 @@ static int stars_for(double score)
         if (G.base_score > 0 && score >= cut[i] * G.base_score)
             s = i + 1;
     return s;
+}
+
+float game_song_speed(void)
+{
+    return G.song_speed > 0 ? G.song_speed : 1;
 }
 
 Result game_result(void)
@@ -2872,7 +2888,7 @@ int game_update(const Pad * pad, uint32_t pressed)
         }
         if (++G.fail_frames >= FAIL_FRAMES)
             return GAME_FAILED;
-        audio_song_speed(1 - 0.7f * G.fail_frames / FAIL_FRAMES);
+        audio_song_speed(G.song_speed * (1 - 0.7f * G.fail_frames / FAIL_FRAMES));
         return GAME_PLAYING;
     }
     if (pressed & BTN_START)
@@ -3674,7 +3690,7 @@ static void ghost_track(void)
 // the run's over: kept when it beat the one there was
 static void ghost_finish(bool failed)
 {
-    if (!ghost.path[0] || failed || G.autoplay || practice.on || !ghost.rec_n)
+    if (!ghost.path[0] || failed || G.autoplay || practice.on || G.song_speed < 0.995f || !ghost.rec_n)
         return;
     int had = ghost.ref_n ? ghost.ref[ghost.ref_n - 1] : 0;
     ghost.rec[ghost.rec_n - 1] = (int)G.score;
@@ -4135,6 +4151,10 @@ static void draw_hud(void)
             snprintf(t, sizeof(t), "PRACTICE  %d%% > %d%%", (int)(practice.speed * 100 + 0.5f), practice.target);
         else
             snprintf(t, sizeof(t), "PRACTICE  %d%%", (int)(practice.speed * 100 + 0.5f));
+        font_draw_shadow(res.ui, t, SCREEN_W - 16, 44, 22, RGBA(255, 225, 150, 255), ALIGN_RIGHT);
+    } else if (G.song_speed < 0.995f || G.song_speed > 1.005f) {
+        char t[32];
+        snprintf(t, sizeof(t), "SPEED  %d%%", (int)(G.song_speed * 100 + 0.5f));
         font_draw_shadow(res.ui, t, SCREEN_W - 16, 44, 22, RGBA(255, 225, 150, 255), ALIGN_RIGHT);
     }
     draw_ghost();

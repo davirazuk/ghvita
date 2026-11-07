@@ -38,6 +38,7 @@ bool game_start(Song * song, int part, int diff);
 void game_force_venue(const char * zone);
 // the next game_start is practice: from..to seconds over and over at speed (0.5..1), and nothing counts
 void game_practice(double from, double to, float speed);
+float game_song_speed(void);    // the music's speed this run: 1 normal
 // the next game_start is a battle against a computer rival: Star Power phrases earn attacks to throw at them.
 // level: the rival's, 0 easy .. 3 brutal, or -1 for the Options' choice
 void game_battle(int level);
