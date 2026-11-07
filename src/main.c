@@ -4894,22 +4894,43 @@ static void calibrate_screen(void)
     panel(110, 100, 740, 380);
     font_draw(res.ui, "Press X on every click you hear.", SCREEN_W / 2, 130, 30, RGBA(240, 235, 225, 255),
               ALIGN_CENTER);
-    // a pulse on the beat (what the game thinks)
-    double ph = fmod(t - 1.0 + 100, 0.5) / 0.5;
+    // the beat as the game hears it: a lamp that flashes on each click and fades
+    double ph = t < 1.0 ? 1 : fmod(t - 1.0, 0.5) / 0.5;
     float pulse = (float)(1 - ph);
+    pulse = pulse * pulse * pulse;
+    const float cx = SCREEN_W / 2, cy = 214;
+    gfx_rect(cx - 42, cy - 42, 84, 84, RGBA(0, 0, 0, 170));
+    gfx_rect(cx - 36, cy - 36, 72, 72, RGBA((int)(70 + 185 * pulse), (int)(50 + 150 * pulse), (int)(20 + 60 * pulse), 255));
     gfx_blend(BLEND_ADD);
-    gfx_sprite(atlas_get(res.game, "glow"), SCREEN_W / 2 - 60, 190, 120, 120, fade_alpha(RGBA(255, 200, 90, 255),
-                                                                                        pulse * pulse));
+    gfx_sprite(atlas_get(res.game, "glow"), cx - 90, cy - 90, 180, 180, fade_alpha(RGBA(255, 200, 90, 255), pulse));
     gfx_blend(BLEND_ALPHA);
+    // every tap on a line: left of centre was early, right was late, the newest brightest
+    const float lx = 230, lw = 500, ly = 286, range = 0.15f;    // +-150 ms across
+    gfx_rect(lx, ly, lw, 4, RGBA(0, 0, 0, 200));
+    // within 30 ms either way: green
+    float green = lw / 2 * 0.03f / range;
+    gfx_rect(lx + lw / 2 - green, ly, green * 2, 4, RGBA(70, 200, 90, 220));
+    gfx_rect(lx + lw / 2 - 1, ly - 10, 2, 24, WHITE);
+    font_draw(res.ui, "early", lx, ly + 10, 16, RGBA(150, 200, 255, 255), ALIGN_LEFT);
+    font_draw(res.ui, "late", lx + lw, ly + 10, 16, RGBA(255, 170, 120, 255), ALIGN_RIGHT);
+    for (int i = 0; i < calib_count; i++) {
+        float off = (float)calib_hits[i];
+        off = off < -range ? -range : off > range ? range : off;
+        float a = i == calib_count - 1 ? 1 : 0.35f + 0.5f * i / (calib_count ? calib_count : 1);
+        gfx_rect(lx + lw / 2 + off / range * lw / 2 - 2, ly - 8, 4, 20, fade_alpha(RGBA(255, 230, 150, 255), a));
+    }
+    // how many of the sixteen
+    gfx_rect(lx, 252, lw, 6, RGBA(0, 0, 0, 180));
+    gfx_rect(lx, 252, lw * (calib_count > 16 ? 16 : calib_count) / 16.0f, 6, RGBA(255, 200, 90, 255));
     char s[96];
     double sum = 0;
     for (int i = 0; i < calib_count; i++)
         sum += calib_hits[i];
     snprintf(s, sizeof(s), "%d of 16 clicks   (so far %+d ms)", calib_count,
              calib_count ? (int)(sum / calib_count * 1000) : 0);
-    font_draw(res.ui, s, SCREEN_W / 2, 340, 28, RGBA(255, 230, 160, 255), ALIGN_CENTER);
+    font_draw(res.ui, s, SCREEN_W / 2, 330, 26, RGBA(255, 230, 160, 255), ALIGN_CENTER);
     snprintf(s, sizeof(s), "Current offset %+d ms", cfg.offset_ms);
-    font_draw(res.ui, s, SCREEN_W / 2, 380, 24, RGBA(200, 200, 200, 255), ALIGN_CENTER);
+    font_draw(res.ui, s, SCREEN_W / 2, 370, 22, RGBA(200, 200, 200, 255), ALIGN_CENTER);
     if (done)
         font_draw(res.ui, "Press Triangle to keep the new offset", SCREEN_W / 2, 420, 26, RGBA(120, 220, 255, 255),
                   ALIGN_CENTER);
