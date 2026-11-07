@@ -3517,30 +3517,35 @@ static void draw_battle(void)
 {
     if (!battle.on)
         return;
-    // the rival's meter down the right edge, its score above
-    const float x = SCREEN_W - 30, top = 300, h = 150;
-    font_draw_shadow(res.ui, battle.name, x + 8, top - 48, 20, RGBA(255, 160, 140, 255), ALIGN_RIGHT);
+    // the tug of war across the top: your meter against the rival's, the split where they meet
+    const float w = 420, x = (SCREEN_W - w) / 2, y = 12, h = 14;
+    float me = G.rock < 0 ? 0 : G.rock, them = battle.rock < 0 ? 0 : battle.rock;
+    float split = me + them > 0.001f ? me / (me + them) : 0.5f;
+    gfx_rect(x - 3, y - 3, w + 6, h + 6, RGBA(0, 0, 0, 200));
+    gfx_rect(x, y, w * split, h, RGBA(70, 190, 255, 255));
+    gfx_rect(x + w * split, y, w * (1 - split), h, RGBA(235, 70, 55, 255));
+    gfx_rect(x + w * split - 2, y - 4, 4, h + 8, WHITE);
     char t[48];
+    font_draw_shadow(res.ui, "YOU", x - 10, y - 2, 18, RGBA(150, 215, 255, 255), ALIGN_RIGHT);
+    font_draw_shadow(res.ui, battle.name, x + w + 10, y - 2, 18, RGBA(255, 160, 140, 255), ALIGN_LEFT);
     snprintf(t, sizeof(t), "%ld", battle.score);
-    font_draw_shadow(res.ui, t, x + 8, top - 26, 20, WHITE, ALIGN_RIGHT);
-    gfx_rect(x - 2, top - 2, 16, h + 4, RGBA(0, 0, 0, 200));
-    float r = battle.rock < 0 ? 0 : battle.rock;
-    uint32_t c = r > 0.66f ? RGBA(90, 220, 90, 255) : r > 0.33f ? RGBA(240, 200, 60, 255) : RGBA(230, 60, 50, 255);
-    gfx_rect(x, top + h * (1 - r), 12, h * r, c);
+    font_draw_shadow(res.ui, t, x + w + 10, y + 18, 16, WHITE, ALIGN_LEFT);
     if (G.t < battle.rival_hit_until)
-        font_draw_shadow(res.ui, "HIT!", x + 8, top + h + 6, 18, RGBA(255, 210, 90, 255), ALIGN_RIGHT);
+        font_draw_shadow(res.ui, "HIT!", x + w + 10, y + 36, 16, RGBA(255, 210, 90, 255), ALIGN_LEFT);
     if (battle.warn_t > 0) {
         // the rival's attack on its way: a second's warning
         char w[48];
         snprintf(w, sizeof(w), "INCOMING: %s", atk_names[battle.warn_atk]);
         font_draw_shadow(res.title, w, SCREEN_W / 2, 96, 30, RGBA(255, 110, 90, 255), ALIGN_CENTER);
     }
-    // the attacks in hand
-    for (int i = 0; i < battle.mine_n; i++)
-        font_draw_shadow(res.ui, atk_names[battle.mine[i]], 16, 226 + i * 22, 18,
-                         i ? RGBA(200, 200, 200, 255) : RGBA(255, 210, 90, 255), ALIGN_LEFT);
-    if (battle.mine_n)
-        font_draw_shadow(res.ui, "ATTACK: Star Power button", 16, 204, 16, RGBA(200, 200, 210, 255), ALIGN_LEFT);
+    // the attacks in hand, the next one lit
+    if (battle.mine_n) {
+        gfx_rect(8, 198, 196, 30 + battle.mine_n * 22, RGBA(0, 0, 0, 150));
+        font_draw_shadow(res.ui, "ATTACK: Star Power button", 16, 204, 15, RGBA(200, 200, 210, 255), ALIGN_LEFT);
+        for (int i = 0; i < battle.mine_n; i++)
+            font_draw_shadow(res.ui, atk_names[battle.mine[i]], 16, 224 + i * 22, 18,
+                             i ? RGBA(200, 200, 200, 255) : RGBA(255, 210, 90, 255), ALIGN_LEFT);
+    }
 }
 
 static void draw_live_stats(void)
