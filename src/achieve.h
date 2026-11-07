@@ -11,6 +11,7 @@ typedef struct {
     int part, diff, stars, score, best_streak, overhits, sp_hit, sp_total, pct;
     bool failed, fc, practice, autoplay;
     int daily_streak, library;
+    int battle, rival;          // battle: 0 none, 1 won, 2 lost; the rival's level (0 easy .. 3 brutal)
 } AchPlay;
 
 int achieve_count(void);

@@ -2934,12 +2934,14 @@ static void finish_song(int how)
         plat_log("battle: %s, you %d, %s %d (%d%% of notes), attacks thrown %d, taken %d", result.battle == 1 ? "won" : "lost",
                  result.score, result.rival_name, result.rival_score, result.rival_pct, result.attacks_thrown, result.attacks_taken);
     results_history = false;
+    if (!autoplay && !practicing && result.battle)
+        career_battle(result.battle == 1);
     if (!autoplay && !practicing)
         career_add(result.part, result.score, result.stars, result.notes_hit, result.notes_total, result.best_streak,
                    result.overhits, result.played_s, result.failed, result.fc);
     AchPlay ap = {result.part, result.diff, result.stars, result.score, result.best_streak, result.overhits, result.sp_hit,
                   result.sp_total, result.notes_total ? result.notes_hit * 100 / result.notes_total : 0, result.failed,
-                  result.fc, practicing, autoplay, daily_streak(), songs_count()};
+                  result.fc, practicing, autoplay, daily_streak(), songs_count(), result.battle, cfg.rival};
     result_ach_n = achieve_check(&ap, result_ach, 6);
     for (int i = 0; i < result_ach_n && i < 6; i++)
         plat_log("achievement: %s", achieve_get(result_ach[i])->name);
@@ -3250,7 +3252,14 @@ static void results_screen(void)
             snprintf(rows[5].value, sizeof(rows[5].value), "%d%% on time, %d ms %s", on, abs(result.off_ms),
                      result.off_ms > 0 ? "late" : "early");
     }
-    for (int i = 0; i < 6; i++) {
+    int nrows = 6;
+    if (result.part == PART_VOCALS) {
+        // a singer's results: phrases, not notes; no frets, so no overhits, Star Power notes or timing
+        rows[1].label = "Phrases sung";
+        rows[2].label = "Best run of phrases";
+        nrows = 3;
+    }
+    for (int i = 0; i < nrows; i++) {
         float y = 200 + i * 31;
         font_draw_shadow(res.ui, rows[i].label, 330, y, 28, RGBA(220, 210, 200, 255), ALIGN_LEFT);
         font_draw_shadow(res.ui, rows[i].value, 870, y, 28, RGBA(255, 236, 190, 255), ALIGN_RIGHT);
@@ -3258,7 +3267,7 @@ static void results_screen(void)
     bool strip = false;
     for (int i = 0; i < RESULT_STRIP; i++)
         strip |= result.strip[i] != 255;
-    if (result.timed && !results_history) {
+    if (result.timed && !results_history && result.part != PART_VOCALS) {
         // early, on time, late: a thin bar under the timing row
         int all = result.early + result.on_time + result.late;
         if (all) {
@@ -4698,7 +4707,7 @@ static void career_screen(void)
     struct {
         const char * label;
         char value[48];
-    } rows[8];
+    } rows[9];
     rows[0].label = "Songs finished";
     snprintf(rows[0].value, 48, "%d of %d played", career.finished, career.plays);
     rows[1].label = "Full combos";
@@ -4715,10 +4724,12 @@ static void career_screen(void)
     snprintf(rows[6].value, 48, "%lld h %02lld min", career.seconds / 3600, career.seconds / 60 % 60);
     rows[7].label = "Plays most";
     snprintf(rows[7].value, 48, "%s", career.plays ? part_name(fav) : "-");
-    for (int i = 0; i < 8; i++) {
-        float y = 190 + i * 31;
-        font_draw(res.ui, rows[i].label, 170, y, 28, RGBA(220, 210, 200, 255), ALIGN_LEFT);
-        font_draw(res.ui, rows[i].value, 790, y, 28, RGBA(255, 236, 190, 255), ALIGN_RIGHT);
+    rows[8].label = "Battles won";
+    snprintf(rows[8].value, 48, "%d of %d", career.battles_won, career.battles_won + career.battles_lost);
+    for (int i = 0; i < 9; i++) {
+        float y = 186 + i * 29;
+        font_draw(res.ui, rows[i].label, 170, y, 26, RGBA(220, 210, 200, 255), ALIGN_LEFT);
+        font_draw(res.ui, rows[i].value, 790, y, 26, RGBA(255, 236, 190, 255), ALIGN_RIGHT);
     }
     static const char * help[] = {"btn_r", "Achievements", "btn_circle", "Back"};
     help_bar(help, 4);
@@ -4729,12 +4740,11 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
-        "The title shows World Tour's own logo. The main menu shows who's playing: picture, rank, stars, medals.",
-        "Battle: the rival plays like a person (chords and fast runs are harder for it), picks its moment to attack,",
-        "  and has a name. New attack: Speed Up. INCOMING warns you a second before one lands. Options > Game > Battle rival.",
-        "GET READY shows the cover, the song's details and your best. Options' tabs fit, with more rows.",
-        "The strikeline buttons lost the off-centre arch on top. Player pictures: Guitar Hero art or any album cover.",
-        "Pause: PRACTICE THIS PART takes you to practice on the section you were in. Medals in the song list.",
+        "Fixed: the SOLO! percent could go past 100%.",
+        "Career counts your battles won. New achievements: Rival Slayer, Duelist, Giant Killer (beat a Brutal rival).",
+        "A singer's results show phrases sung, not frets. Singing along: the vocals' score sits on a dark backing.",
+        "Pause: PRACTICE THIS PART. Battle: a smarter rival, Speed Up, INCOMING warnings, Options > Game > Battle rival.",
+        "The title shows World Tour's own logo; the main menu shows who's playing. New GET READY and Options screens.",
     };
     int n = (int)(sizeof(lines) / sizeof(lines[0]));
     gfx_begin(0, 0, 0);

@@ -10,6 +10,7 @@ typedef struct {
     int best_streak, best_score, stars;
     long long seconds;
     int part_plays[PART_COUNT];
+    int battles_won, battles_lost;
 } Career;
 
 extern Career career;
@@ -18,4 +19,6 @@ void career_add(int part, int score, int stars, int hit, int total, int streak, 
                 bool fc);
 // the title that goes with the stars earned, and how many the next one takes (0: the top)
 const char * career_rank(int * next_at);
+// a battle's outcome, for the record
+void career_battle(bool won);
 #endif

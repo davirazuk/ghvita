@@ -36,6 +36,9 @@ static const Achievement list[] = {
     {"tour_all", "Headliner", "Finish the whole World Tour"},
     {"library100", "Collector", "100 songs on the card"},
     {"library500", "Archivist", "500 songs on the card"},
+    {"battle1", "Rival Slayer", "Win a battle"},
+    {"battle10", "Duelist", "Win 10 battles"},
+    {"brutal", "Giant Killer", "Beat a Brutal rival on Expert"},
 };
 #define N (int)(sizeof(list) / sizeof(list[0]))
 static bool have[N];
@@ -133,6 +136,9 @@ int achieve_check(const AchPlay * p, int * out, int max)
         else if (!strcmp(id, "tour_all")) v = tour_leg_finished(true);
         else if (!strcmp(id, "library100")) v = p->library >= 100;
         else if (!strcmp(id, "library500")) v = p->library >= 500;
+        else if (!strcmp(id, "battle1")) v = p->battle == 1;
+        else if (!strcmp(id, "battle10")) v = career.battles_won >= 10;
+        else if (!strcmp(id, "brutal")) v = p->battle == 1 && p->rival == 3 && expert;
         now[i] = v && !have[i];
     }
     int n = 0;

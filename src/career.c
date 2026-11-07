@@ -56,6 +56,8 @@ void career_load(void)
         else if (!strcmp(k, "best_score")) c->best_score = (int)v;
         else if (!strcmp(k, "stars")) c->stars = (int)v;
         else if (!strcmp(k, "seconds")) c->seconds = v;
+        else if (!strcmp(k, "battles_won")) c->battles_won = (int)v;
+        else if (!strcmp(k, "battles_lost")) c->battles_lost = (int)v;
         else if (sscanf(k, "part%d", &part) == 1 && part >= 0 && part < PART_COUNT)
             c->part_plays[part] = (int)v;
     }
@@ -77,9 +79,19 @@ static void save(void)
             c->best_score, c->stars, c->seconds);
     for (int i = 0; i < PART_COUNT; i++)
         fprintf(f, "part%d = %d\n", i, c->part_plays[i]);
+    fprintf(f, "battles_won = %d\nbattles_lost = %d\n", c->battles_won, c->battles_lost);
     fclose(f);
     remove(path);
     rename(tmp, path);
+}
+
+void career_battle(bool won)
+{
+    if (won)
+        career.battles_won++;
+    else
+        career.battles_lost++;
+    save();
 }
 
 void career_add(int part, int score, int stars, int hit, int total, int streak, int overhits, int seconds, bool failed,

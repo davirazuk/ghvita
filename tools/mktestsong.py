@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Makes small original Clone Hero songs for the tests: mktestsong.py OUT_DIR [--count N] [--seconds S]
-Each is a folder (song.ini, notes.chart, song.ogg) with guitar, bass, keys and drums on all four difficulties, sections,
+Each is a folder (song.ini, notes.chart, song.ogg) with guitar, bass, keys and drums on all four difficulties (and one MIDI song with guitar and vocals), sections,
 Star Power phrases and a solo, and audio synthesized from the chart (a tone per note over a click), so the bot has
 songs to play on a machine with no library. Needs numpy and ffmpeg."""
 import argparse, os, random, subprocess, tempfile, wave
@@ -115,5 +115,81 @@ def make(idx):
     print(folder)
 
 
+def vlq(n):
+    out = [n & 0x7f]
+    n >>= 7
+    while n:
+        out.insert(0, (n & 0x7f) | 0x80)
+        n >>= 7
+    return bytes(out)
+
+
+def track(events):
+    """events: (tick, bytes) -> an MTrk chunk, delta-timed, ended"""
+    out, last = b'', 0
+    for tick, ev in sorted(events, key=lambda e: (e[0], e[1][0] == 0x80 and -1 or 0)):
+        out += vlq(tick - last) + ev
+        last = tick
+    out += vlq(0) + b'\xff\x2f\x00'
+    return b'MTrk' + len(out).to_bytes(4, 'big') + out
+
+
+def name(text):
+    return b'\xff\x03' + vlq(len(text)) + text.encode()
+
+
+def make_vocal_song():
+    """a MIDI song with guitar and a sung part (lyrics, phrases), for the singing tests"""
+    rnd = random.Random(77)
+    bpm, beats = 110, int(a.seconds * 110 / 60) // 4 * 4
+    nm, artist = 'Test Song Vocals', 'GH Vita Tests'
+    folder = os.path.join(a.out, f'{artist} - {nm}')
+    os.makedirs(folder, exist_ok=True)
+    T = 480
+    tempo = track([(0, b'\xff\x51\x03' + (60000000 // bpm).to_bytes(3, 'big')), (0, name('TEMPO'))])
+    gt = [(0, name('PART GUITAR'))]
+    for beat in range(4, beats):
+        f = rnd.randrange(5)
+        gt += [(beat * T, bytes([0x90, 96 + f, 100])), (beat * T + T // 4, bytes([0x80, 96 + f, 0]))]
+    words = 'oh the road goes on and on we sing it loud we sing it strong'.split()
+    vx = [(0, name('PART VOCALS'))]
+    tunes = []
+    for ph in range(2, beats // 4 - 1, 2):
+        start = ph * 4 * T
+        vx += [(start, bytes([0x90, 105, 100])), (start + 6 * T, bytes([0x80, 105, 0]))]
+        for k in range(6):
+            t0, pitch, w = start + k * T, 55 + rnd.randrange(12), words[(ph + k) % len(words)]
+            vx += [(t0, b'\xff\x05' + vlq(len(w)) + w.encode()), (t0, bytes([0x90, pitch, 100])),
+                   (t0 + T * 3 // 4, bytes([0x80, pitch, 0]))]
+            tunes.append((t0, pitch))
+    ev = [(0, name('EVENTS'))] + [(i * beats // 4 * T, b'\xff\x01' + vlq(len(t)) + t.encode())
+                                  for i, t in enumerate(['[section Intro]', '[section Verse]', '[section Chorus]', '[section Outro]'])]
+    mid = b'MThd' + (6).to_bytes(4, 'big') + (1).to_bytes(2, 'big') + (4).to_bytes(2, 'big') + T.to_bytes(2, 'big')
+    mid += tempo + track(gt) + track(vx) + track(ev)
+    open(os.path.join(folder, 'notes.mid'), 'wb').write(mid)
+    # the audio: the click and the sung line as a plain voice-like tone (so autoplay's detector hears pitches)
+    length = (beats + 4) * 60 / bpm
+    buf = np.zeros(int(length * RATE), np.float32)
+    sec = 60 / bpm / T
+    for t0, pitch in tunes:
+        s0, n = int(t0 * sec * RATE), int(T * 3 / 4 * sec * RATE)
+        f = 440 * 2 ** ((pitch - 69) / 12)
+        x = np.arange(n) / RATE
+        seg = buf[s0:s0 + n]
+        seg += (0.3 * np.sin(2 * np.pi * f * x) + 0.1 * np.sin(4 * np.pi * f * x))[:len(seg)]
+    pcm = (np.clip(buf, -1, 1) * 32000).astype('<i2')
+    with tempfile.TemporaryDirectory() as tmp:
+        w = os.path.join(tmp, 'a.wav')
+        with wave.open(w, 'wb') as f:
+            f.setnchannels(1); f.setsampwidth(2); f.setframerate(RATE); f.writeframes(pcm.tobytes())
+        subprocess.run(['ffmpeg', '-loglevel', 'error', '-y', '-i', w, '-c:a', 'libvorbis', '-q:a', '2',
+                        os.path.join(folder, 'song.ogg')], check=True)
+    open(os.path.join(folder, 'song.ini'), 'w').write(
+        f'[song]\nname = {nm}\nartist = {artist}\nalbum = Tests\ngenre = Test\nyear = 2026\ncharter = mktestsong\n'
+        f'song_length = {int(length * 1000)}\ndiff_guitar = 1\ndiff_vocals = 1\n')
+    print(folder)
+
+
 for i in range(a.count):
     make(i)
+make_vocal_song()
