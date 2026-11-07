@@ -79,10 +79,14 @@ static double toast_t = -10;
 
 static void menu_music_stop(void);
 
+static double outro_t = -1;          // the song's done: when its closing moment began (-1 none)
+
 static void go(int s)
 {
     if (s != S_TITLE && s != S_MAIN)
         menu_music_stop();
+    if (s != S_PLAY)
+        outro_t = -1;           // a song's closing moment never carries over
     screen = s;
     screen_t = now_s;
     screen_frames = 0;
@@ -3090,13 +3094,29 @@ static void play_screen(void)
     if (r == GAME_PAUSE) {
         game_pause(true);
         go(S_PAUSE);
-    } else if (r == GAME_DONE || r == GAME_FAILED) {
+    } else if (r == GAME_DONE && outro_t < 0) {
+        // the last note's rung out: a moment for the crowd before the results
+        outro_t = now_s;
+        sound_play(res.snd[SND_CHEER1 + rand() % 3], cfg.crowd_vol * 0.1f, false);
+    }
+    if (r == GAME_FAILED || (r == GAME_DONE && now_s - outro_t > 1.1)) {
+        outro_t = -1;
         finish_song(r);
         pressed = repeat = 0;
         results_screen();
         return;
     }
     game_draw();
+    if (outro_t >= 0) {
+        float k = (float)((now_s - outro_t) / 1.1);
+        k = k > 1 ? 1 : k;
+        gfx_2d();
+        gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(0, 0, 0, (int)(200 * k * k)));
+        float sz = 64 + 20 * (1 - (k < 0.2f ? k / 0.2f : 1));
+        font_draw_shadow(res.title, "SONG COMPLETE!", SCREEN_W / 2, 200, sz,
+                         fade_alpha(RGBA(255, 220, 120, 255), k < 0.15f ? k / 0.15f : 1), ALIGN_CENTER);
+        gfx_end();
+    }
 }
 
 static void pause_screen(void)
@@ -5058,6 +5078,9 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "FACE-OFF: Select on GET READY. Play, PASS THE VITA to a friend, they play the same chart, then the verdict.",
+        "Titles: show any achievement you've unlocked on your player card (Edit Player > Title).",
+        "SONG COMPLETE! as the crowd cheers before the results. The ghost race has bars. Menu highlights breathe.",
         "Every hit flashes and sends a ring of light out; a miss flashes red; held sustains burn; every 50 streak sweeps the neck.",
         "Star Power: the neck glows blue on the beat and comets run up the rails (no more spiky lightning).",
         "The band is backlit in the stage's colours; cameras flash in the crowd when you're rocking.",
