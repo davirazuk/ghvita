@@ -64,8 +64,7 @@ def save(name, im):
 
 # GHWT's plain dark menu backgrounds (its title one has words on it; the others are strips)
 backs = ['ghwt_menu_bg.png']
-emblems = [('01_world_tour', 'ghwt_logo_GH4_LoR_256.png', 0.92, 0), ('02_guitar_hero', 'gh_logo.png', 0.9, 1),
-           ('03_griffin', 'ghwt_setlist_griffin.png', 0.88, 2)]
+emblems = [('01_world_tour', 'ghwt_logo_GH4_LoR_256.png', 0.92, 0), ('03_griffin', 'ghwt_setlist_griffin.png', 0.88, 2)]
 for name, art, scale, b in emblems:
     save(name, on(backdrop(backs[b % len(backs)], 0.3), tex(art), scale))
 mags = ['Kerrang', 'AP', 'Decibel', 'GPlayer', 'Paste', 'HELL', 'BACKYARD', 'BAR']

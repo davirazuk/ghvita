@@ -301,10 +301,9 @@ static void title_screen(void)
     }
     gfx_begin(0, 0, 0);
     gfx_2d();
-    draw_background(res.bg_title, WHITE);
+    res_title_art();
     float a = 0.8f + 0.2f * sinf((float)now_s * 4);   // breathes, never fades out
-    gfx_rect_grad(0, 420, SCREEN_W, 90, RGBA(0, 0, 0, 0), RGBA(0, 0, 0, 210));
-    font_draw_shadow(res.title, "PRESS X TO ROCK", SCREEN_W * 0.74f, 452, 46, fade_alpha(RGBA(255, 220, 120, 255), a),
+    font_draw_shadow(res.title, "PRESS X TO ROCK", SCREEN_W / 2, 430, 46, fade_alpha(RGBA(255, 220, 120, 255), a),
                      ALIGN_CENTER);
     gfx_end();
 }
@@ -397,11 +396,54 @@ static void menu_music_stop(void)
     menu_tune = false;
 }
 
+// a chart's medal from its best: 0 none, 1 bronze (4 stars), 2 silver (95% of the notes), 3 gold (full combo)
+enum { MEDAL_NONE, MEDAL_BRONZE, MEDAL_SILVER, MEDAL_GOLD };
+static const char * const medal_names[] = {"", "BRONZE", "SILVER", "GOLD"};
+static const uint32_t medal_cols[] = {0, RGBA(205, 127, 50, 255), RGBA(200, 205, 215, 255), RGBA(255, 205, 60, 255)};
+
+static int medal_of(const Score * b)
+{
+    return b->fc ? MEDAL_GOLD : b->percent >= 95 ? MEDAL_SILVER : b->stars >= 4 ? MEDAL_BRONZE : MEDAL_NONE;
+}
+
+static void draw_medal(int m, float x, float y, float r)
+{
+    if (!m)
+        return;
+    gfx_rect(x - r, y - r, 2 * r, 2 * r, RGBA(0, 0, 0, 160));
+    gfx_rect(x - r + 2, y - r + 2, 2 * r - 4, 2 * r - 4, medal_cols[m]);
+    char c[2] = {medal_names[m][0], 0};
+    font_draw(res.ui, c, x, y - r * 0.8f, r * 1.5f, RGBA(40, 30, 20, 255), ALIGN_CENTER);
+}
+
+// a full combo on some part at some difficulty
+static bool song_has_gold(const Song * s)
+{
+    for (int p = 0; p < PART_COUNT; p++)
+        for (int d = 0; d < DIFF_COUNT; d++)
+            if (s->best[p][d].fc)
+                return true;
+    return false;
+}
+
+// all the medals won, over every song: {bronze, silver, gold}
+static void medal_totals(int out[4])
+{
+    memset(out, 0, 4 * sizeof(int));
+    for (int i = 0; i < songs_count(); i++) {
+        const Song * s = songs_get(i);
+        for (int p = 0; p < PART_COUNT; p++)
+            for (int d = 0; d < DIFF_COUNT; d++)
+                out[medal_of(&s->best[p][d])]++;
+    }
+}
+
 // ---------------------------------------------------------------------------------------------------- daily song
 // One song a day from the library, the same all day whatever the sort; finishing it on any part keeps a streak going.
 // daily.txt: "<day> <streak> <best streak>", the day the last one was finished.
 
 static void open_select(const Song * s);
+static void draw_player_face(int i, float x, float top, float w, bool lit);
 
 // days since 1970 by the local calendar, so the song changes at the player's midnight
 static long local_day(void)
@@ -569,7 +611,7 @@ static void main_menu(void)
     gfx_2d();
     draw_background(res.bg_menu, WHITE);
     if (res.logo)
-        gfx_sprite(&(Sprite){res.logo, 0, 0, 1, 1, 512, 370}, 500, 60, 420, 303, WHITE);
+        gfx_sprite(&(Sprite){res.logo, 0, 0, 1, 1, 512, 370}, 535, 46, 350, 253, WHITE);
     panel(40, 108, 420, 340);
     for (int i = 0; i < n; i++) {
         float y = 118 + i * 41;
@@ -593,7 +635,31 @@ static void main_menu(void)
         const Song * ds = songs_get(daily_pick());
         char d[240];
         snprintf(d, sizeof(d), "Today: %s - %s", ds->name, ds->artist);
-        font_draw_fit(res.ui, d, 500, 380, 22, 440, RGBA(255, 230, 160, 255), ALIGN_LEFT);
+        font_draw_fit(res.ui, d, 710, 312, 20, 420, RGBA(255, 230, 160, 255), ALIGN_CENTER);
+    }
+    // who's playing: their card, their rank, their stars and medals
+    {
+        const float x = 500, y = 344, w = 420, h = 96;
+        gfx_rect(x, y, w, h, RGBA(0, 0, 0, 150));
+        gfx_rect(x, y, w, 2, RGBA(255, 215, 110, 200));
+        int me = player_current();
+        draw_player_face(me, x + 48, y + 8, 80, true);
+        font_draw_fit(res.title, player_name(me), x + 100, y + 10, 30, 300, RGBA(255, 225, 150, 255), ALIGN_LEFT);
+        int next;
+        const char * rank = career_rank(&next);
+        char line[96];
+        snprintf(line, sizeof(line), "%s   %d stars", rank, career.stars);
+        font_draw_fit(res.ui, line, x + 100, y + 46, 18, 300, RGBA(215, 210, 200, 255), ALIGN_LEFT);
+        int medals[4];
+        medal_totals(medals);
+        for (int m = MEDAL_GOLD, k = 0; m >= MEDAL_BRONZE; m--, k++) {
+            float mx = x + 112 + k * 74;
+            draw_medal(m, mx, y + 80, 9);
+            snprintf(line, sizeof(line), "%d", medals[m]);
+            font_draw(res.ui, line, mx + 14, y + 70, 18, medal_cols[m], ALIGN_LEFT);
+        }
+        snprintf(line, sizeof(line), "%d/%d", achieve_unlocked(), achieve_count());
+        font_draw(res.ui, line, x + w - 14, y + 70, 18, RGBA(255, 210, 90, 255), ALIGN_RIGHT);
     }
     char t[200], now[160];
     snprintf(t, sizeof(t), "%d %s", songs_count(), songs_count() == 1 ? "song" : "songs");
@@ -1930,48 +1996,6 @@ static bool song_matches(const Song * s, const char * text)
         text += n;
     }
     return true;
-}
-
-// a chart's medal from its best: 0 none, 1 bronze (4 stars), 2 silver (95% of the notes), 3 gold (full combo)
-enum { MEDAL_NONE, MEDAL_BRONZE, MEDAL_SILVER, MEDAL_GOLD };
-static const char * const medal_names[] = {"", "BRONZE", "SILVER", "GOLD"};
-static const uint32_t medal_cols[] = {0, RGBA(205, 127, 50, 255), RGBA(200, 205, 215, 255), RGBA(255, 205, 60, 255)};
-
-static int medal_of(const Score * b)
-{
-    return b->fc ? MEDAL_GOLD : b->percent >= 95 ? MEDAL_SILVER : b->stars >= 4 ? MEDAL_BRONZE : MEDAL_NONE;
-}
-
-static void draw_medal(int m, float x, float y, float r)
-{
-    if (!m)
-        return;
-    gfx_rect(x - r, y - r, 2 * r, 2 * r, RGBA(0, 0, 0, 160));
-    gfx_rect(x - r + 2, y - r + 2, 2 * r - 4, 2 * r - 4, medal_cols[m]);
-    char c[2] = {medal_names[m][0], 0};
-    font_draw(res.ui, c, x, y - r * 0.8f, r * 1.5f, RGBA(40, 30, 20, 255), ALIGN_CENTER);
-}
-
-// a full combo on some part at some difficulty
-static bool song_has_gold(const Song * s)
-{
-    for (int p = 0; p < PART_COUNT; p++)
-        for (int d = 0; d < DIFF_COUNT; d++)
-            if (s->best[p][d].fc)
-                return true;
-    return false;
-}
-
-// all the medals won, over every song: {bronze, silver, gold}
-static void medal_totals(int out[4])
-{
-    memset(out, 0, 4 * sizeof(int));
-    for (int i = 0; i < songs_count(); i++) {
-        const Song * s = songs_get(i);
-        for (int p = 0; p < PART_COUNT; p++)
-            for (int d = 0; d < DIFF_COUNT; d++)
-                out[medal_of(&s->best[p][d])]++;
-    }
 }
 
 // five stars or better on any part at any difficulty
@@ -4659,11 +4683,12 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
-        "Downloads and update checks work on the Vita again (builds 62 to 75 couldn't connect).",
-        "Player pictures: Guitar Hero logos, the griffin and World Tour's magazines, or download any album cover.",
-        "Results: how many hits were on time, with an early / on time / late bar under Your timing.",
-        "Medals show in the song list. Show > Played, no gold medal yet. Options > Game > Battle rival: Easy to Brutal.",
-        "Earlier: players, battle mode, medals, achievements, race your best, daily song, practice speed-ups.",
+        "The title shows World Tour's own logo. The main menu shows who's playing: picture, rank, stars, medals.",
+        "Battle: the rival plays like a person (chords and fast runs are harder for it), picks its moment to attack,",
+        "  and has a name. New attack: Speed Up. INCOMING warns you a second before one lands. Options > Game > Battle rival.",
+        "GET READY shows the cover, the song's details and your best. Options' tabs fit, with more rows.",
+        "The strikeline buttons lost the off-centre arch on top. Player pictures: Guitar Hero art or any album cover.",
+        "Results: how many hits were on time. Medals in the song list. Downloads and updates work again.",
     };
     int n = (int)(sizeof(lines) / sizeof(lines[0]));
     gfx_begin(0, 0, 0);
