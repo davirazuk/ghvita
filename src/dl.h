@@ -109,6 +109,8 @@ typedef struct {
 bool dl_updates_start(const DlUpdateAsk * ask, int n);  // false: one's already going, or nothing to ask
 bool dl_updates_progress(int * done, int * total, int * found);   // true while it's going
 // what it found, once it's done: the new charts and the folders they replace
+// a Chorus search's album covers (one each): their URLs and "Artist - Album", how many (blocking: call from a worker)
+int dl_cover_search(const char * text, char (*urls)[160], char (*labels)[120], int max);
 int dl_updates_take(DlHit * out, char (*old)[256], int max);
 // the cover of a hit, fetched in the background: the file once it's there, else NULL (asks for it)
 const char * dl_cover(const DlHit * h);

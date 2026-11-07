@@ -2179,3 +2179,33 @@ int dl_updates_take(DlHit * out, char (*old)[256], int max)
     pthread_mutex_unlock(&upd_lock);
     return n;
 }
+
+// album covers for a player's picture: a Chorus search's covers, one per album, as URLs with what they're from
+int dl_cover_search(const char * text, char (*urls)[160], char (*labels)[120], int max)
+{
+    char q[200], post[400], err[160];
+    json_escape(q, sizeof(q), text);
+    snprintf(post, sizeof(post), "{\"search\":\"%s\",\"page\":1,\"per_page\":50}", q);
+    const char * headers[] = {"Content-Type: application/json", NULL};
+    HttpReq r = {.url = "https://api.enchor.us/search", .post = post, .headers = headers, .stall_s = 20};
+    char * body = NULL;
+    size_t len = 0;
+    int status = http_fetch(&r, &body, &len, err, sizeof(err));
+    DlHit * hits = NULL;
+    int total = 0, n = status >= 200 && status < 300 ? parse_chorus(body, len, &hits, &total) : 0, k = 0;
+    free(body);
+    for (int i = 0; i < n && k < max; i++) {
+        if (!hits[i].art[0])
+            continue;
+        bool seen = false;
+        for (int j = 0; j < k && !seen; j++)
+            seen = !strcmp(urls[j], hits[i].art);
+        if (seen)
+            continue;
+        snprintf(urls[k], 160, "%s", hits[i].art);
+        snprintf(labels[k], 120, "%s - %s", hits[i].artist, hits[i].album[0] ? hits[i].album : hits[i].name);
+        k++;
+    }
+    free(hits);
+    return k;
+}
