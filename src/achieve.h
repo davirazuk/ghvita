@@ -17,6 +17,9 @@ typedef struct {
 int achieve_count(void);
 const Achievement * achieve_get(int i);
 bool achieve_has(int i);
+// by id: whether it's unlocked, and its name (NULL when there's no such)
+bool achieve_has_id(const char * id);
+const char * achieve_name(const char * id);
 int achieve_unlocked(void);
 void achieve_load(void);
 // checks a play: how many came new; their indices into out (up to max)

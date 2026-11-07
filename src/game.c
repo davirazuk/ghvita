@@ -7,6 +7,7 @@
 #include <sys/stat.h>
 #include "game.h"
 #include "player.h"
+#include "achieve.h"
 #include "vocals.h"
 #include "res.h"
 #include "audio.h"
@@ -112,7 +113,9 @@ static struct {
     double miss_t[6];                   // a lane's last miss: its cup flashes red
     double wave_t;
     double strobe_t;                    // a chorus came in: the stage strobes
-    float kick;                         // the camera's jolt: Star Power, a big moment (decays)                      // a streak milestone: a wave of light up the neck
+    float kick;
+    char ach_text[48];                  // an achievement just earned, shown along the bottom
+    double ach_t;                         // the camera's jolt: Star Power, a big moment (decays)                      // a streak milestone: a wave of light up the neck
     uint32_t held;              // lanes held (bit per lane, LANE_OPEN = bit 5)
     float miss_flash, sp_flash;
     bool vocal;                         // the Vocals part: no highway, vocals.c has the notes
@@ -1498,6 +1501,7 @@ static void reset_play(void)
     }
     G.wave_t = -100;
     G.kick = 0;
+    G.ach_t = -100;
     G.strobe_t = -100;
     G.held = 0;
     G.touch_count = 0;
@@ -2032,6 +2036,12 @@ static void hit_note(int i)
         snprintf(t, sizeof(t), "%d NOTE STREAK!", G.streak);
         popup(t);
         G.wave_t = G.t;
+        // a streak achievement earned right now: said now, not only at the results
+        const char * id = G.streak == 100 ? "streak100" : G.streak == 500 ? "streak500" : G.streak == 1000 ? "streak1000" : NULL;
+        if (id && !G.autoplay && !practice.on && !achieve_has_id(id)) {
+            snprintf(G.ach_text, sizeof(G.ach_text), "ACHIEVEMENT: %s", achieve_name(id));
+            G.ach_t = G.t;
+        }
         if (G.streak % 100 == 0)
             G.kick = 0.6f;
         G.cheer = 1;
@@ -3862,6 +3872,15 @@ static void draw_hud(void)
         else
             snprintf(t, sizeof(t), "%s  %s", part_name(G.part_id), diff_name(G.diff));
         font_draw_fit(res.ui, t, dx + tx + 2, 126, 20, 540 - tx, with_alpha(RGBA(200, 200, 200, 255), a), ALIGN_LEFT);
+    }
+    if (G.t - G.ach_t < 3) {
+        // a gold banner rising from the bottom
+        float k = (float)(G.t - G.ach_t), in = k < 0.3f ? k / 0.3f : k > 2.6f ? (3 - k) / 0.4f : 1;
+        float y = SCREEN_H - 30 - 50 * in;
+        float w = font_width(res.ui, G.ach_text, 22) + 40;
+        gfx_rect(SCREEN_W / 2 - w / 2, y, w, 34, RGBA(40, 25, 0, (int)(220 * in)));
+        gfx_rect(SCREEN_W / 2 - w / 2, y, w, 2, RGBA(255, 210, 90, (int)(255 * in)));
+        font_draw_shadow(res.ui, G.ach_text, SCREEN_W / 2, y + 6, 22, with_alpha(RGBA(255, 220, 120, 255), in), ALIGN_CENTER);
     }
     // messages
     if (G.popup[0] && G.t - G.popup_t < 2.0) {

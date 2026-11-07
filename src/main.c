@@ -5214,6 +5214,7 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "Streak achievements (100, 500, 1000) are announced the moment you earn them.",
         "Star Power notes glitter as they come. The band leaps when a chorus hits.",
         "Practice: each section shows how dense it is, so the hard parts stand out. Smoke rolls after the chorus jets.",
         "GIG COMPLETE!: a setlist or random gig ends on a summary of the whole gig.",
