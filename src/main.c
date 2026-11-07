@@ -2388,6 +2388,20 @@ static void song_list(void)
     gfx_begin(0, 0, 0);
     gfx_2d();
     draw_background(res.bg_menu, WHITE);
+    if (art && art_for == sel) {
+        // the chosen song's cover, huge and soft behind the list, fading in as it changes
+        static int cover_for = -1;
+        static double cover_t;
+        if (cover_for != sel) {
+            cover_for = sel;
+            cover_t = now_s;
+        }
+        float a = (float)((now_s - cover_t) / 0.4);
+        a = a > 1 ? 1 : a;
+        gfx_sprite(&(Sprite){art, 0, 0, 1, 1, 256, 256}, 0, (SCREEN_H - SCREEN_W) / 2, SCREEN_W, SCREEN_W,
+                   RGBA(255, 255, 255, (int)(110 * a)));
+        gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(0, 0, 0, 120));
+    }
     banner("QUICKPLAY");
     char t[160];
     if (find_text[0])
