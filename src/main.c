@@ -30,7 +30,7 @@
 #include "update.h"
 
 enum { S_TITLE, S_MAIN, S_TOUR, S_SONGS, S_SELECT, S_PRACTICE, S_PLAY, S_PAUSE, S_RESUME, S_RESULTS, S_OPTIONS, S_CALIBRATE, S_EMPTY,
-       S_DOWNLOAD, S_UPDATE, S_CAREER, S_NEWS, S_PLAYERS, S_PLAYER_EDIT };
+       S_DOWNLOAD, S_UPDATE, S_CAREER, S_NEWS, S_PLAYERS, S_PLAYER_EDIT, S_FACEOFF };
 
 static int screen = S_TITLE;
 static double now_s, screen_t;
@@ -79,10 +79,14 @@ static double toast_t = -10;
 
 static void menu_music_stop(void);
 
+static double outro_t = -1;          // the song's done: when its closing moment began (-1 none)
+
 static void go(int s)
 {
     if (s != S_TITLE && s != S_MAIN)
         menu_music_stop();
+    if (s != S_PLAY)
+        outro_t = -1;           // a song's closing moment never carries over
     screen = s;
     screen_t = now_s;
     screen_frames = 0;
@@ -174,6 +178,21 @@ static void draw_cover(Tex * t, float x, float y, float size)
 }
 
 // a panel of GHWT's stitched leather
+// the menus' highlight on the chosen row: World Tour's bar, breathing, a soft glow sweeping along it
+static void select_bar(float x, float y, float w, float h, uint32_t col)
+{
+    (void)col;
+    float b = 0.82f + 0.18f * sinf((float)now_s * 5);
+    int v = (int)(255 * b);
+    gfx_sprite(atlas_get(res.hud, "wor_select"), x, y, w, h, RGBA(v, v, v, 255));
+    float sweep = (float)fmod(now_s * 0.6, 1.6) - 0.3f;
+    if (sweep > 0 && sweep < 1) {
+        gfx_blend(BLEND_ADD);
+        gfx_sprite(atlas_get(res.game, "glow"), x + w * sweep - h, y - h * 0.2f, h * 2, h * 1.4f, RGBA(255, 220, 140, 70));
+        gfx_blend(BLEND_ALPHA);
+    }
+}
+
 static void panel(float x, float y, float w, float h)
 {
     gfx_nine(atlas_get(res.hud, "list_bg"), x, y, w, h, 40, 0.8f, WHITE);
@@ -285,6 +304,10 @@ static void draw_toast(void)
 // ------------------------------------------------------------------------------------------------------ the title
 
 static int players_row;
+// FACE-OFF: two players take turns on the same chart. 1: the first is playing; 2: handing over; 3: the second is
+// playing; 4: the verdict
+static int faceoff, faceoff_p[2], faceoff_part, faceoff_diff, faceoff_pick;
+static Result faceoff_r[2];
 static int pause_options_at = 2;   // OPTIONS' row in the pause menu (it moves when PRACTICE THIS PART shows)
 static bool players_from_title;    // the picker came up at start: back goes to the title
 
@@ -446,6 +469,9 @@ static void medal_totals(int out[4])
 
 static void open_select(const Song * s);
 static void draw_player_face(int i, float x, float top, float w, bool lit);
+static void faceoff_screen(void);
+static void player_switch(int i);
+static const char * player_title_text(void);
 
 // days since 1970 by the local calendar, so the song changes at the player's midnight
 static long local_day(void)
@@ -618,7 +644,7 @@ static void main_menu(void)
     for (int i = 0; i < n; i++) {
         float y = 118 + i * 41;
         if (i == menu_index)
-            gfx_sprite(atlas_get(res.hud, "wor_select"), 50, y - 5, 400, 42, WHITE);
+            select_bar(50, y - 5, 400, 42, WHITE);
         font_draw_shadow(res.title, items[i], 80, y, 34, i == menu_index ? RGBA(255, 230, 150, 255)
                                                                            : RGBA(200, 190, 180, 255), ALIGN_LEFT);
         if (i == M_DAILY && songs_count()) {
@@ -647,10 +673,8 @@ static void main_menu(void)
         int me = player_current();
         draw_player_face(me, x + 48, y + 8, 80, true);
         font_draw_fit(res.title, player_name(me), x + 100, y + 10, 30, 300, RGBA(255, 225, 150, 255), ALIGN_LEFT);
-        int next;
-        const char * rank = career_rank(&next);
         char line[96];
-        snprintf(line, sizeof(line), "%s   %d stars", rank, career.stars);
+        snprintf(line, sizeof(line), "%s   %d stars", player_title_text(), career.stars);
         font_draw_fit(res.ui, line, x + 100, y + 46, 18, 300, RGBA(215, 210, 200, 255), ALIGN_LEFT);
         int medals[4];
         medal_totals(medals);
@@ -1402,7 +1426,10 @@ static void dl_queue_screen(void)
         const DlJob * q = &jobs[top + r];
         float y = 130 + r * 56;
         bool on = top + r == dl_jobs_sel;
-        gfx_sprite(atlas_get(res.hud, on ? "wor_select" : "wor_row"), 14, y, 580, 54, WHITE);
+        if (on)
+            select_bar(14, y, 580, 54, WHITE);
+        else
+            gfx_sprite(atlas_get(res.hud, "wor_row"), 14, y, 580, 54, WHITE);
         font_draw_fit(res.ui, q->hit.site == DL_CHORUS ? "CH" : "RV", 42, y + 9, 16, 40, RGBA(135, 140, 150, 255),
                       ALIGN_LEFT);
         font_draw_fit(res.ui, q->hit.name, 80, y + 6, 22, 380, on ? RGBA(255, 220, 160, 255) : RGBA(220, 220, 225, 255),
@@ -1634,7 +1661,10 @@ static void download_screen(void)
         const DlHit * h = &rows[r];
         float y = 130 + r * 56;
         bool on = dl_top + r == dl_sel, dim = h->unplayable[0] != 0;
-        gfx_sprite(atlas_get(res.hud, on ? "wor_select" : "wor_row"), 14, y, 580, 54, WHITE);
+        if (on)
+            select_bar(14, y, 580, 54, WHITE);
+        else
+            gfx_sprite(atlas_get(res.hud, "wor_row"), 14, y, 580, 54, WHITE);
         char up[128], badge_buf[16], sub[200];
         upper(up, sizeof(up), h->name);
         if (h->charter[0])
@@ -2258,7 +2288,7 @@ static void list_menu_draw(const Song * s)
     for (int i = 0; i < 9; i++) {
         float y = 86 + i * 44;
         if (i == list_row)
-            gfx_sprite(atlas_get(res.hud, "wor_select"), 224, y - 4, 512, 42, WHITE);
+            select_bar(224, y - 4, 512, 42, WHITE);
         font_draw_fit(res.ui, rows[i], SCREEN_W / 2, y + 2, 28, 460, i == list_row ? RGBA(255, 230, 150, 255)
                                                                                    : RGBA(220, 215, 205, 255), ALIGN_CENTER);
     }
@@ -2418,7 +2448,10 @@ static void song_list(void)
         Song * x = songs_get(i);
         float y = 104 + r * 56;
         bool on = top + r == pos;
-        gfx_sprite(atlas_get(res.hud, on ? "wor_select" : "wor_row"), 14, y, 580, 54, WHITE);
+        if (on)
+            select_bar(14, y, 580, 54, WHITE);
+        else
+            gfx_sprite(atlas_get(res.hud, "wor_row"), 14, y, 580, 54, WHITE);
         Tex * th = thumb_get(x);
         gfx_rect(26, y + 5, 44, 44, RGBA(0, 0, 0, 160));
         if (th)
@@ -2544,7 +2577,7 @@ static void draw_select(const Song * s, bool loading)
         float y = 254 + d * 46;
         bool on = d == sel_diff, has = sel_diffs[sel_part] & (1 << d);
         if (on)
-            gfx_sprite(atlas_get(res.hud, "wor_select"), 60, y - 4, 500, 44, WHITE);
+            select_bar(60, y - 4, 500, 44, WHITE);
         font_draw_shadow(res.ui, diff_name(d), 90, y, 30,
                          on ? RGBA(255, 230, 150, 255) : has ? RGBA(190, 190, 190, 255) : RGBA(85, 80, 75, 255),
                          ALIGN_LEFT);
@@ -2593,9 +2626,14 @@ static void draw_select(const Song * s, bool loading)
     if (loading)
         font_draw_shadow(res.title, "LOADING", SCREEN_W / 2, 488, 36, RGBA(255, 220, 120, 255), ALIGN_CENTER);
     else {
-        static const char * help[] = {"btn_cross", "Rock!", "btn_circle", "Back", "btn_left", "Part", "btn_up",
-                                      "Difficulty", "btn_square", "Practice", "btn_triangle", "Battle"};
-        help_bar(help, sel_part != PART_VOCALS && !tour_on ? 12 : 10);
+        const char * help[16] = {"btn_cross", "Rock!", "btn_circle", "Back", "btn_left", "Part", "btn_up", "Difficulty",
+                                 "btn_square", "Practice"};
+        int nh = 10;
+        if (sel_part != PART_VOCALS && !tour_on)
+            help[nh++] = "btn_triangle", help[nh++] = "Battle";
+        if (player_count() > 1 && !tour_on)
+            help[nh++] = "btn_select", help[nh++] = "Face-off";
+        help_bar(help, nh);
     }
     gfx_end();
 }
@@ -2865,7 +2903,7 @@ static void practice_screen(void)
         float y = 318 + r * 40;
         bool cur = pr_step == PR_STEP_SET && r == pr_set_row;
         if (cur)
-            gfx_sprite(atlas_get(res.hud, "wor_select"), 622, y - 4, 312, 38, WHITE);
+            select_bar(622, y - 4, 312, 38, WHITE);
         uint32_t col = pr_step != PR_STEP_SET ? RGBA(150, 150, 150, 255) : cur ? RGBA(255, 236, 170, 255) : RGBA(220, 220, 220, 255);
         if (r == 0)
             font_draw_shadow(res.title, labels[0], 778, y - 2, 32, col, ALIGN_CENTER);
@@ -2938,6 +2976,15 @@ static void select_screen(void)
         ui_sound(SND_UI_BACK);
         go(from_list());
         return;
+    }
+    if ((pressed & BTN_SELECT) && !tour_on && player_count() > 1) {
+        // a face-off: this player now, someone else after
+        ui_sound(SND_UI_SELECT);
+        faceoff = 1;
+        faceoff_p[0] = player_current();
+        faceoff_part = sel_part;
+        faceoff_diff = sel_diff;
+        select_starting = true;
     }
     if ((pressed & BTN_TRIANGLE) && sel_part != PART_VOCALS && !tour_on) {
         // a battle with a computer rival on this chart
@@ -3047,13 +3094,29 @@ static void play_screen(void)
     if (r == GAME_PAUSE) {
         game_pause(true);
         go(S_PAUSE);
-    } else if (r == GAME_DONE || r == GAME_FAILED) {
+    } else if (r == GAME_DONE && outro_t < 0) {
+        // the last note's rung out: a moment for the crowd before the results
+        outro_t = now_s;
+        sound_play(res.snd[SND_CHEER1 + rand() % 3], cfg.crowd_vol * 0.1f, false);
+    }
+    if (r == GAME_FAILED || (r == GAME_DONE && now_s - outro_t > 1.1)) {
+        outro_t = -1;
         finish_song(r);
         pressed = repeat = 0;
         results_screen();
         return;
     }
     game_draw();
+    if (outro_t >= 0) {
+        float k = (float)((now_s - outro_t) / 1.1);
+        k = k > 1 ? 1 : k;
+        gfx_2d();
+        gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(0, 0, 0, (int)(200 * k * k)));
+        float sz = 64 + 20 * (1 - (k < 0.2f ? k / 0.2f : 1));
+        font_draw_shadow(res.title, "SONG COMPLETE!", SCREEN_W / 2, 200, sz,
+                         fade_alpha(RGBA(255, 220, 120, 255), k < 0.15f ? k / 0.15f : 1), ALIGN_CENTER);
+        gfx_end();
+    }
 }
 
 static void pause_screen(void)
@@ -3146,7 +3209,7 @@ static void pause_screen(void)
     for (int i = 0; i < n; i++) {
         float y = 192 + i * step;
         if (i == menu_index)
-            gfx_sprite(atlas_get(res.hud, "wor_select"), SCREEN_W / 2 - 170, y - 4, 340, step - 4, WHITE);
+            select_bar(SCREEN_W / 2 - 170, y - 4, 340, step - 4, WHITE);
         uint32_t col = i == menu_index ? RGBA(255, 230, 150, 255) : RGBA(210, 200, 190, 255);
         if (font_width(res.title, items[i], size) > 320)
             font_draw_fit(res.title, items[i], SCREEN_W / 2, y, size, 320, col, ALIGN_CENTER);
@@ -3218,6 +3281,18 @@ static bool results_can_practice(void)
 static void results_screen(void)
 {
     Song * s = songs_get(sel);
+    if ((pressed & (BTN_CROSS | BTN_CIRCLE)) && (faceoff == 1 || faceoff == 3)) {
+        // a face-off's turn is over: on to the hand-over, or the verdict
+        ui_sound(SND_UI_SELECT);
+        faceoff_r[faceoff == 1 ? 0 : 1] = result;
+        if (faceoff == 1) {
+            faceoff = 2;
+            faceoff_pick = (faceoff_p[0] + 1) % player_count();
+        } else
+            faceoff = 4;
+        go(S_FACEOFF);
+        return;
+    }
     if (pressed & (BTN_CROSS | BTN_CIRCLE)) {
         ui_sound(SND_UI_SELECT);
         // on to the next of the setlist, on the same part and difficulty when it has them
@@ -3642,7 +3717,7 @@ static void tour_screen(void)
         float y = 158 + g * 54;
         bool on = g == tour_gig;
         if (on)
-            gfx_sprite(atlas_get(res.hud, "wor_select"), 30, y - 6, 376, 50, tour_in_set ? RGBA(150, 150, 150, 255) : WHITE);
+            select_bar(30, y - 6, 376, 50, tour_in_set ? RGBA(150, 150, 150, 255) : WHITE);
         const char * title = res_venue_title(tour_zone(tour_leg, g));
         font_draw_fit(res.ui, leg_open ? title : "???", 56, y + 2, 28, 250,
                       on ? RGBA(255, 230, 150, 255) : leg_open ? RGBA(205, 200, 195, 255) : RGBA(100, 95, 90, 255),
@@ -3664,7 +3739,7 @@ static void tour_screen(void)
             float y = 162 + i * 78;
             bool on = tour_in_set && i == tour_slot, locked = i == TOUR_ENCORE && !encore_open;
             if (on)
-                gfx_sprite(atlas_get(res.hud, "wor_select"), 444, y - 8, 484, 74, WHITE);
+                select_bar(444, y - 8, 484, 74, WHITE);
             const Song * s = tour_ids[i] >= 0 ? songs_get(tour_ids[i]) : NULL;
             uint32_t c = locked ? RGBA(120, 115, 110, 255) : on ? RGBA(255, 230, 150, 255) : RGBA(225, 220, 212, 255);
             if (i == TOUR_ENCORE)
@@ -4051,7 +4126,7 @@ static void options_screen(void)
         float y = 140 + r * 32;
         bool on = opt_top + r == menu_index;
         if (on)
-            gfx_sprite(atlas_get(res.hud, "wor_select"), 130, y - 3, 700, 34, WHITE);
+            select_bar(130, y - 3, 700, 34, WHITE);
         uint32_t c = on ? RGBA(255, 230, 150, 255) : RGBA(220, 215, 205, 255);
         font_draw(res.ui, name, 160, y + 1, 26, c, ALIGN_LEFT);
         // the volumes and percentages show as a bar as well
@@ -4169,6 +4244,45 @@ static void player_reload(void)
     daily.loaded = false;
     view_stale = true;
     art_for = preview_for = -1;
+}
+
+// a player's title: an achievement of theirs they show on their card, by its id in title.txt ("" for their rank)
+static void player_title_get(int i, char * out, int size)
+{
+    char d[400], p[460];
+    player_dir_of(i, d, sizeof(d));
+    snprintf(p, sizeof(p), "%stitle.txt", d);
+    out[0] = 0;
+    FILE * f = fopen(p, "r");
+    if (f) {
+        if (fgets(out, size, f))
+            out[strcspn(out, "\r\n")] = 0;
+        fclose(f);
+    }
+}
+
+static void player_title_set(int i, const char * id)
+{
+    char d[400], p[460];
+    player_dir_of(i, d, sizeof(d));
+    snprintf(p, sizeof(p), "%stitle.txt", d);
+    FILE * f = fopen(p, "w");
+    if (f) {
+        fprintf(f, "%s\n", id);
+        fclose(f);
+    }
+}
+
+// the title's words: the achievement's name, or the career rank when none is chosen (or it isn't theirs any more)
+static const char * player_title_text(void)
+{
+    static char id[40];
+    player_title_get(player_current(), id, sizeof(id));
+    for (int k = 0; id[0] && k < achieve_count(); k++)
+        if (!strcmp(achieve_get(k)->id, id) && achieve_has(k))
+            return achieve_get(k)->name;
+    int next;
+    return career_rank(&next);
 }
 
 // after a delete: the current player may be someone else now
@@ -4357,7 +4471,7 @@ static void players_screen(void)
 // Square on a card: the name, the colour, a picture (one of your songs' covers, one downloaded, or one of yours from
 // the card's avatars folder), or the player gone.
 
-enum { PE_NAME, PE_COLOR, PE_GH, PE_SONGS, PE_WEB, PE_CARD, PE_CLEAR, PE_DELETE, PE_ROWS };
+enum { PE_NAME, PE_COLOR, PE_TITLE, PE_GH, PE_SONGS, PE_WEB, PE_CARD, PE_CLEAR, PE_DELETE, PE_ROWS };
 static int pe_cover = -1, pe_card, pe_gh;
 static char pe_ghs[48][64];                // the game's own Guitar Hero pictures (assets/avatars)
 static int pe_gh_n = -1;
@@ -4555,6 +4669,25 @@ static void player_edit_screen(void)
         ui_sound(SND_UI_MOVE);
         if (pe_row == PE_COLOR)
             player_set_color(me, player_color(me) + d);
+        else if (pe_row == PE_TITLE) {
+            // through the achievements this player has, and back to their rank
+            char cur[40];
+            player_title_get(me, cur, sizeof(cur));
+            int n = achieve_count(), at = -1;
+            for (int k = 0; k < n; k++)
+                if (!strcmp(achieve_get(k)->id, cur))
+                    at = k;
+            for (int step = 0; step <= n; step++) {
+                at += d;
+                if (at < -1)
+                    at = n - 1;
+                if (at >= n)
+                    at = -1;
+                if (at == -1 || achieve_has(at))
+                    break;
+            }
+            player_title_set(me, at < 0 ? "" : achieve_get(at)->id);
+        }
         else if (pe_row == PE_GH && pe_gh_n > 0)
             pe_gh = (pe_gh + d + pe_gh_n) % pe_gh_n;
         else if (pe_row == PE_SONGS)
@@ -4669,11 +4802,20 @@ static void player_edit_screen(void)
     banner("EDIT PLAYER");
     panel(30, 84, 560, 400);
     char vals[PE_ROWS][96];
-    static const char * const labels[PE_ROWS] = {"Name", "Colour", "Guitar Hero picture", "Picture from your songs",
+    static const char * const labels[PE_ROWS] = {"Name", "Colour", "Title", "Guitar Hero picture", "Picture from your songs",
                                                  "Download an album cover",
                                                  "Picture from the card", "No picture", "Delete player"};
     snprintf(vals[PE_NAME], 96, "%s", player_name(me));
     snprintf(vals[PE_COLOR], 96, "< %d >", player_color(me) + 1);
+    {
+        char cur[40];
+        player_title_get(me, cur, sizeof(cur));
+        const char * tn = "Career rank";
+        for (int k = 0; cur[0] && k < achieve_count(); k++)
+            if (!strcmp(achieve_get(k)->id, cur))
+                tn = achieve_get(k)->name;
+        snprintf(vals[PE_TITLE], 96, "< %s >", tn);
+    }
     if (pe_gh_n > 0)
         snprintf(vals[PE_GH], 96, "< %d of %d >", pe_gh % pe_gh_n + 1, pe_gh_n);
     else
@@ -4689,10 +4831,10 @@ static void player_edit_screen(void)
     snprintf(vals[PE_CLEAR], 96, "%s", "");
     snprintf(vals[PE_DELETE], 96, "%s", pe_delete_armed ? "X again to delete" : "");
     for (int i = 0; i < PE_ROWS; i++) {
-        float y = 98 + i * 47;
+        float y = 96 + i * 43;
         bool cur = i == pe_row;
         if (cur)
-            gfx_sprite(atlas_get(res.hud, "wor_select"), 44, y - 4, 532, 46, WHITE);
+            select_bar(44, y - 4, 532, 40, WHITE);
         uint32_t col = i == PE_DELETE ? RGBA(255, 140, 120, 255) : cur ? RGBA(255, 230, 150, 255) : RGBA(215, 205, 195, 255);
         font_draw_shadow(res.ui, labels[i], 60, y + 6, 24, col, ALIGN_LEFT);
         font_draw_fit(res.ui, vals[i], 562, y + 9, 20, 230, cur ? RGBA(255, 236, 190, 255) : RGBA(180, 180, 185, 255),
@@ -4730,6 +4872,86 @@ static void player_edit_screen(void)
     } else {
         static const char * help[] = {"btn_cross", "Choose", "btn_up", "Move", "btn_circle", "Back"};
         help_bar(help, 6);
+    }
+    gfx_end();
+}
+
+// FACE-OFF: the hand-over (who plays next) and the verdict
+static void faceoff_screen(void)
+{
+    Song * s = songs_get(sel);
+    int n = player_count();
+    if (faceoff == 2) {
+        if (repeat & (BTN_LEFT | BTN_RIGHT)) {
+            int d = repeat & BTN_LEFT ? -1 : 1;
+            do
+                faceoff_pick = (faceoff_pick + d + n) % n;
+            while (faceoff_pick == faceoff_p[0] && n > 1);
+            ui_sound(SND_UI_MOVE);
+        }
+        if ((pressed & BTN_CROSS) && s) {
+            ui_sound(SND_UI_SELECT);
+            faceoff_p[1] = faceoff_pick;
+            player_switch(faceoff_pick);
+            if (game_start(s, faceoff_part, faceoff_diff)) {
+                faceoff = 3;
+                practicing = false;
+                game_set_autoplay(autoplay);
+                go(S_PLAY);
+                return;
+            }
+        }
+    } else if (pressed & (BTN_CROSS | BTN_CIRCLE)) {
+        // the verdict's read: back to the first player and the list
+        ui_sound(SND_UI_SELECT);
+        player_switch(faceoff_p[0]);
+        faceoff = 0;
+        go(from_list());
+        return;
+    }
+    if (faceoff == 2 && (pressed & BTN_CIRCLE)) {
+        ui_sound(SND_UI_BACK);
+        faceoff = 0;
+        go(from_list());
+        return;
+    }
+    gfx_begin(0, 0, 0);
+    gfx_2d();
+    draw_background(res.bg_menu, RGBA(150, 150, 150, 255));
+    banner("FACE-OFF");
+    char t[120];
+    if (faceoff == 2) {
+        font_draw_shadow(res.title, "PASS THE VITA!", SCREEN_W / 2, 96, 46, RGBA(255, 220, 140, 255), ALIGN_CENTER);
+        snprintf(t, sizeof(t), "%s scored %d. Who's taking them on?", player_name(faceoff_p[0]), faceoff_r[0].score);
+        font_draw_fit(res.ui, t, SCREEN_W / 2, 152, 24, 820, WHITE, ALIGN_CENTER);
+        draw_player_face(faceoff_pick, SCREEN_W / 2, 196, 170, true);
+        snprintf(t, sizeof(t), "<  %s  >", player_name(faceoff_pick));
+        font_draw_shadow(res.title, t, SCREEN_W / 2, 378, 36, RGBA(255, 236, 190, 255), ALIGN_CENTER);
+        static const char * help[] = {"btn_cross", "Play", "btn_left", "Choose", "btn_circle", "Call it off"};
+        help_bar(help, 6);
+    } else {
+        // the verdict: both cards, both scores, the winner crowned
+        int win = faceoff_r[0].score == faceoff_r[1].score ? -1 : faceoff_r[0].score > faceoff_r[1].score ? 0 : 1;
+        font_draw_shadow(res.title, win < 0 ? "A DRAW!" : "WINNER!", SCREEN_W / 2, 84, 46,
+                         RGBA(255, 220, 140, 255), ALIGN_CENTER);
+        for (int k = 0; k < 2; k++) {
+            float x = SCREEN_W / 2 + (k ? 210 : -210);
+            const Result * r = &faceoff_r[k];
+            float sz = win == k ? 170 : 140;
+            if (win == k)
+                gfx_rect(x - sz / 2 - 6, 150 - 6, sz + 12, sz + 12, RGBA(255, 210, 90, 255));
+            draw_player_face(faceoff_p[k], x, 150, sz, win != 1 - k);
+            font_draw_shadow(res.title, player_name(faceoff_p[k]), x, 150 + sz + 12, 32,
+                             win == k ? RGBA(255, 220, 140, 255) : RGBA(210, 205, 195, 255), ALIGN_CENTER);
+            snprintf(t, sizeof(t), "%d", r->score);
+            font_draw_shadow(res.title, t, x, 150 + sz + 48, 34, WHITE, ALIGN_CENTER);
+            int pct = r->notes_total ? r->notes_hit * 100 / r->notes_total : 0;
+            snprintf(t, sizeof(t), "%d%%   streak %d%s", pct, r->best_streak, r->fc ? "   FC" : "");
+            font_draw(res.ui, t, x, 150 + sz + 88, 20, RGBA(210, 205, 195, 255), ALIGN_CENTER);
+        }
+        font_draw_shadow(res.title, "VS", SCREEN_W / 2, 220, 40, RGBA(255, 120, 90, 255), ALIGN_CENTER);
+        static const char * help[] = {"btn_cross", "Done"};
+        help_bar(help, 2);
     }
     gfx_end();
 }
@@ -4856,6 +5078,9 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "FACE-OFF: Select on GET READY. Play, PASS THE VITA to a friend, they play the same chart, then the verdict.",
+        "Titles: show any achievement you've unlocked on your player card (Edit Player > Title).",
+        "SONG COMPLETE! as the crowd cheers before the results. The ghost race has bars. Menu highlights breathe.",
         "Every hit flashes and sends a ring of light out; a miss flashes red; held sustains burn; every 50 streak sweeps the neck.",
         "Star Power: the neck glows blue on the beat and comets run up the rails (no more spiky lightning).",
         "The band is backlit in the stage's colours; cameras flash in the crowd when you're rocking.",
@@ -5096,6 +5321,7 @@ int main(void)
         case S_CAREER: career_screen(); break;
         case S_PLAYERS: players_screen(); break;
         case S_PLAYER_EDIT: player_edit_screen(); break;
+        case S_FACEOFF: faceoff_screen(); break;
         case S_NEWS: news_screen(); break;
         case S_PLAY: play_screen(); break;
         case S_PAUSE: pause_screen(); break;
