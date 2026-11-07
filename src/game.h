@@ -27,7 +27,7 @@ typedef struct {
     int vox_good, vox_graded;   // phrases sung strong (80%+) of those graded, 0 when not singing along
     int battle;                 // 0 not a battle, 1 won, 2 lost
     int rival_score;
-    int attacks_thrown, attacks_taken, rival_pct;
+    int attacks_thrown, attacks_taken, rival_pct, rival_level;
     char rival_name[24];
 } Result;
 
@@ -38,8 +38,9 @@ bool game_start(Song * song, int part, int diff);
 void game_force_venue(const char * zone);
 // the next game_start is practice: from..to seconds over and over at speed (0.5..1), and nothing counts
 void game_practice(double from, double to, float speed);
-// the next game_start is a battle against a computer rival: Star Power phrases earn attacks to throw at them
-void game_battle(void);
+// the next game_start is a battle against a computer rival: Star Power phrases earn attacks to throw at them.
+// level: the rival's, 0 easy .. 3 brutal, or -1 for the Options' choice
+void game_battle(int level);
 // after game_practice: each run through with 90% of the notes speeds the next up by step_pct, up to target_pct
 void game_practice_ramp(int step_pct, int target_pct);
 // while practising: the speed now, runs through so far, the best run's % of notes

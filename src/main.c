@@ -1765,6 +1765,40 @@ static void download_screen(void)
 
 // songs the downloader has finished join the library while no song list or song is on screen (their indexes
 // mustn't move meanwhile)
+// the song list's little covers: a few kept by folder, the least lately drawn going first; one loaded a frame at most,
+// so scrolling never waits on a pile of JPEGs
+#define THUMBS 16
+static struct {
+    char folder[256];
+    Tex * tex;              // NULL: the song has no cover (still remembered, so it isn't looked for again)
+    double used;
+} thumbs[THUMBS];
+static int thumb_loads;     // loaded this frame
+
+static Tex * thumb_get(const Song * s)
+{
+    int free_at = 0;
+    for (int k = 0; k < THUMBS; k++) {
+        if (thumbs[k].folder[0] && !strcmp(thumbs[k].folder, s->folder)) {
+            thumbs[k].used = now_s;
+            return thumbs[k].tex;
+        }
+        if (thumbs[k].used < thumbs[free_at].used)
+            free_at = k;
+    }
+    if (thumb_loads >= 1)
+        return NULL;
+    thumb_loads++;
+    tex_free(thumbs[free_at].tex);
+    char path[400];
+    snprintf(path, sizeof(path), "%s/album.jpg", s->folder);
+    struct stat st;
+    thumbs[free_at].tex = stat(path, &st) == 0 ? tex_load(path, TEX_MIPMAP) : NULL;
+    snprintf(thumbs[free_at].folder, sizeof(thumbs[0].folder), "%s", s->folder);
+    thumbs[free_at].used = now_s;
+    return thumbs[free_at].tex;
+}
+
 // chart updates under way: the new chart's id and the folder it takes the place of
 #define SWAP_MAX 64
 static struct {
@@ -1886,6 +1920,11 @@ static void take_downloads(void)
     art_for = -1;
     view_stale = true;
     dl_marked = -1;
+    // a chart swapped in for an older one keeps the folder: its cover may be new
+    for (int t = 0; t < THUMBS; t++) {
+        tex_free(thumbs[t].tex);
+        memset(&thumbs[t], 0, sizeof(thumbs[t]));
+    }
     if (added == 1)
         snprintf(t, sizeof(t), "Added %s", name);
     else
@@ -2357,25 +2396,32 @@ static void song_list(void)
     else
         snprintf(t, sizeof(t), "%d / %d   by %s", n ? pos + 1 : 0, n, sort_name(cfg.sort));
     font_draw_fit(res.ui, t, SCREEN_W - 24, 30, 24, 420, RGBA(230, 230, 230, 255), ALIGN_RIGHT);
-    // the list
+    // the list: each row with its cover
+    thumb_loads = 0;
     for (int r = 0; r < rows && top + r < n; r++) {
         int i = view[top + r];
         Song * x = songs_get(i);
         float y = 104 + r * 56;
         bool on = top + r == pos;
         gfx_sprite(atlas_get(res.hud, on ? "wor_select" : "wor_row"), 14, y, 580, 54, WHITE);
+        Tex * th = thumb_get(x);
+        gfx_rect(26, y + 5, 44, 44, RGBA(0, 0, 0, 160));
+        if (th)
+            gfx_sprite(&(Sprite){th, 0, 0, 1, 1, 44, 44}, 26, y + 5, 44, 44, WHITE);
+        else if (res.logo)
+            gfx_sprite(&(Sprite){res.logo, 0, 0, 1, 1, 512, 370}, 29, y + 13, 38, 27, RGBA(150, 150, 150, 200));
         char up[128];
         upper(up, sizeof(up), x->name);
-        font_draw_fit(res.ui, up, 40, y + 4, 26, 520, on ? RGBA(255, 236, 170, 255) : RGBA(235, 235, 235, 255),
+        font_draw_fit(res.ui, up, 82, y + 4, 26, 480, on ? RGBA(255, 236, 170, 255) : RGBA(235, 235, 235, 255),
                       ALIGN_LEFT);
-        font_draw_fit(res.ui, x->artist, 42, y + 28, 20, 410, on ? RGBA(255, 210, 140, 255) : RGBA(170, 170, 175, 255),
+        font_draw_fit(res.ui, x->artist, 84, y + 28, 20, 370, on ? RGBA(255, 210, 140, 255) : RGBA(170, 170, 175, 255),
                       ALIGN_LEFT);
         const Score * b = &x->best[first_part(x)][cfg.last_diff];
         if (b->stars)
             draw_stars(b->stars, 470, y + 30, 18);
         draw_medal(medal_of(b), 572, y + 39, 9);
         if (x->fav)
-            gfx_sprite(atlas_get(res.hud, "hud_star_gold"), 20, y + 16, 20, 20, WHITE);
+            gfx_sprite(atlas_get(res.hud, "hud_star_gold"), 56, y + 34, 18, 18, WHITE);
     }
     if (!n) {
         font_draw_shadow(res.ui, find_text[0] ? "No song matches that" : "No songs here", 304, 240, 30,
@@ -2455,6 +2501,16 @@ static int from_list(void)
 }
 
 static int tour_leg, tour_gig, tour_slot;
+// the last gig of a leg ends on a boss battle: its encore against a rival who's tougher every two legs
+static bool tour_boss(void)
+{
+    return tour_on && tour_slot == TOUR_ENCORE && tour_gig == TOUR_GIGS - 1;
+}
+
+static int tour_boss_level(void)
+{
+    return tour_leg / 2 > 3 ? 3 : tour_leg / 2;
+}
 
 static void draw_select(const Song * s, bool loading)
 {
@@ -2515,7 +2571,7 @@ static void draw_select(const Song * s, bool loading)
         font_draw(res.ui, "Not played yet", 770, 404, 22, RGBA(180, 178, 172, 255), ALIGN_CENTER);
     if (tour_on) {
         char t2[80];
-        snprintf(t2, sizeof(t2), "%s%s", tour_slot == TOUR_ENCORE ? "Encore at " : "Live at ",
+        snprintf(t2, sizeof(t2), "%s%s", tour_boss() ? "Boss battle at " : tour_slot == TOUR_ENCORE ? "Encore at " : "Live at ",
                  res_venue_title(tour_zone(tour_leg, tour_gig)));
         font_draw_fit(res.ui, t2, SCREEN_W / 2, 84, 24, 560, RGBA(255, 200, 120, 255), ALIGN_CENTER);
     }
@@ -2830,6 +2886,8 @@ static void select_screen(void)
     if (select_starting) {
         // the chart, the highway picture and the stems take the Vita a second or so: the screen says so meanwhile
         select_starting = false;
+        if (tour_boss() && sel_part != PART_VOCALS)
+            game_battle(tour_boss_level());
         if (game_start(s, sel_part, sel_diff)) {
             practicing = false;
             game_set_autoplay(autoplay);
@@ -2870,7 +2928,7 @@ static void select_screen(void)
         // a battle with a computer rival on this chart
         stop_preview();
         ui_sound(SND_UI_SELECT);
-        game_battle();
+        game_battle(-1);
         if (game_start(s, sel_part, sel_diff)) {
             practicing = false;
             game_set_autoplay(autoplay);
@@ -2908,7 +2966,7 @@ static void finish_song(int how)
 {
     result = game_result();
     section_title(result.worst);
-    if (tour_on && !result.failed)
+    if (tour_on && !result.failed && result.battle != 2)     // a boss battle lost isn't a gig played
         tour_played();
     plat_log("result: %s, score %d, %d stars, %d/%d notes, best streak %d, %d/%d phrases, %d overhits%s; hits %+d ms "
              "on average, spread %d", how == GAME_DONE ? "done" : "failed", result.score, result.stars,
@@ -2941,7 +2999,7 @@ static void finish_song(int how)
                    result.overhits, result.played_s, result.failed, result.fc);
     AchPlay ap = {result.part, result.diff, result.stars, result.score, result.best_streak, result.overhits, result.sp_hit,
                   result.sp_total, result.notes_total ? result.notes_hit * 100 / result.notes_total : 0, result.failed,
-                  result.fc, practicing, autoplay, daily_streak(), songs_count(), result.battle, cfg.rival};
+                  result.fc, practicing, autoplay, daily_streak(), songs_count(), result.battle, result.rival_level};
     result_ach_n = achieve_check(&ap, result_ach, 6);
     for (int i = 0; i < result_ach_n && i < 6; i++)
         plat_log("achievement: %s", achieve_get(result_ach[i])->name);
@@ -3553,7 +3611,8 @@ static void tour_screen(void)
             const Song * s = tour_ids[i] >= 0 ? songs_get(tour_ids[i]) : NULL;
             uint32_t c = locked ? RGBA(120, 115, 110, 255) : on ? RGBA(255, 230, 150, 255) : RGBA(225, 220, 212, 255);
             if (i == TOUR_ENCORE)
-                font_draw(res.ui, "ENCORE", 900, y - 2, 18, RGBA(255, 200, 120, 255), ALIGN_RIGHT);
+                font_draw(res.ui, tour_gig == TOUR_GIGS - 1 ? "BOSS BATTLE" : "ENCORE", 900, y - 2, 18,
+                          tour_gig == TOUR_GIGS - 1 ? RGBA(255, 120, 90, 255) : RGBA(255, 200, 120, 255), ALIGN_RIGHT);
             font_draw_fit(res.ui, locked ? "???" : s ? s->name : "(no longer on the card)", 466, y, 28, 330, c,
                           ALIGN_LEFT);
             if (s && !locked)
@@ -4740,6 +4799,8 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "World Tour: each leg ends on a BOSS BATTLE encore against a rival who gets tougher leg by leg.",
+        "Battles show a tug-of-war bar across the top. The song list shows every song's cover.",
         "Fixed: the SOLO! percent could go past 100%.",
         "Career counts your battles won. New achievements: Rival Slayer, Duelist, Giant Killer (beat a Brutal rival).",
         "A singer's results show phrases sung, not frets. Singing along: the vocals' score sits on a dark backing.",
@@ -4904,7 +4965,7 @@ int main(void)
         int part = getenv("GHV_PART") ? atoi(getenv("GHV_PART")) : 0;
         int diff = getenv("GHV_DIFF") ? atoi(getenv("GHV_DIFF")) : 3;
         if (getenv("GHV_BATTLE"))
-            game_battle();          // tests: a battle (GHV_BATTLE=1)
+            game_battle(-1);        // tests: a battle (GHV_BATTLE=1)
         if (s && game_start(s, part, diff)) {
             game_set_autoplay(autoplay);
             go(S_PLAY);
