@@ -13,7 +13,8 @@
 #include "audio.h"
 #include "whammybar.h"
 
-#define WINDOW 0.095            // seconds early or late a note can still be hit (Warriors of Rock-ish lenient)
+// seconds early or late a note can still be hit: Normal is Warriors of Rock-ish lenient; Options can widen or narrow it
+#define WINDOW (cfg.hit_window == 1 ? 0.075 : cfg.hit_window == 2 ? 0.115 : 0.095)
 #define Z_FAR 11.0f             // the highway's far end (the strikeline is at 0)
 #define Z_NEAR -3.4f
 #define HALF_W 2.62f            // half the highway's width (lanes are 1 wide)

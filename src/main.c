@@ -3863,13 +3863,13 @@ static void tour_screen(void)
 
 enum { O_SPEED, O_HIGHWAY, O_VENUE, O_BAND, O_SING, O_SINGDIFF, O_OFFSET, O_LAYOUT, O_DRUMKEYS, O_DRUMHITS, O_TILT, O_NOFAIL, O_LEFTY, O_MUSIC, O_SFX, O_CROWD, O_FPS,
        O_CAMERA, O_HWALPHA, O_VLIGHT, O_FLASH, O_POPUPS, O_TIMING, O_LIVE, O_VANISH, O_MISSSND, O_REAR, O_BEND, O_COUNTDOWN,
-       O_RESET, O_FIVEPADS, O_DOUBLEKICK, O_EASYSUS, O_COUNTIN, O_SCREENS, O_PROGRESS, O_CUPS, O_AUTOREPRESS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, O_CROWDHANDS, O_VIGNETTE, O_LYRICS, O_MENUMUSIC, O_SINGSP, O_SHRINKCHECK, O_GHOST, O_RIVAL, O_COUNT };
+       O_RESET, O_FIVEPADS, O_DOUBLEKICK, O_EASYSUS, O_COUNTIN, O_SCREENS, O_PROGRESS, O_CUPS, O_AUTOREPRESS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, O_CROWDHANDS, O_VIGNETTE, O_LYRICS, O_MENUMUSIC, O_SINGSP, O_SHRINKCHECK, O_GHOST, O_RIVAL, O_WINDOW, O_COUNT };
 
 // the options by subject, L and R between them
-enum { OPT_TABS = 7, OPT_TAB_MAX = 11 };
+enum { OPT_TABS = 7, OPT_TAB_MAX = 14 };
 static const char * opt_tab_names[OPT_TABS] = {"GAME", "CONTROLS", "HIGHWAY", "STAGE", "SCREEN", "SOUND", "LIBRARY"};
 static const int opt_tabs[OPT_TABS][OPT_TAB_MAX + 1] = {
-    {O_SPEED, O_OFFSET, O_NOFAIL, O_EASYSUS, O_AUTOREPRESS, O_VANISH, O_COUNTDOWN, O_SING, O_SINGDIFF, O_RIVAL, O_RESET, -1},
+    {O_SPEED, O_OFFSET, O_NOFAIL, O_EASYSUS, O_AUTOREPRESS, O_VANISH, O_COUNTDOWN, O_SING, O_SINGDIFF, O_RIVAL, O_WINDOW, O_RESET, -1},
     {O_LAYOUT, O_DRUMKEYS, O_FIVEPADS, O_DOUBLEKICK, O_LEFTY, O_TILT, O_REAR, O_SINGSP, -1},
     {O_HIGHWAY, O_HWALPHA, O_CAMERA, O_CUPS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, -1},
     {O_VENUE, O_VLIGHT, O_BAND, O_CROWDHANDS, O_VIGNETTE, O_SCREENS, O_FLASH, -1},
@@ -3995,6 +3995,12 @@ static void option_text(int i, char * name, char * value, size_t n)
     case O_POPUPS: strcpy(name, "Streak messages"); snprintf(value, n, "%s", cfg.no_popups ? "Off" : "On"); break;
     case O_TIMING: strcpy(name, "Timing bar"); snprintf(value, n, "%s", cfg.timing_bar ? "On" : "Off"); break;
     case O_LIVE: strcpy(name, "Live percent"); snprintf(value, n, "%s", cfg.live_stats ? "On" : "Off"); break;
+    case O_WINDOW: {
+        static const char * const wn[3] = {"Normal", "Strict", "Lenient"};
+        strcpy(name, "Timing window");
+        snprintf(value, n, "%s", wn[cfg.hit_window % 3]);
+        break;
+    }
     case O_RIVAL: {
         static const char * const lv[4] = {"Easy", "Normal", "Hard", "Brutal"};
         strcpy(name, "Battle rival");
@@ -4099,6 +4105,7 @@ static void change_option(int i, int d)
     case O_LIVE: cfg.live_stats = !cfg.live_stats; break;
     case O_GHOST: cfg.no_ghost = !cfg.no_ghost; break;
     case O_RIVAL: cfg.rival = (cfg.rival + d + 4) % 4; break;
+    case O_WINDOW: cfg.hit_window = (cfg.hit_window + d + 3) % 3; break;
     case O_VANISH: cfg.vanish = !cfg.vanish; break;
     case O_MISSSND: cfg.no_miss_sound = !cfg.no_miss_sound; break;
     case O_REAR: cfg.no_rear_whammy = !cfg.no_rear_whammy; break;
@@ -4289,6 +4296,7 @@ static void options_screen(void)
         "X counts the songs whose audio isn't shrunk to Opus yet, then X shrinks them, right on the Vita.",
         "GHOST +1200: how far ahead (or behind) your best run on the chart you were at this point.",
         "How good the computer rival is in a battle (Triangle on GET READY).",
+        "How early or late a note can be hit: Strict 75 ms, Normal 95 ms, Lenient 115 ms either way.",
     };
     char line[160];
     const char * text = about[opt];
@@ -5242,6 +5250,7 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "Options > Game > Timing window: Strict, Normal or Lenient. The score counter rolls up; the crowd surges on big moments.",
         "Fixed: a held fret's lane light tinted the notes over it; it now sits under them. The picker shows stars.",
         "Streak achievements (100, 500, 1000) are announced the moment you earn them.",
         "Star Power notes glitter as they come. The band leaps when a chorus hits.",
