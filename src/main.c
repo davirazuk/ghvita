@@ -1765,6 +1765,40 @@ static void download_screen(void)
 
 // songs the downloader has finished join the library while no song list or song is on screen (their indexes
 // mustn't move meanwhile)
+// the song list's little covers: a few kept by folder, the least lately drawn going first; one loaded a frame at most,
+// so scrolling never waits on a pile of JPEGs
+#define THUMBS 16
+static struct {
+    char folder[256];
+    Tex * tex;              // NULL: the song has no cover (still remembered, so it isn't looked for again)
+    double used;
+} thumbs[THUMBS];
+static int thumb_loads;     // loaded this frame
+
+static Tex * thumb_get(const Song * s)
+{
+    int free_at = 0;
+    for (int k = 0; k < THUMBS; k++) {
+        if (thumbs[k].folder[0] && !strcmp(thumbs[k].folder, s->folder)) {
+            thumbs[k].used = now_s;
+            return thumbs[k].tex;
+        }
+        if (thumbs[k].used < thumbs[free_at].used)
+            free_at = k;
+    }
+    if (thumb_loads >= 1)
+        return NULL;
+    thumb_loads++;
+    tex_free(thumbs[free_at].tex);
+    char path[400];
+    snprintf(path, sizeof(path), "%s/album.jpg", s->folder);
+    struct stat st;
+    thumbs[free_at].tex = stat(path, &st) == 0 ? tex_load(path, TEX_MIPMAP) : NULL;
+    snprintf(thumbs[free_at].folder, sizeof(thumbs[0].folder), "%s", s->folder);
+    thumbs[free_at].used = now_s;
+    return thumbs[free_at].tex;
+}
+
 // chart updates under way: the new chart's id and the folder it takes the place of
 #define SWAP_MAX 64
 static struct {
@@ -1886,6 +1920,11 @@ static void take_downloads(void)
     art_for = -1;
     view_stale = true;
     dl_marked = -1;
+    // a chart swapped in for an older one keeps the folder: its cover may be new
+    for (int t = 0; t < THUMBS; t++) {
+        tex_free(thumbs[t].tex);
+        memset(&thumbs[t], 0, sizeof(thumbs[t]));
+    }
     if (added == 1)
         snprintf(t, sizeof(t), "Added %s", name);
     else
@@ -2357,25 +2396,32 @@ static void song_list(void)
     else
         snprintf(t, sizeof(t), "%d / %d   by %s", n ? pos + 1 : 0, n, sort_name(cfg.sort));
     font_draw_fit(res.ui, t, SCREEN_W - 24, 30, 24, 420, RGBA(230, 230, 230, 255), ALIGN_RIGHT);
-    // the list
+    // the list: each row with its cover
+    thumb_loads = 0;
     for (int r = 0; r < rows && top + r < n; r++) {
         int i = view[top + r];
         Song * x = songs_get(i);
         float y = 104 + r * 56;
         bool on = top + r == pos;
         gfx_sprite(atlas_get(res.hud, on ? "wor_select" : "wor_row"), 14, y, 580, 54, WHITE);
+        Tex * th = thumb_get(x);
+        gfx_rect(26, y + 5, 44, 44, RGBA(0, 0, 0, 160));
+        if (th)
+            gfx_sprite(&(Sprite){th, 0, 0, 1, 1, 44, 44}, 26, y + 5, 44, 44, WHITE);
+        else if (res.logo)
+            gfx_sprite(&(Sprite){res.logo, 0, 0, 1, 1, 512, 370}, 29, y + 13, 38, 27, RGBA(150, 150, 150, 200));
         char up[128];
         upper(up, sizeof(up), x->name);
-        font_draw_fit(res.ui, up, 40, y + 4, 26, 520, on ? RGBA(255, 236, 170, 255) : RGBA(235, 235, 235, 255),
+        font_draw_fit(res.ui, up, 82, y + 4, 26, 480, on ? RGBA(255, 236, 170, 255) : RGBA(235, 235, 235, 255),
                       ALIGN_LEFT);
-        font_draw_fit(res.ui, x->artist, 42, y + 28, 20, 410, on ? RGBA(255, 210, 140, 255) : RGBA(170, 170, 175, 255),
+        font_draw_fit(res.ui, x->artist, 84, y + 28, 20, 370, on ? RGBA(255, 210, 140, 255) : RGBA(170, 170, 175, 255),
                       ALIGN_LEFT);
         const Score * b = &x->best[first_part(x)][cfg.last_diff];
         if (b->stars)
             draw_stars(b->stars, 470, y + 30, 18);
         draw_medal(medal_of(b), 572, y + 39, 9);
         if (x->fav)
-            gfx_sprite(atlas_get(res.hud, "hud_star_gold"), 20, y + 16, 20, 20, WHITE);
+            gfx_sprite(atlas_get(res.hud, "hud_star_gold"), 56, y + 34, 18, 18, WHITE);
     }
     if (!n) {
         font_draw_shadow(res.ui, find_text[0] ? "No song matches that" : "No songs here", 304, 240, 30,
