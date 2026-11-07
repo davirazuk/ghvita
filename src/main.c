@@ -4406,7 +4406,8 @@ static void options_screen(void)
         "GHOST +1200: how far ahead (or behind) your best run on the chart you were at this point.",
         "How good the computer rival is in a battle (Triangle on GET READY).",
         "How early or late a note can be hit: Strict 75 ms, Normal 95 ms, Lenient 115 ms either way.",
-        "Light drops the hit rings, Star Power glitter, smoke, band backlight and camera flashes, for a steadier frame rate.",
+        "Light drops the hit rings, Star Power glitter, smoke, band backlight, lasers and sparks, for a steadier frame rate.",
+        "The song's speed. Below 100% the run isn't saved (scores, medals, the tour); practice has its own speed.",
     };
     char line[160];
     const char * text = about[opt];
