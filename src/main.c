@@ -63,6 +63,7 @@ static Result result;
 static int result_ach[6], result_ach_n;   // achievements this song unlocked
 static int result_medal;                  // a better medal than the chart had, or 0
 static bool result_best, result_daily;   // a new best; today's daily song done
+static int result_slowed;                 // the Song speed % of a run played slower than the song (it isn't saved), or 0
 // the results screen's other page: this chart's last plays (this one last)
 #define HIST_MAX 10
 static Played hist[HIST_MAX];
@@ -2632,8 +2633,15 @@ static void draw_select(const Song * s, bool loading)
             draw_stars(b->stars, 330, y + 4, 24);
         draw_medal(medal_of(b), 532, y + 16, 13);
     }
-    font_draw(res.ui, "Medals:  Bronze 4 stars   Silver 95%   Gold full combo", 310, 444, 17, RGBA(190, 185, 175, 255),
-              ALIGN_CENTER);
+    if (cfg.song_speed != 100) {
+        // a slowed song isn't saved: said before it's played, not after
+        snprintf(t, sizeof(t), cfg.song_speed < 100 ? "Song speed %d%%: this run won't be saved" : "Song speed %d%%",
+                 cfg.song_speed);
+        font_draw(res.ui, t, 310, 443, 18, cfg.song_speed < 100 ? RGBA(255, 160, 90, 255) : RGBA(255, 225, 150, 255),
+                  ALIGN_CENTER);
+    } else
+        font_draw(res.ui, "Medals:  Bronze 4 stars   Silver 95%   Gold full combo", 310, 444, 17, RGBA(190, 185, 175, 255),
+                  ALIGN_CENTER);
     // right: the cover, the song's details and the chosen chart's best
     panel(610, 100, 320, 380);
     draw_cover(art_for == sel ? art : NULL, 680, 116, 180);
@@ -3118,6 +3126,10 @@ static void finish_song(int how)
 {
     result = game_result();
     section_title(result.worst);
+    // a run counts (scores, medals, the career, the tour, achievements) at the song's own speed or faster, and not in
+    // practice: a practised stretch, or a slowed song, would otherwise go down as the chart's best
+    result_slowed = !practicing && game_song_speed() < 0.995f ? (int)(game_song_speed() * 100 + 0.5f) : 0;
+    bool counts = !autoplay && !practicing && !result_slowed;
     if (setlist_at >= 0 && !tour_on) {
         gig.songs++;
         gig.score += result.failed ? 0 : result.score;
@@ -3131,7 +3143,7 @@ static void finish_song(int how)
             snprintf(gig.best, sizeof(gig.best), "%s", gs->name);
         }
     }
-    if (tour_on && !result.failed && result.battle != 2)     // a boss battle lost isn't a gig played
+    if (tour_on && !result.failed && result.battle != 2 && !result_slowed)     // a boss battle lost isn't a gig played
         tour_played();
     plat_log("result: %s, score %d, %d stars, %d/%d notes, best streak %d, %d/%d phrases, %d overhits%s; hits %+d ms "
              "on average, spread %d", how == GAME_DONE ? "done" : "failed", result.score, result.stars,
@@ -3144,27 +3156,28 @@ static void finish_song(int how)
     if (s && !result.failed) {
         Score sc = {result.score, (uint8_t)result.stars,
                     (uint8_t)(result.notes_total ? result.notes_hit * 100 / result.notes_total : 0), result.fc};
-        result_best = !autoplay && result.score > s->best[result.part][result.diff].score;
+        result_best = counts && result.score > s->best[result.part][result.diff].score;
         int had = medal_of(&s->best[result.part][result.diff]), got = medal_of(&sc);
-        result_medal = got > had && !autoplay ? got : 0;
-        if (!autoplay)
+        result_medal = got > had && counts ? got : 0;
+        if (counts)
             songs_save_score(s, result.part, result.diff, sc);
     }
-    result_daily = s && !result.failed && !autoplay && !practicing && daily_finished(s);
+    result_daily = s && !result.failed && counts && daily_finished(s);
     hist_n = s && !practicing ? songs_history(s, result.part, result.diff, hist, HIST_MAX) : 0;
-    hist_has_this = s && !result.failed && !autoplay;
+    hist_has_this = s && !result.failed && counts;
     if (result.battle)
         plat_log("battle: %s, you %d, %s %d (%d%% of notes), attacks thrown %d, taken %d", result.battle == 1 ? "won" : "lost",
                  result.score, result.rival_name, result.rival_score, result.rival_pct, result.attacks_thrown, result.attacks_taken);
     results_history = false;
-    if (!autoplay && !practicing && result.battle)
+    if (counts && result.battle)
         career_battle(result.battle == 1);
-    if (!autoplay && !practicing)
+    if (counts)
         career_add(result.part, result.score, result.stars, result.notes_hit, result.notes_total, result.best_streak,
                    result.overhits, result.played_s, result.failed, result.fc);
     AchPlay ap = {result.part, result.diff, result.stars, result.score, result.best_streak, result.overhits, result.sp_hit,
                   result.sp_total, result.notes_total ? result.notes_hit * 100 / result.notes_total : 0, result.failed,
-                  result.fc, practicing, autoplay, daily_streak(), songs_count(), result.battle, result.rival_level};
+                  result.fc, practicing || result_slowed, autoplay, daily_streak(), songs_count(), result.battle, result.rival_level,
+                  (int)(game_song_speed() * 100 + 0.5f)};
     result_ach_n = achieve_check(&ap, result_ach, 6);
     for (int i = 0; i < result_ach_n && i < 6; i++)
         plat_log("achievement: %s", achieve_get(result_ach[i])->name);
@@ -3683,10 +3696,18 @@ static void results_screen(void)
                  i == 1 && result_ach_n > 2 ? " and more" : "");
         font_draw_shadow(res.ui, d, SCREEN_W - 90, 76 + i * 22, 20, RGBA(255, 210, 90, 255), ALIGN_RIGHT);
     }
+    // under the cover, two lines: out of the way of the stars and the rows
+    if (result_slowed) {
+        char d[48];
+        snprintf(d, sizeof(d), "SONG SPEED %d%%", result_slowed);
+        font_draw_shadow(res.ui, d, 185, 398, 22, RGBA(255, 160, 90, 255), ALIGN_CENTER);
+        font_draw_shadow(res.ui, "Not saved", 185, 424, 20, RGBA(255, 190, 140, 255), ALIGN_CENTER);
+    }
     if (result_daily) {
         char d[48];
-        snprintf(d, sizeof(d), "DAILY SONG DONE  %d day%s", daily_streak(), daily_streak() == 1 ? "" : "s");
-        font_draw_shadow(res.ui, d, 330, 160, 24, RGBA(130, 230, 130, 255), ALIGN_LEFT);
+        snprintf(d, sizeof(d), "%d day%s in a row", daily_streak(), daily_streak() == 1 ? "" : "s");
+        font_draw_shadow(res.ui, "DAILY SONG DONE", 185, 398, 22, RGBA(130, 230, 130, 255), ALIGN_CENTER);
+        font_draw_shadow(res.ui, d, 185, 424, 20, RGBA(170, 235, 170, 255), ALIGN_CENTER);
     }
     const char * help[8] = {"btn_cross", "Continue", "btn_triangle", "Retry"};
     int nh = 4;
@@ -3900,13 +3921,13 @@ static void tour_screen(void)
 
 enum { O_SPEED, O_HIGHWAY, O_VENUE, O_BAND, O_SING, O_SINGDIFF, O_OFFSET, O_LAYOUT, O_DRUMKEYS, O_DRUMHITS, O_TILT, O_NOFAIL, O_LEFTY, O_MUSIC, O_SFX, O_CROWD, O_FPS,
        O_CAMERA, O_HWALPHA, O_VLIGHT, O_FLASH, O_POPUPS, O_TIMING, O_LIVE, O_VANISH, O_MISSSND, O_REAR, O_BEND, O_COUNTDOWN,
-       O_RESET, O_FIVEPADS, O_DOUBLEKICK, O_EASYSUS, O_COUNTIN, O_SCREENS, O_PROGRESS, O_CUPS, O_AUTOREPRESS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, O_CROWDHANDS, O_VIGNETTE, O_LYRICS, O_MENUMUSIC, O_SINGSP, O_SHRINKCHECK, O_GHOST, O_RIVAL, O_WINDOW, O_LIGHTFX, O_COUNT };
+       O_RESET, O_FIVEPADS, O_DOUBLEKICK, O_EASYSUS, O_COUNTIN, O_SCREENS, O_PROGRESS, O_CUPS, O_AUTOREPRESS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, O_CROWDHANDS, O_VIGNETTE, O_LYRICS, O_MENUMUSIC, O_SINGSP, O_SHRINKCHECK, O_GHOST, O_RIVAL, O_WINDOW, O_LIGHTFX, O_SONGSPEED, O_COUNT };
 
 // the options by subject, L and R between them
 enum { OPT_TABS = 7, OPT_TAB_MAX = 14 };
 static const char * opt_tab_names[OPT_TABS] = {"GAME", "CONTROLS", "HIGHWAY", "STAGE", "SCREEN", "SOUND", "LIBRARY"};
 static const int opt_tabs[OPT_TABS][OPT_TAB_MAX + 1] = {
-    {O_SPEED, O_OFFSET, O_NOFAIL, O_EASYSUS, O_AUTOREPRESS, O_VANISH, O_COUNTDOWN, O_SING, O_SINGDIFF, O_RIVAL, O_WINDOW, O_RESET, -1},
+    {O_SPEED, O_SONGSPEED, O_OFFSET, O_NOFAIL, O_EASYSUS, O_AUTOREPRESS, O_VANISH, O_COUNTDOWN, O_SING, O_SINGDIFF, O_RIVAL, O_WINDOW, O_RESET, -1},
     {O_LAYOUT, O_DRUMKEYS, O_FIVEPADS, O_DOUBLEKICK, O_LEFTY, O_TILT, O_REAR, O_SINGSP, -1},
     {O_HIGHWAY, O_HWALPHA, O_CAMERA, O_CUPS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, -1},
     {O_VENUE, O_VLIGHT, O_BAND, O_CROWDHANDS, O_VIGNETTE, O_SCREENS, O_FLASH, -1},
@@ -4033,6 +4054,10 @@ static void option_text(int i, char * name, char * value, size_t n)
     case O_TIMING: strcpy(name, "Timing bar"); snprintf(value, n, "%s", cfg.timing_bar ? "On" : "Off"); break;
     case O_LIVE: strcpy(name, "Live percent"); snprintf(value, n, "%s", cfg.live_stats ? "On" : "Off"); break;
     case O_LIGHTFX: strcpy(name, "Effects"); snprintf(value, n, "%s", cfg.light_fx ? "Light" : "Full"); break;
+    case O_SONGSPEED:
+        strcpy(name, "Song speed");
+        snprintf(value, n, cfg.song_speed < 100 ? "%d%%  (not saved)" : "%d%%", cfg.song_speed);
+        break;
     case O_WINDOW: {
         static const char * const wn[3] = {"Normal", "Strict", "Lenient"};
         strcpy(name, "Timing window");
@@ -4145,6 +4170,7 @@ static void change_option(int i, int d)
     case O_RIVAL: cfg.rival = (cfg.rival + d + 4) % 4; break;
     case O_WINDOW: cfg.hit_window = (cfg.hit_window + d + 3) % 3; break;
     case O_LIGHTFX: cfg.light_fx = !cfg.light_fx; break;
+    case O_SONGSPEED: cfg.song_speed = clampi(cfg.song_speed + 5 * d, 50, 150); break;
     case O_VANISH: cfg.vanish = !cfg.vanish; break;
     case O_MISSSND: cfg.no_miss_sound = !cfg.no_miss_sound; break;
     case O_REAR: cfg.no_rear_whammy = !cfg.no_rear_whammy; break;
@@ -5330,14 +5356,14 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "Options > Game > Song speed, 50% to 150%: shown on the HUD. A run below 100% isn't saved.",
+        "Achievements: Speed Demon (finish a song at 125% speed) and Ludicrous (4 stars at 150%).",
+        "Fixed: a practice run was saved as a score, so a slowed whole-song practice could earn the gold medal.",
+        "Practice: the section you're in shows under the PRACTICE label, and a Metronome setting ticks the beat.",
+        "Fixed: the results' DAILY SONG DONE covered the stars; it's under the cover now.",
         "Star Power: the band spins round as it goes on, and sparks fountain up either side of the guitarists.",
-        "Lasers sweep over the band in a chorus that's going well, and under Star Power.",
+        "Lasers sweep over the band in a good chorus and under Star Power; the lights leave pools on the stage.",
         "The camera pulls back from the band through the count-in. A song played well ends with the jets.",
-        "Practice: a Metronome setting ticks along with the beat.",
-        "Fixed: a practice run that started partway into a song clicked the whole count-in at once.",
-        "Vocals: your voice's trail now scrolls with the notes, and the pitch marker glows when you're on the note.",
-        "Fixed: the streak lamps beside the highway floated off the rope; they sit on it, evenly spaced.",
-        "Earlier: lighters in slow songs, Timing window, Effects: Light, rock meter danger glow, highway previews.",
     };
     int n = (int)(sizeof(lines) / sizeof(lines[0]));
     gfx_begin(0, 0, 0);

@@ -93,6 +93,7 @@ typedef struct {
     bool live_stats;        // percent hit and a full-combo mark in the song
     bool no_ghost;          // no racing the chart's best run
     bool metronome;         // practice ticks along with the beat
+    int song_speed;         // the song's speed in %, outside practice (below 100 the run isn't saved)
     bool light_fx;          // the lighter look: no ring, glitter, smoke, backlight or crowd flashes (for a steady frame rate)
     int hit_window;         // 0 normal, 1 strict, 2 lenient
     int rival;              // battle: the rival's skill, 0 easy 1 normal 2 hard 3 brutal
