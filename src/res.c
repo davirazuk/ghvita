@@ -93,6 +93,35 @@ void res_title_art(void)
     draw_background(res.bg_title, WHITE);
 }
 
+// a hint for while something loads: a different one each time it's asked for a new one
+static const char * const tips[] = {
+    "Tilt the Vita up quickly to use Star Power. Select works too.",
+    "Rub the rear touchpad to whammy a sustain and fill Star Power faster.",
+    "Pause a song and pick PRACTICE THIS PART to loop the section you're stuck on.",
+    "Practice can speed up by itself each time you clear the section: Speed up, +5% a clear.",
+    "Triangle on GET READY starts a battle. Star Power phrases become attacks.",
+    "Select on GET READY starts a FACE-OFF: pass the Vita to a friend for the same song.",
+    "Gold medal: a full combo. Silver: 95% of the notes. Bronze: four stars.",
+    "R on the results screen shows your last ten plays of that chart.",
+    "Calibrate from the main menu if the notes feel early or late.",
+    "The Daily Song changes at midnight. Finish it every day to keep your streak.",
+    "Check for newer charts from the song list's Select menu.",
+    "Each leg of the World Tour ends on a boss battle.",
+    "Pick a title for your player card from any achievement you've unlocked.",
+    "Race your best: GHOST shows how far ahead of your best run you are.",
+};
+static int tip_at = -1;
+
+const char * res_tip(bool next)
+{
+    int n = (int)(sizeof(tips) / sizeof(tips[0]));
+    if (tip_at < 0)
+        tip_at = (int)(plat_now_us() / 1000) % n;
+    else if (next)
+        tip_at = (tip_at + 1) % n;
+    return tips[tip_at];
+}
+
 void res_loading(float done, const char * text)
 {
     gfx_begin(0, 0, 0);
@@ -104,6 +133,8 @@ void res_loading(float done, const char * text)
     float w = 300, x = (SCREEN_W - w) / 2, y = 486;
     gfx_rect(x - 2, y - 2, w + 4, 10, RGBA(0, 0, 0, 220));
     gfx_rect(x, y, w * (done < 0 ? 0 : done > 1 ? 1 : done), 6, RGBA(255, 200, 90, 255));
+    if (res.ui)
+        font_draw(res.ui, res_tip(false), SCREEN_W / 2, 504, 17, RGBA(220, 215, 205, 220), ALIGN_CENTER);
     gfx_end();
     plat_present();
 }

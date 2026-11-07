@@ -2623,9 +2623,11 @@ static void draw_select(const Song * s, bool loading)
                  res_venue_title(tour_zone(tour_leg, tour_gig)));
         font_draw_fit(res.ui, t2, SCREEN_W / 2, 84, 24, 560, RGBA(255, 200, 120, 255), ALIGN_CENTER);
     }
-    if (loading)
-        font_draw_shadow(res.title, "LOADING", SCREEN_W / 2, 488, 36, RGBA(255, 220, 120, 255), ALIGN_CENTER);
-    else {
+    if (loading) {
+        gfx_rect(0, 480, SCREEN_W, 64, RGBA(0, 0, 0, 200));
+        font_draw_shadow(res.title, "LOADING", SCREEN_W / 2, 482, 30, RGBA(255, 220, 120, 255), ALIGN_CENTER);
+        font_draw(res.ui, res_tip(false), SCREEN_W / 2, 516, 17, RGBA(220, 215, 205, 255), ALIGN_CENTER);
+    } else {
         const char * help[16] = {"btn_cross", "Rock!", "btn_circle", "Back", "btn_left", "Part", "btn_up", "Difficulty",
                                  "btn_square", "Practice"};
         int nh = 10;
@@ -2939,6 +2941,7 @@ static void select_screen(void)
     if (select_starting) {
         // the chart, the highway picture and the stems take the Vita a second or so: the screen says so meanwhile
         select_starting = false;
+        res_tip(true);
         if (tour_boss() && sel_part != PART_VOCALS)
             game_battle(tour_boss_level());
         if (game_start(s, sel_part, sel_diff)) {

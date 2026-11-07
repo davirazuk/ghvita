@@ -1,5 +1,6 @@
 // The app's own art and sounds (assets/), loaded once
 #pragma once
+#include <stdbool.h>
 #include "gfx.h"
 #include "font.h"
 #include "audio.h"
@@ -45,6 +46,8 @@ extern Res res;
 void res_load(void);
 // the loading screen (the title picture, text and a bar 0..1); res_load draws it as it goes
 void res_title_art(void);
+// a hint to show while something loads; next: move on to another
+const char * res_tip(bool next);
 void res_loading(float done, const char * text);
 // the sound effects load on a thread after res_load: a song waits for them
 void res_wait_sounds(void);
