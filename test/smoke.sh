@@ -6,8 +6,9 @@
 set -u
 cd "$(dirname "$0")"
 root=..
-[ -f $root/build-pc/build.ninja ] || cmake -S $root -B $root/build-pc -G Ninja >/dev/null
-ninja -C $root/build-pc >/dev/null || { echo "smoke: desktop build failed"; exit 1; }
+# the -dev packages' headers are where the system keeps them (CMakeLists' PCDEPS is for a PC without them)
+[ -f $root/build-pc/build.ninja ] || cmake -S $root -B $root/build-pc -G Ninja -DPCDEPS=/usr/include >/dev/null
+out=$(ninja -C $root/build-pc 2>&1) || { echo "$out" | grep -E "error|FAILED" | head -20; echo "smoke: desktop build failed"; exit 1; }
 [ -d songs ] && ls songs | grep -q "GH Vita Tests" || python3 $root/tools/mktestsong.py songs --count 2 >/dev/null
 mkdir -p data shots && ln -sfn ../songs data/songs
 if [ -z "${DISPLAY:-}" ]; then
