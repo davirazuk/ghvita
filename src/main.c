@@ -4734,7 +4734,7 @@ static void news_screen(void)
         "  and has a name. New attack: Speed Up. INCOMING warns you a second before one lands. Options > Game > Battle rival.",
         "GET READY shows the cover, the song's details and your best. Options' tabs fit, with more rows.",
         "The strikeline buttons lost the off-centre arch on top. Player pictures: Guitar Hero art or any album cover.",
-        "Results: how many hits were on time. Medals in the song list. Downloads and updates work again.",
+        "Pause: PRACTICE THIS PART takes you to practice on the section you were in. Medals in the song list.",
     };
     int n = (int)(sizeof(lines) / sizeof(lines[0]));
     gfx_begin(0, 0, 0);
