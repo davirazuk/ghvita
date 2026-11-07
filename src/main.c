@@ -4077,16 +4077,40 @@ static void players_screen(void)
 // the card's avatars folder), or the player gone.
 
 enum { PE_NAME, PE_COLOR, PE_SONGS, PE_WEB, PE_CARD, PE_CLEAR, PE_DELETE, PE_ROWS };
-static int pe_cover = -1, pe_style, pe_seed = 1, pe_card;
+static int pe_cover = -1, pe_card;
 static Tex * pe_prev;                   // the picture the row offers, before it's taken
 static char pe_prev_path[460];
 static char pe_files[64][128];          // the avatars folder's pictures
 static int pe_file_n = -1;
-static const char * const pe_styles[] = {"adventurer", "avataaars", "bottts", "pixel-art", "fun-emoji", "lorelei",
-                                         "micah", "big-smile", "croodles", "thumbs", "notionists", "open-peeps"};
-#define PE_STYLES (int)(sizeof(pe_styles) / sizeof(pe_styles[0]))
+// album covers off Chorus: a search (typed), its covers, the one shown
+#define PE_COVERS 40
+static char pe_query[96], pe_cover_url[PE_COVERS][160], pe_cover_label[PE_COVERS][120];
+static volatile int pe_cover_n, pe_search_state;    // 0 none yet, 1 searching, 2 done
+static int pe_cv;
 
-// the download: a worker fetches a picture into the preview file
+static void * pe_search_thread(void * arg)
+{
+    (void)arg;
+    pe_cover_n = dl_cover_search(pe_query, pe_cover_url, pe_cover_label, PE_COVERS);
+    pe_search_state = 2;
+    return NULL;
+}
+
+static void pe_search(const char * text)
+{
+    if (pe_search_state == 1 || !text[0])
+        return;
+    snprintf(pe_query, sizeof(pe_query), "%s", text);
+    pe_cover_n = pe_cv = 0;
+    pe_search_state = 1;
+    pthread_t t;
+    if (pthread_create(&t, NULL, pe_search_thread, NULL) != 0)
+        pe_search_state = 2;
+    else
+        pthread_detach(t);
+}
+
+// the download: a worker fetches a cover into the preview file
 static volatile int pe_web_state;       // 0 idle, 1 fetching, 2 ready, 3 failed
 static char pe_web_url[200];
 static int pe_web_shown = -1;           // which (style, seed) the preview is of
@@ -4098,10 +4122,11 @@ static void * pe_web_thread(void * arg)
     size_t len = 0;
     HttpReq r = {.url = pe_web_url, .stall_s = 15};
     int status = http_fetch(&r, &body, &len, err, sizeof(err));
-    bool ok = status == 200 && len > 8 && !memcmp(body, "\x89PNG", 4);
+    bool ok = status == 200 && len > 8 &&
+              (!memcmp(body, "\x89PNG", 4) || ((unsigned char)body[0] == 0xFF && (unsigned char)body[1] == 0xD8));
     if (ok) {
         char p[460];
-        snprintf(p, sizeof(p), "%stmp_avatar.png", plat_data_dir());
+        snprintf(p, sizeof(p), "%stmp_cover.img", plat_data_dir());
         FILE * f = fopen(p, "wb");
         ok = f && fwrite(body, 1, len, f) == len;
         if (f)
@@ -4117,8 +4142,9 @@ static void pe_web_fetch(void)
 {
     if (pe_web_state == 1)
         return;
-    snprintf(pe_web_url, sizeof(pe_web_url), "https://api.dicebear.com/9.x/%s/png?seed=%s%d&size=256",
-             pe_styles[pe_style], player_name(edit_player), pe_seed);
+    if (pe_cv >= pe_cover_n)
+        return;
+    snprintf(pe_web_url, sizeof(pe_web_url), "%s", pe_cover_url[pe_cv]);
     pe_web_state = 1;
     pthread_t t;
     if (pthread_create(&t, NULL, pe_web_thread, NULL) != 0)
@@ -4228,17 +4254,24 @@ static void player_edit_screen(void)
             player_set_color(me, player_color(me) + d);
         else if (pe_row == PE_SONGS)
             pe_next_cover(d);
-        else if (pe_row == PE_WEB) {
-            pe_style = (pe_style + d + PE_STYLES) % PE_STYLES;
+        else if (pe_row == PE_WEB && pe_cover_n > 0) {
+            pe_cv = (pe_cv + d + pe_cover_n) % pe_cover_n;
             pe_web_shown = -1;
         } else if (pe_row == PE_CARD && pe_file_n > 0)
             pe_card = (pe_card + d + pe_file_n) % pe_file_n;
     }
-    if ((pressed & BTN_TRIANGLE) && pe_row == PE_WEB) {
-        // another of the same style
-        pe_seed++;
-        pe_web_shown = -1;
-        ui_sound(SND_UI_MOVE);
+    bool search_now = (pressed & BTN_TRIANGLE) && pe_row == PE_WEB;
+    if ((pressed & BTN_CROSS) && pe_row == PE_WEB && pe_cover_n == 0 && pe_search_state != 1) {
+        search_now = true;      // nothing found yet: X searches
+        pressed &= ~BTN_CROSS;
+    }
+    if (search_now) {
+        // a song, an artist or an album: its covers come back to browse
+        ui_sound(SND_UI_SELECT);
+        snprintf(dl_typed, sizeof(dl_typed), "%s", pe_query);
+        kb_apply = pe_search;
+        kb_library = false;
+        dl_typing = true;
     }
     // what the row offers, in the preview
     char offer[460] = "";
@@ -4248,13 +4281,13 @@ static void player_edit_screen(void)
         if (pe_cover >= 0)
             snprintf(offer, sizeof(offer), "%s/album.jpg", songs_get(pe_cover)->folder);
     } else if (pe_row == PE_WEB) {
-        int want = pe_style * 100000 + pe_seed;
-        if (pe_web_shown != want && pe_web_state != 1) {
+        int want = pe_search_state * 1000 + pe_cv;
+        if (pe_cover_n > 0 && pe_web_shown != want && pe_web_state != 1) {
             pe_web_fetch();
             pe_web_shown = want;
         }
-        if (pe_web_state == 2)
-            snprintf(offer, sizeof(offer), "%stmp_avatar.png", plat_data_dir());
+        if (pe_web_state == 2 && pe_cover_n > 0)
+            snprintf(offer, sizeof(offer), "%stmp_cover.img", plat_data_dir());
     } else if (pe_row == PE_CARD && pe_file_n > 0)
         snprintf(offer, sizeof(offer), "%savatars/%s", plat_data_dir(), pe_files[pe_card % pe_file_n]);
     // a new download lands in the same file: load it again
@@ -4278,7 +4311,7 @@ static void player_edit_screen(void)
             break;
         case PE_COLOR: player_set_color(me, player_color(me) + 1); break;
         case PE_SONGS: ok = offer[0] && pe_take_file(offer, false); break;
-        case PE_WEB: ok = pe_web_state == 2 && pe_take_file(offer, false); break;
+        case PE_WEB: ok = pe_web_state == 2 && offer[0] && pe_take_file(offer, true); break;
         case PE_CARD: ok = offer[0] && pe_take_file(offer, true); break;
         case PE_CLEAR: player_clear_picture(me); break;
         case PE_DELETE:
@@ -4328,12 +4361,17 @@ static void player_edit_screen(void)
     banner("EDIT PLAYER");
     panel(30, 84, 560, 400);
     char vals[PE_ROWS][96];
-    static const char * const labels[PE_ROWS] = {"Name", "Colour", "Picture from your songs", "Download a picture",
+    static const char * const labels[PE_ROWS] = {"Name", "Colour", "Picture from your songs", "Download an album cover",
                                                  "Picture from the card", "No picture", "Delete player"};
     snprintf(vals[PE_NAME], 96, "%s", player_name(me));
     snprintf(vals[PE_COLOR], 96, "< %d >", player_color(me) + 1);
     snprintf(vals[PE_SONGS], 96, "%s", pe_cover >= 0 ? songs_get(pe_cover)->name : "no covers");
-    snprintf(vals[PE_WEB], 96, "< %s >", pe_styles[pe_style]);
+    if (pe_search_state == 1)
+        snprintf(vals[PE_WEB], 96, "searching...");
+    else if (pe_cover_n > 0)
+        snprintf(vals[PE_WEB], 96, "< %d of %d >", pe_cv + 1, pe_cover_n);
+    else
+        snprintf(vals[PE_WEB], 96, pe_search_state == 2 ? "none found: Triangle" : "X to search");
     snprintf(vals[PE_CARD], 96, "%s", pe_file_n > 0 ? pe_files[pe_card % pe_file_n] : "none yet");
     snprintf(vals[PE_CLEAR], 96, "%s", "");
     snprintf(vals[PE_DELETE], 96, "%s", pe_delete_armed ? "X again to delete" : "");
@@ -4355,8 +4393,13 @@ static void player_edit_screen(void)
         if (pe_prev)
             gfx_sprite(&(Sprite){pe_prev, 0, 0, 1, 1, 120, 120}, 770 - 60, 350, 120, 120, WHITE);
         else
-            font_draw(res.ui, pe_row == PE_WEB && pe_web_state == 1 ? "downloading..." :
-                      pe_row == PE_WEB ? "couldn't download" : "-", 770, 400, 20, RGBA(200, 200, 205, 255), ALIGN_CENTER);
+            font_draw(res.ui, pe_row == PE_WEB && (pe_web_state == 1 || pe_search_state == 1) ? "downloading..."
+                              : pe_row == PE_WEB && pe_cover_n == 0                       ? "search for a song"
+                              : pe_row == PE_WEB                                          ? "couldn't download"
+                                                                                          : "-",
+                      770, 400, 20, RGBA(200, 200, 205, 255), ALIGN_CENTER);
+        if (pe_row == PE_WEB && pe_cover_n > 0)
+            font_draw_fit(res.ui, pe_cover_label[pe_cv], 770, 476, 16, 330, RGBA(220, 215, 205, 255), ALIGN_CENTER);
         if (pe_row == PE_CARD && pe_file_n <= 0)
             font_draw_fit(res.ui, "Put PNG or JPEG pictures in ux0:data/ghvita/avatars", 770, 440, 16, 330,
                           RGBA(200, 200, 205, 255), ALIGN_CENTER);
@@ -4364,9 +4407,9 @@ static void player_edit_screen(void)
     draw_toast();
     if (dl_typing) {
         kb_draw();
-        font_draw(res.ui, "Type the name, then Start", SCREEN_W / 2, 470, 22, RGBA(255, 220, 140, 255), ALIGN_CENTER);
+        font_draw(res.ui, dl_typing && kb_apply == pe_search ? "Type a song, artist or album, then Start" : "Type the name, then Start", SCREEN_W / 2, 470, 22, RGBA(255, 220, 140, 255), ALIGN_CENTER);
     } else if (pe_row == PE_WEB) {
-        static const char * help[] = {"btn_cross", "Use it", "btn_left", "Style", "btn_triangle", "Another", "btn_circle", "Back"};
+        static const char * help[] = {"btn_cross", "Use it", "btn_left", "Browse", "btn_triangle", "Search", "btn_circle", "Back"};
         help_bar(help, 8);
     } else if (pe_row == PE_SONGS || pe_row == PE_CARD) {
         static const char * help[] = {"btn_cross", "Use it", "btn_left", "Browse", "btn_circle", "Back"};
@@ -4498,7 +4541,7 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
-        "Players: WHO'S PLAYING? at the start. Square edits a card: name, colour, a picture (song covers, downloads or your own), delete.",
+        "Players: WHO'S PLAYING? at the start. Square edits a card: name, colour, a picture (your songs' covers, album covers downloaded from Chorus, or your own), delete.",
         "Battle: Triangle on GET READY. Star Power phrases become attacks against a computer rival.",
         "DAILY SONG on the main menu, with a streak. Medals (bronze, silver, gold) on every chart.",
         "28 achievements on CAREER (press R). Race your best: GHOST +/- shows how you're doing against your best run.",
