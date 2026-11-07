@@ -42,7 +42,8 @@ static int * view;
 static int view_n, view_cap;
 static bool view_stale = true;
 static char find_text[64];
-enum { SHOW_ALL, SHOW_FAVS, SHOW_NEW, SHOW_PART };   // then SHOW_PART + each part
+// what the song list shows: the made-up lists (played long ago, never five stars, short ones), then SHOW_PART + each part
+enum { SHOW_ALL, SHOW_FAVS, SHOW_NEW, SHOW_STALE, SHOW_UNSTARRED, SHOW_SHORT, SHOW_LONG, SHOW_PART };
 static int show;
 static double sel_t;
 static Tex * art;
@@ -53,7 +54,7 @@ static int want_diff;               // the difficulty last picked (a part withou
 static uint8_t sel_diffs[PART_COUNT];   // the difficulties each part of the chosen song has, a bit each
 static int menu_index;
 static Result result;
-static bool result_best;
+static bool result_best, result_daily;   // a new best; today's daily song done
 // the results screen's other page: this chart's last plays (this one last)
 #define HIST_MAX 10
 static Played hist[HIST_MAX];
@@ -379,6 +380,107 @@ static void menu_music_stop(void)
     menu_tune = false;
 }
 
+// ---------------------------------------------------------------------------------------------------- daily song
+// One song a day from the library, the same all day whatever the sort; finishing it on any part keeps a streak going.
+// daily.txt: "<day> <streak> <best streak>", the day the last one was finished.
+
+static void open_select(const Song * s);
+
+// days since 1970 by the local calendar, so the song changes at the player's midnight
+static long local_day(void)
+{
+    time_t now = time(NULL);
+    struct tm * tm = localtime(&now);
+    if (!tm)
+        return (long)(now / 86400);
+    int y = tm->tm_year + 1900, m = tm->tm_mon + 1, d = tm->tm_mday;
+    y -= m <= 2;
+    long era = (y >= 0 ? y : y - 399) / 400;
+    long yoe = y - era * 400, doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+    return era * 146097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719468;
+}
+
+static struct {
+    long done_day;          // the day the daily song was last finished
+    int streak, best;
+    bool loaded;
+} daily;
+
+static void daily_load(void)
+{
+    if (daily.loaded)
+        return;
+    daily.loaded = true;
+    char path[400];
+    snprintf(path, sizeof(path), "%sdaily.txt", plat_data_dir());
+    FILE * f = fopen(path, "r");
+    if (f) {
+        if (fscanf(f, "%ld %d %d", &daily.done_day, &daily.streak, &daily.best) != 3)
+            daily.done_day = daily.streak = daily.best = 0;
+        fclose(f);
+    }
+}
+
+// the streak as it stands today: one missed day and it's gone
+static int daily_streak(void)
+{
+    daily_load();
+    return daily.done_day >= local_day() - 1 ? daily.streak : 0;
+}
+
+static bool daily_done_today(void)
+{
+    daily_load();
+    return daily.done_day == local_day();
+}
+
+// today's song: the one whose name hashes lowest with today's date
+static int daily_pick(void)
+{
+    long day = local_day();
+    int pick = -1;
+    uint32_t low = 0xffffffffu;
+    for (int i = 0; i < songs_count(); i++) {
+        const Song * s = songs_get(i);
+        const char * name = strrchr(s->folder, '/');
+        name = name ? name + 1 : s->folder;
+        uint32_t h = 2166136261u ^ (uint32_t)day;
+        for (const char * c = name; *c; c++)
+            h = (h ^ (uint8_t)*c) * 16777619u;
+        h ^= h >> 15;
+        h *= 0x2c1b3c6du;
+        h ^= h >> 12;
+        if (pick < 0 || h < low)
+            low = h, pick = i;
+    }
+    return pick;
+}
+
+static bool daily_is(const Song * s)
+{
+    int k = daily_pick();
+    return s && k >= 0 && songs_get(k) == s;
+}
+
+// a finished play of today's song: true when it made today count
+static bool daily_finished(const Song * s)
+{
+    if (!daily_is(s) || daily_done_today())
+        return false;
+    long day = local_day();
+    daily.streak = daily.done_day == day - 1 ? daily.streak + 1 : 1;
+    daily.best = daily.streak > daily.best ? daily.streak : daily.best;
+    daily.done_day = day;
+    char path[400];
+    snprintf(path, sizeof(path), "%sdaily.txt", plat_data_dir());
+    FILE * f = fopen(path, "w");
+    if (f) {
+        fprintf(f, "%ld %d %d\n", daily.done_day, daily.streak, daily.best);
+        fclose(f);
+    }
+    return true;
+}
+
 static void main_menu(void)
 {
     static int offered;                 // the build last put up: a newer one found later is offered too
@@ -392,8 +494,10 @@ static void main_menu(void)
         go(S_UPDATE);
         return;
     }
-    static const char * items[] = {"QUICKPLAY", "WORLD TOUR", "DOWNLOAD SONGS", "OPTIONS", "CALIBRATE", "CAREER", "EXIT"};
-    const int n = 7;
+    static const char * items[] = {"QUICKPLAY", "DAILY SONG", "WORLD TOUR", "DOWNLOAD SONGS", "OPTIONS", "CALIBRATE",
+                                   "CAREER", "EXIT"};
+    enum { M_QUICK, M_DAILY, M_TOUR, M_DOWNLOAD, M_OPTIONS, M_CALIBRATE, M_CAREER, M_EXIT };
+    const int n = 8;
     if (repeat & BTN_UP) {
         menu_index = (menu_index + n - 1) % n;
         ui_sound(SND_UI_MOVE);
@@ -408,20 +512,30 @@ static void main_menu(void)
     } else if (pressed & BTN_CROSS) {
         ui_sound(SND_UI_SELECT);
         int which = menu_index;
-        if (which == 0)
+        if (which == M_QUICK)
             go(songs_count() ? S_SONGS : S_EMPTY);
-        else if (which == 1)
+        else if (which == M_DAILY) {
+            int k = daily_pick();
+            if (k < 0)
+                go(S_EMPTY);
+            else {
+                sel = k;
+                sel_t = now_s;
+                menu_music_stop();
+                open_select(songs_get(k));
+            }
+        } else if (which == M_TOUR)
             tour_enter();
-        else if (which == 2)
+        else if (which == M_DOWNLOAD)
             go(S_DOWNLOAD);
-        else if (which == 3) {
+        else if (which == M_OPTIONS) {
             options_from = S_MAIN;
             go(S_OPTIONS);
-        } else if (which == 4) {
+        } else if (which == M_CALIBRATE) {
             calib_count = 0;
             calib_playing = false;
             go(S_CALIBRATE);
-        } else if (which == 5)
+        } else if (which == M_CAREER)
             go(S_CAREER);
         else {
             plat_quit();
@@ -435,11 +549,28 @@ static void main_menu(void)
         gfx_sprite(&(Sprite){res.logo, 0, 0, 1, 1, 512, 370}, 500, 60, 420, 303, WHITE);
     panel(40, 108, 420, 340);
     for (int i = 0; i < n; i++) {
-        float y = 122 + i * 46;
+        float y = 118 + i * 41;
         if (i == menu_index)
-            gfx_sprite(atlas_get(res.hud, "wor_select"), 50, y - 5, 400, 46, WHITE);
-        font_draw_shadow(res.title, items[i], 80, y, 38, i == menu_index ? RGBA(255, 230, 150, 255)
+            gfx_sprite(atlas_get(res.hud, "wor_select"), 50, y - 5, 400, 42, WHITE);
+        font_draw_shadow(res.title, items[i], 80, y, 34, i == menu_index ? RGBA(255, 230, 150, 255)
                                                                            : RGBA(200, 190, 180, 255), ALIGN_LEFT);
+        if (i == M_DAILY && songs_count()) {
+            // a tick once it's done today, else the streak waiting on it
+            char d[32] = "";
+            int st = daily_streak();
+            if (daily_done_today())
+                snprintf(d, sizeof(d), "done  %d day%s", st, st == 1 ? "" : "s");
+            else if (st)
+                snprintf(d, sizeof(d), "%d day streak", st);
+            font_draw_shadow(res.ui, d, 440, y + 8, 20, daily_done_today() ? RGBA(130, 230, 130, 255)
+                                                                            : RGBA(255, 200, 110, 255), ALIGN_RIGHT);
+        }
+    }
+    if (menu_index == M_DAILY && songs_count()) {
+        const Song * ds = songs_get(daily_pick());
+        char d[240];
+        snprintf(d, sizeof(d), "Today: %s - %s", ds->name, ds->artist);
+        font_draw_fit(res.ui, d, 500, 380, 22, 440, RGBA(255, 230, 160, 255), ALIGN_LEFT);
     }
     char t[200], now[160];
     snprintf(t, sizeof(t), "%d songs", songs_count());
@@ -1330,7 +1461,7 @@ static void download_screen(void)
         dl_panel = false;
         pick_open = false;
         go(S_MAIN);
-        menu_index = 2;             // back on DOWNLOAD SONGS
+        menu_index = 3;             // back on DOWNLOAD SONGS
         return;
     }
     if ((pressed & BTN_CROSS) && has) {
@@ -1679,9 +1810,25 @@ static bool song_matches(const Song * s, const char * text)
     return true;
 }
 
+// five stars or better on any part at any difficulty
+static bool song_starred(const Song * s)
+{
+    for (int p = 0; p < PART_COUNT; p++)
+        for (int d = 0; d < DIFF_COUNT; d++)
+            if (s->best[p][d].stars >= 5)
+                return true;
+    return false;
+}
+
 static bool song_shown(const Song * s)
 {
+    // played, but not in the last 30 days (plays from before times were kept count as long ago)
+    long month_ago = (long)time(NULL) - 30L * 24 * 3600;
     if ((show == SHOW_FAVS && !s->fav) || (show == SHOW_NEW && s->plays) ||
+        (show == SHOW_STALE && (!s->plays || s->last_played > month_ago)) ||
+        (show == SHOW_UNSTARRED && (!s->plays || song_starred(s))) ||
+        (show == SHOW_SHORT && (s->length_ms <= 0 || s->length_ms > 180000)) ||
+        (show == SHOW_LONG && s->length_ms <= 360000) ||
         (show >= SHOW_PART && !(s->parts & (1 << (show - SHOW_PART)))))
         return false;
     return song_matches(s, find_text);
@@ -1718,6 +1865,14 @@ static const char * show_name(void)
         return "Favourites";
     if (show == SHOW_NEW)
         return "Not played yet";
+    if (show == SHOW_STALE)
+        return "Not played in a month";
+    if (show == SHOW_UNSTARRED)
+        return "Played, never 5 stars";
+    if (show == SHOW_SHORT)
+        return "Short (3 min or less)";
+    if (show == SHOW_LONG)
+        return "Long (over 6 min)";
     if (show >= SHOW_PART) {
         snprintf(t, sizeof(t), "Has %s", part_name(show - SHOW_PART));
         return t;
@@ -2522,6 +2677,7 @@ static void finish_song(int how)
         if (!autoplay)
             songs_save_score(s, result.part, result.diff, sc);
     }
+    result_daily = s && !result.failed && !autoplay && !practicing && daily_finished(s);
     hist_n = s && !practicing ? songs_history(s, result.part, result.diff, hist, HIST_MAX) : 0;
     hist_has_this = s && !result.failed && !autoplay;
     results_history = false;
@@ -2850,6 +3006,11 @@ static void results_screen(void)
     }
     if (result_best)
         font_draw_shadow(res.title, "NEW BEST!", 870, 148, 36, RGBA(120, 220, 255, 255), ALIGN_RIGHT);
+    if (result_daily) {
+        char d[48];
+        snprintf(d, sizeof(d), "DAILY SONG DONE  %d day%s", daily_streak(), daily_streak() == 1 ? "" : "s");
+        font_draw_shadow(res.ui, d, 330, 160, 24, RGBA(130, 230, 130, 255), ALIGN_LEFT);
+    }
     const char * help[8] = {"btn_cross", "Continue", "btn_triangle", "Retry"};
     int nh = 4;
     if (results_can_practice())
@@ -3500,7 +3661,7 @@ static void career_screen(void)
     if (pressed & (BTN_CIRCLE | BTN_CROSS)) {
         ui_sound(SND_UI_BACK);
         go(S_MAIN);
-        menu_index = 5;
+        menu_index = 6;             // back on CAREER
         return;
     }
     gfx_begin(0, 0, 0);
@@ -3639,7 +3800,7 @@ static void calibrate_screen(void)
         audio_song_unload();
         calib_playing = false;
         go(S_MAIN);
-        menu_index = 4;             // back on CALIBRATE
+        menu_index = 5;             // back on CALIBRATE
         return;
     }
     gfx_begin(0, 0, 0);
