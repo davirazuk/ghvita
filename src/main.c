@@ -5330,14 +5330,14 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
-        "A hit gem swells and fades at the strikeline. In slow songs the crowd holds up lighters.",
-        "Fixed: Retry after a battle played the song without the battle.",
-        "Options: choosing a highway or a venue shows a preview of it. Fixed: Highway solid's value was cut to \"10...\".",
-        "The rock meter glows red and its needle trembles when you're about to fail; full, it glows green.",
-        "Options > Screen > Effects: Light turns off the heavier effects for a steadier frame rate.",
-        "Options > Game > Timing window: Strict, Normal or Lenient. The score counter rolls up.",
-        "Fixed: a held fret's lane light tinted the notes over it. Streak achievements pop up as you earn them.",
-        "Earlier: GIG COMPLETE!, FACE-OFF, titles, practice section density, smoke after the chorus jets.",
+        "Star Power: the band spins round as it goes on, and sparks fountain up either side of the guitarists.",
+        "Lasers sweep over the band in a chorus that's going well, and under Star Power.",
+        "The camera pulls back from the band through the count-in. A song played well ends with the jets.",
+        "Practice: a Metronome setting ticks along with the beat.",
+        "Fixed: a practice run that started partway into a song clicked the whole count-in at once.",
+        "Vocals: your voice's trail now scrolls with the notes, and the pitch marker glows when you're on the note.",
+        "Fixed: the streak lamps beside the highway floated off the rope; they sit on it, evenly spaced.",
+        "Earlier: lighters in slow songs, Timing window, Effects: Light, rock meter danger glow, highway previews.",
     };
     int n = (int)(sizeof(lines) / sizeof(lines[0]));
     gfx_begin(0, 0, 0);
