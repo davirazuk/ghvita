@@ -2347,8 +2347,8 @@ static void draw_select(const Song * s, bool loading)
         font_draw_shadow(res.title, "LOADING", SCREEN_W / 2, 488, 36, RGBA(255, 220, 120, 255), ALIGN_CENTER);
     else {
         static const char * help[] = {"btn_cross", "Rock!", "btn_circle", "Back", "btn_left", "Part", "btn_up",
-                                      "Difficulty", "btn_square", "Practice"};
-        help_bar(help, 10);
+                                      "Difficulty", "btn_square", "Practice", "btn_triangle", "Battle"};
+        help_bar(help, sel_part != PART_VOCALS && !tour_on ? 12 : 10);
     }
     gfx_end();
 }
@@ -2688,6 +2688,18 @@ static void select_screen(void)
         go(from_list());
         return;
     }
+    if ((pressed & BTN_TRIANGLE) && sel_part != PART_VOCALS && !tour_on) {
+        // a battle with a computer rival on this chart
+        stop_preview();
+        ui_sound(SND_UI_SELECT);
+        game_battle();
+        if (game_start(s, sel_part, sel_diff)) {
+            practicing = false;
+            game_set_autoplay(autoplay);
+            go(S_PLAY);
+            return;
+        }
+    }
     if (pressed & BTN_SQUARE) {
         read_sections(s);
         ui_sound(pr_count ? SND_UI_SELECT : SND_UI_BACK);
@@ -2733,7 +2745,7 @@ static void finish_song(int how)
                     (uint8_t)(result.notes_total ? result.notes_hit * 100 / result.notes_total : 0), result.fc};
         result_best = result.score > s->best[result.part][result.diff].score;
         int had = medal_of(&s->best[result.part][result.diff]), got = medal_of(&sc);
-        result_medal = got > had ? got : 0;
+        result_medal = got > had && !autoplay ? got : 0;
         if (!autoplay)
             songs_save_score(s, result.part, result.diff, sc);
     }
@@ -2958,14 +2970,20 @@ static void results_screen(void)
     draw_background(res.bg_results, WHITE);
     gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(0, 0, 0, 90));
     panel(40, 30, 880, 470);
-    font_draw_fit(res.title, result.failed ? "SONG FAILED" : s ? s->name : "", SCREEN_W / 2, 48, 52, 820,
-                  result.failed ? RGBA(255, 90, 70, 255) : RGBA(255, 220, 140, 255), ALIGN_CENTER);
+    if (result.battle)
+        font_draw_fit(res.title, result.battle == 1 ? "YOU WIN!" : "RIVAL WINS", SCREEN_W / 2, 48, 52, 820,
+                      result.battle == 1 ? RGBA(120, 230, 120, 255) : RGBA(255, 90, 70, 255), ALIGN_CENTER);
+    else
+        font_draw_fit(res.title, result.failed ? "SONG FAILED" : s ? s->name : "", SCREEN_W / 2, 48, 52, 820,
+                      result.failed ? RGBA(255, 90, 70, 255) : RGBA(255, 220, 140, 255), ALIGN_CENTER);
     if (s) {
         // failed, the big line doesn't name the song
         char who[200];
         snprintf(who, sizeof(who), "%s  -  %s", s->name, s->artist);
-        font_draw_fit(res.ui, result.failed ? who : s->artist, SCREEN_W / 2, 104, 26, 820, RGBA(230, 230, 230, 255),
-                      ALIGN_CENTER);
+        if (result.battle)
+            snprintf(who, sizeof(who), "%s  -  you %d, rival %d", s->name, result.score, result.rival_score);
+        font_draw_fit(res.ui, result.failed || result.battle ? who : s->artist, SCREEN_W / 2, 104, 26, 820,
+                      RGBA(230, 230, 230, 255), ALIGN_CENTER);
     }
     draw_cover(art_for == sel ? art : NULL, 84, 150, 200);
     char t[96];
