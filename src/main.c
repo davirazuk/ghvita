@@ -2210,7 +2210,7 @@ static int setlist_find(int song)
 
 static void list_menu_update(void)
 {
-    enum { ROWS = 9 };
+    enum { ROWS = 10 };
     Song * s = songs_get(sel);
     if (repeat & BTN_UP)
         list_row = (list_row + ROWS - 1) % ROWS;
@@ -2270,6 +2270,21 @@ static void list_menu_update(void)
         else if (list_row == 8) {
             updates_check();
             list_menu = false;
+        } else if (list_row == 9 && view_n) {
+            // a gig of five songs picked at random from what the list shows, played as a setlist
+            setlist_n = 0;
+            for (int tries = 0; setlist_n < 5 && setlist_n < view_n && tries < 200; tries++) {
+                int k = view[rand() % view_n];
+                if (setlist_find(k) < 0)
+                    setlist[setlist_n++] = k;
+            }
+            setlist_at = 0;
+            sel = setlist[0];
+            list_menu = false;
+            stop_preview();
+            open_select(songs_get(sel));
+            pressed = repeat = 0;
+            return;
         }
     }
     if (pressed & (BTN_CIRCLE | BTN_SELECT)) {
@@ -2282,8 +2297,8 @@ static void list_menu_update(void)
 static void list_menu_draw(const Song * s)
 {
     gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(0, 0, 0, 170));
-    panel(200, 70, 560, 426);
-    char rows[9][64];
+    panel(200, 62, 560, 440);
+    char rows[10][64];
     snprintf(rows[0], sizeof(rows[0]), "Sort by   %s", sort_name(cfg.sort));
     snprintf(rows[1], sizeof(rows[1]), "Show   %s", show_name());
     snprintf(rows[2], sizeof(rows[2]), "%s", s && s->fav ? "Take out of favourites" : "Add to favourites");
@@ -2297,10 +2312,11 @@ static void list_menu_draw(const Song * s)
         snprintf(rows[8], sizeof(rows[8]), "Checking for newer charts %d/%d", done, total);
     else
         snprintf(rows[8], sizeof(rows[8]), "Check for newer charts");
-    for (int i = 0; i < 9; i++) {
-        float y = 86 + i * 44;
+    snprintf(rows[9], sizeof(rows[9]), "Random gig: 5 songs from this list");
+    for (int i = 0; i < 10; i++) {
+        float y = 78 + i * 42;
         if (i == list_row)
-            select_bar(224, y - 4, 512, 42, WHITE);
+            select_bar(224, y - 4, 512, 40, WHITE);
         font_draw_fit(res.ui, rows[i], SCREEN_W / 2, y + 2, 28, 460, i == list_row ? RGBA(255, 230, 150, 255)
                                                                                    : RGBA(220, 215, 205, 255), ALIGN_CENTER);
     }
@@ -2629,6 +2645,11 @@ static void draw_select(const Song * s, bool loading)
                       ALIGN_CENTER);
     } else
         font_draw(res.ui, "Not played yet", 770, 404, 22, RGBA(180, 178, 172, 255), ALIGN_CENTER);
+    if (setlist_at >= 0 && setlist_n > 1 && !tour_on) {
+        char t2[48];
+        snprintf(t2, sizeof(t2), "Setlist: song %d of %d", setlist_at + 1, setlist_n);
+        font_draw_fit(res.ui, t2, SCREEN_W / 2, 74, 22, 560, RGBA(255, 200, 120, 255), ALIGN_CENTER);
+    }
     if (tour_on) {
         char t2[80];
         snprintf(t2, sizeof(t2), "%s%s", tour_boss() ? "Boss battle at " : tour_slot == TOUR_ENCORE ? "Encore at " : "Live at ",
