@@ -57,6 +57,7 @@ static uint8_t sel_diffs[PART_COUNT];   // the difficulties each part of the cho
 static int menu_index;
 static Result result;
 static int result_ach[6], result_ach_n;   // achievements this song unlocked
+static int result_medal;                  // a better medal than the chart had, or 0
 static bool result_best, result_daily;   // a new best; today's daily song done
 // the results screen's other page: this chart's last plays (this one last)
 #define HIST_MAX 10
@@ -1830,6 +1831,38 @@ static bool song_matches(const Song * s, const char * text)
     return true;
 }
 
+// a chart's medal from its best: 0 none, 1 bronze (4 stars), 2 silver (95% of the notes), 3 gold (full combo)
+enum { MEDAL_NONE, MEDAL_BRONZE, MEDAL_SILVER, MEDAL_GOLD };
+static const char * const medal_names[] = {"", "BRONZE", "SILVER", "GOLD"};
+static const uint32_t medal_cols[] = {0, RGBA(205, 127, 50, 255), RGBA(200, 205, 215, 255), RGBA(255, 205, 60, 255)};
+
+static int medal_of(const Score * b)
+{
+    return b->fc ? MEDAL_GOLD : b->percent >= 95 ? MEDAL_SILVER : b->stars >= 4 ? MEDAL_BRONZE : MEDAL_NONE;
+}
+
+static void draw_medal(int m, float x, float y, float r)
+{
+    if (!m)
+        return;
+    gfx_rect(x - r, y - r, 2 * r, 2 * r, RGBA(0, 0, 0, 160));
+    gfx_rect(x - r + 2, y - r + 2, 2 * r - 4, 2 * r - 4, medal_cols[m]);
+    char c[2] = {medal_names[m][0], 0};
+    font_draw(res.ui, c, x, y - r * 0.8f, r * 1.5f, RGBA(40, 30, 20, 255), ALIGN_CENTER);
+}
+
+// all the medals won, over every song: {bronze, silver, gold}
+static void medal_totals(int out[4])
+{
+    memset(out, 0, 4 * sizeof(int));
+    for (int i = 0; i < songs_count(); i++) {
+        const Song * s = songs_get(i);
+        for (int p = 0; p < PART_COUNT; p++)
+            for (int d = 0; d < DIFF_COUNT; d++)
+                out[medal_of(&s->best[p][d])]++;
+    }
+}
+
 // five stars or better on any part at any difficulty
 static bool song_starred(const Song * s)
 {
@@ -2299,7 +2332,11 @@ static void draw_select(const Song * s, bool loading)
         const Score * b = &s->best[sel_part][d];
         if (b->stars)
             draw_stars(b->stars, 520, y + 4, 24);
+        draw_medal(medal_of(b), 668, y + 16, 13);
     }
+    // what the medals ask for, under the rows
+    font_draw(res.ui, "Medals:  Bronze 4 stars   Silver 95% of notes   Gold full combo", SCREEN_W / 2, 446, 18,
+              RGBA(190, 185, 175, 255), ALIGN_CENTER);
     if (tour_on) {
         char t2[80];
         snprintf(t2, sizeof(t2), "%s%s", tour_slot == TOUR_ENCORE ? "Encore at " : "Live at ",
@@ -2690,10 +2727,13 @@ static void finish_song(int how)
     game_log_whammy();
     Song * s = songs_get(sel);
     result_best = false;
+    result_medal = 0;
     if (s && !result.failed) {
         Score sc = {result.score, (uint8_t)result.stars,
                     (uint8_t)(result.notes_total ? result.notes_hit * 100 / result.notes_total : 0), result.fc};
         result_best = result.score > s->best[result.part][result.diff].score;
+        int had = medal_of(&s->best[result.part][result.diff]), got = medal_of(&sc);
+        result_medal = got > had ? got : 0;
         if (!autoplay)
             songs_save_score(s, result.part, result.diff, sc);
     }
@@ -3032,6 +3072,12 @@ static void results_screen(void)
     }
     if (result_best)
         font_draw_shadow(res.title, "NEW BEST!", 870, 148, 36, RGBA(120, 220, 255, 255), ALIGN_RIGHT);
+    if (result_medal) {
+        char d[48];
+        snprintf(d, sizeof(d), "%s MEDAL!", medal_names[result_medal]);
+        draw_medal(result_medal, 70, 54, 16);
+        font_draw_shadow(res.title, d, 96, 38, 32, medal_cols[result_medal], ALIGN_LEFT);
+    }
     for (int i = 0; i < result_ach_n && i < 2; i++) {
         // what this song unlocked, under the stars
         char d[96];
@@ -3902,6 +3948,15 @@ static void career_screen(void)
     else
         snprintf(line, sizeof(line), "%d stars", career.stars);
     font_draw(res.ui, line, SCREEN_W / 2, 154, 24, RGBA(220, 215, 205, 255), ALIGN_CENTER);
+    int medals[4];
+    medal_totals(medals);
+    for (int m = MEDAL_GOLD, k = 0; m >= MEDAL_BRONZE; m--, k++) {
+        // gold, silver, bronze: how many charts have each
+        float x = SCREEN_W / 2 - 150 + k * 120;
+        draw_medal(m, x, 64, 12);
+        snprintf(line, sizeof(line), "%d", medals[m]);
+        font_draw_shadow(res.ui, line, x + 18, 52, 24, medal_cols[m], ALIGN_LEFT);
+    }
     int fav = 0;
     for (int i = 1; i < PART_COUNT; i++)
         if (career.part_plays[i] > career.part_plays[fav])
