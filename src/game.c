@@ -23,7 +23,7 @@
 #define SUS_DROP_GRACE 0.12
 #define SUS_SLACK 0.09
 #define HIT_LOG 16
-#define SPARKS 40
+#define SPARKS 96
 #define FAIL_FRAMES 75
 
 enum { PENDING, HIT, MISSED };
@@ -1933,7 +1933,7 @@ static void hit_note(int i)
     for (int l = 0; l < G.lanes && struck; l++) {
         if (!(n->frets & (1 << l)))
             continue;
-        for (int k = 0; k < 4; k++) {
+        for (int k = 0; k < 7; k++) {
             typeof(&G.spark[0]) sp = &G.spark[G.spark_next++ % SPARKS];
             float a = (rand() % 628) / 100.0f;
             sp->x = lane_x(l);
@@ -3166,6 +3166,38 @@ static void draw_flames(void)
         lay(x, 0.05f, 0, 1.2f, 1.0f, glow, with_alpha(lane_colour[lane_art(l)], 1 - (float)since / 0.32f));
     }
     const Sprite * dot = atlas_get(res.game, "glow");
+    const Sprite * flare = atlas_get(res.game, "flare");
+    for (int l = 0; l < G.lanes && cfg.fire != 2; l++) {
+        double since = G.t - G.flame_t[l];
+        if (since < 0 || since > 0.3)
+            continue;
+        float x = lane_x(l), k = (float)since;
+        uint32_t lc = G.sp_active ? RGBA(150, 220, 255, 255) : lane_colour[lane_art(l)];
+        // the hit: a white-hot flash over the cup for a tenth of a second
+        if (k < 0.12f) {
+            float a = 1 - k / 0.12f, sz = 1.3f + k * 4;
+            lay(x, 0.08f, 0, sz, sz * 0.8f, flare, with_alpha(WHITE, 0.85f * a));
+            lay(x, 0.07f, 0, sz * 1.5f, sz * 1.2f, dot, with_alpha(lc, 0.9f * a));
+        }
+        // and a ring of light running out across the neck
+        float r = 0.35f + k * 3.2f, ra = 1 - k / 0.3f;
+        for (int j = 0; j < 14; j++) {
+            float ang = j * 6.2831853f / 14;
+            float px = x + cosf(ang) * r * 0.9f, pz = sinf(ang) * r * 0.55f;
+            board(px, 0.04f, pz, 0.2f, 0.2f, dot, 0, 0, 1, 1, with_alpha(lc, 0.7f * ra * ra));
+        }
+    }
+    // a held sustain: its cup burns steady, a flicker on top
+    for (int k = 0; k < MAX_SUS; k++) {
+        if (G.sus[k].note < 0 || G.sus[k].lost_t >= 0)
+            continue;
+        for (int l = 0; l < G.lanes; l++)
+            if (G.sus[k].frets & (1 << l)) {
+                float fl = 0.75f + 0.25f * sinf((float)G.t * 40 + l * 1.7f);
+                uint32_t lc = G.sp_active ? RGBA(150, 220, 255, 255) : lane_colour[lane_art(l)];
+                lay(lane_x(l), 0.06f, 0, 1.9f, 1.5f, dot, with_alpha(lc, 0.55f * fl));
+            }
+    }
     for (int i = 0; i < SPARKS; i++)
         if (G.spark[i].life > 0)
             board(G.spark[i].x, G.spark[i].y, G.spark[i].z, 0.24f, 0.24f, dot, 0, 0, 1, 1,
