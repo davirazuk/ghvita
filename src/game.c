@@ -4,7 +4,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/stat.h>
 #include "game.h"
+#include "player.h"
 #include "vocals.h"
 #include "res.h"
 #include "audio.h"
@@ -167,6 +169,10 @@ static struct {
     int ramp, target;                   // speed up by ramp % (0 off) after each clear, up to target %
     int runs, best;                     // times through, best % of notes
 } practice;
+static void ghost_start(const Song * song, int part, int diff);
+static void ghost_track(void);
+static void ghost_finish(bool failed);
+static void draw_ghost(void);
 
 // -------------------------------------------------------------------------------------------------------- helpers
 
@@ -1476,6 +1482,7 @@ bool game_start(Song * song, int part, int diff)
     G.part_id = part;
     G.diff = diff;
     G.beat_best = song->best[part][diff].score;
+    ghost_start(song, part, diff);
     const Part * p = G.part;
     G.state = malloc(p->note_count + 1);
     G.got = malloc(p->note_count + 1);
@@ -1650,6 +1657,7 @@ Result game_result(void)
 {
     Result r;
     memset(&r, 0, sizeof(r));
+    ghost_finish(G.failed);
     r.part = G.part_id;
     r.diff = G.diff;
     r.score = (int)G.score;
@@ -2469,6 +2477,7 @@ int game_update(const Pad * pad, uint32_t pressed)
     if (G.paused || !G.part)
         return GAME_PAUSE;
     G.t = audio_song_time() - cfg.offset_ms / 1000.0;
+    ghost_track();
     // failed: the song winds down like a tape, the board goes red, then the results
     if (G.failed) {
         if (G.fail_frames == 0) {
@@ -3119,6 +3128,75 @@ static void draw_keys(void)
 }
 
 // percent of the notes so far, and a mark while nothing's gone wrong
+
+// ------------------------------------------------------------------------------------------------------------ ghost
+// The best run on a chart, its score every half second: the HUD races it ("GHOST +1200"). A new best replaces it.
+// ghosts/<song folder>.<part>.<diff> in the player's folder.
+#define GHOST_MAX 2400                  // 20 minutes
+static struct {
+    int ref[GHOST_MAX], ref_n;          // the best run's
+    int rec[GHOST_MAX], rec_n;          // this run's
+    char path[600];
+} ghost;
+
+static void ghost_start(const Song * song, int part, int diff)
+{
+    ghost.ref_n = ghost.rec_n = 0;
+    ghost.path[0] = 0;
+    if (practice.on)
+        return;
+    const char * base = strrchr(song->folder, '/');
+    base = base ? base + 1 : song->folder;
+    char dir[420];
+    snprintf(dir, sizeof(dir), "%sghosts", player_dir());
+    mkdir(dir, 0777);
+    snprintf(ghost.path, sizeof(ghost.path), "%s/%s.%d.%d", dir, base, part, diff);
+    FILE * f = fopen(ghost.path, "r");
+    if (!f)
+        return;
+    while (ghost.ref_n < GHOST_MAX && fscanf(f, "%d", &ghost.ref[ghost.ref_n]) == 1)
+        ghost.ref_n++;
+    fclose(f);
+}
+
+static void ghost_track(void)
+{
+    if (!ghost.path[0] || G.t < 0)
+        return;
+    int k = (int)(G.t * 2);
+    while (ghost.rec_n <= k && ghost.rec_n < GHOST_MAX)
+        ghost.rec[ghost.rec_n++] = (int)G.score;
+}
+
+// the run's over: kept when it beat the one there was
+static void ghost_finish(bool failed)
+{
+    if (!ghost.path[0] || failed || G.autoplay || practice.on || !ghost.rec_n)
+        return;
+    int had = ghost.ref_n ? ghost.ref[ghost.ref_n - 1] : 0;
+    ghost.rec[ghost.rec_n - 1] = (int)G.score;
+    if ((int)G.score <= had)
+        return;
+    FILE * f = fopen(ghost.path, "w");
+    if (!f)
+        return;
+    for (int i = 0; i < ghost.rec_n; i++)
+        fprintf(f, "%d\n", ghost.rec[i]);
+    fclose(f);
+}
+
+static void draw_ghost(void)
+{
+    if (!ghost.ref_n || G.t < 0 || cfg.no_ghost)
+        return;
+    int k = (int)(G.t * 2);
+    int then = ghost.ref[k < ghost.ref_n ? k : ghost.ref_n - 1], d = (int)G.score - then;
+    char t[40];
+    snprintf(t, sizeof(t), "GHOST %+d", d);
+    font_draw_shadow(res.ui, t, SCREEN_W - 16, 214, 22, d >= 0 ? RGBA(130, 230, 150, 255) : RGBA(255, 140, 120, 255),
+                     ALIGN_RIGHT);
+}
+
 static void draw_live_stats(void)
 {
     int judged = G.hits + G.misses;
@@ -3295,6 +3373,7 @@ static void draw_hud(void)
             snprintf(t, sizeof(t), "PRACTICE  %d%%", (int)(practice.speed * 100 + 0.5f));
         font_draw_shadow(res.ui, t, SCREEN_W - 16, 44, 22, RGBA(255, 225, 150, 255), ALIGN_RIGHT);
     }
+    draw_ghost();
     if (!G.vocal) {
         draw_live_stats();
         draw_timing_bar();

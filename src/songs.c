@@ -825,6 +825,8 @@ void config_load(void)
             cfg.timing_bar = n != 0;
         else if (strcmp(k, "live_stats") == 0)
             cfg.live_stats = n != 0;
+        else if (strcmp(k, "no_ghost") == 0)
+            cfg.no_ghost = n != 0;
         else if (strcmp(k, "vanish") == 0)
             cfg.vanish = n != 0;
         else if (strcmp(k, "no_miss_sound") == 0)
@@ -936,6 +938,7 @@ void config_save(void)
             cfg.no_popups, cfg.timing_bar, cfg.live_stats, cfg.vanish, cfg.no_miss_sound, cfg.no_rear_whammy, cfg.no_bend, cfg.no_countdown);
     fprintf(f, "double_kick = %d\nfive_pads = %d\neasy_sustains = %d\nno_count_in = %d\nstage_screens = %d\nno_progress = %d\ncup_skin = %d\n", cfg.double_kick, cfg.five_pads, cfg.easy_sustains,
             cfg.no_count_in, cfg.stage_screens, cfg.no_progress, cfg.cup_skin);
+    fprintf(f, "no_ghost = %d\n", cfg.no_ghost);
     fclose(f);
     remove(path);
     rename(tmp, path);
