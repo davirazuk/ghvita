@@ -2910,6 +2910,17 @@ static void practice_screen(void)
         if (sel_part != PART_VOCALS) {
             snprintf(t, sizeof(t), "%d", pr[i].notes);
             font_draw(res.ui, t, 572, y + 15, 22, RGBA(255, 200, 110, 255), ALIGN_RIGHT);
+            // how dense the section is (notes a second against the song's busiest): the hard parts stand out
+            float secs = (float)(pr[i + 1].t - pr[i].t), dens = secs > 0.5f ? pr[i].notes / secs : 0, top = 0.01f;
+            for (int k = 0; k < pr_count; k++) {
+                float sk = (float)(pr[k + 1].t - pr[k].t);
+                if (sk > 0.5f && pr[k].notes / sk > top)
+                    top = pr[k].notes / sk;
+            }
+            float f = dens / top;
+            uint32_t dc = f > 0.8f ? RGBA(240, 80, 60, 255) : f > 0.5f ? RGBA(245, 180, 60, 255) : RGBA(110, 210, 110, 255);
+            gfx_rect(430, y + 44, 140, 4, RGBA(0, 0, 0, 160));
+            gfx_rect(430, y + 44, 140 * f, 4, dc);
         }
     }
     if (pr_top > 0)
@@ -5204,6 +5215,7 @@ static void news_screen(void)
 {
     static const char * const lines[] = {
         "Star Power notes glitter as they come. The band leaps when a chorus hits.",
+        "Practice: each section shows how dense it is, so the hard parts stand out. Smoke rolls after the chorus jets.",
         "GIG COMPLETE!: a setlist or random gig ends on a summary of the whole gig.",
         "Held frets light their lane. The screen edges pulse red when you're about to fail.",
         "The multiplier bursts with light as it goes up. Confetti on results for a full combo or a new best.",
