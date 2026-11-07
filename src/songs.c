@@ -403,7 +403,8 @@ static void load_scores(void)
             continue;
         *tab = 0;
         int part, diff, score, stars, percent, fc;
-        if (sscanf(tab + 1, "%d %d %d %d %d %d", &part, &diff, &score, &stars, &percent, &fc) != 6)
+        long when = 0;      // lines from before build 52 have no time
+        if (sscanf(tab + 1, "%d %d %d %d %d %d %ld", &part, &diff, &score, &stars, &percent, &fc, &when) < 6)
             continue;
         if (part < 0 || part >= PART_COUNT || diff < 0 || diff >= DIFF_COUNT)
             continue;
@@ -411,6 +412,8 @@ static void load_scores(void)
             if (strcmp(base_name(songs[i].folder), line) == 0) {
                 Score * b = &songs[i].best[part][diff];
                 songs[i].plays++;
+                if (when > songs[i].last_played)
+                    songs[i].last_played = when;
                 if (score > b->score) {
                     b->score = score;
                     b->stars = stars;
@@ -469,6 +472,7 @@ int songs_scan(void (*progress)(int found, const char * converting))
     for (int i = 0; i < count; i++) {
         memset(songs[i].best, 0, sizeof(songs[i].best));
         songs[i].plays = 0;
+        songs[i].last_played = 0;
         songs[i].fav = false;
     }
     if (lib_changed || known != count)
@@ -692,9 +696,56 @@ void songs_save_score(Song * s, int part, int diff, Score score)
     FILE * f = fopen(path, "a");
     if (!f)
         return;
-    fprintf(f, "%s\t%d %d %d %d %d %d\n", base_name(s->folder), part, diff, score.score, score.stars, score.percent,
-            score.fc);
+    long now = (long)time(NULL);
+    fprintf(f, "%s\t%d %d %d %d %d %d %ld\n", base_name(s->folder), part, diff, score.score, score.stars, score.percent,
+            score.fc, now);
     fclose(f);
+    s->last_played = now;
+}
+
+int songs_history(const Song * s, int part, int diff, Played * out, int max)
+{
+    char path[400];
+    snprintf(path, sizeof(path), "%sscores.txt", plat_data_dir());
+    FILE * f = fopen(path, "r");
+    if (!f || max <= 0) {
+        if (f)
+            fclose(f);
+        return 0;
+    }
+    const char * name = base_name(s->folder);
+    char line[600];
+    int n = 0;          // a ring of the newest max, unrolled at the end
+    while (fgets(line, sizeof(line), f)) {
+        char * tab = strchr(line, '\t');
+        if (!tab)
+            continue;
+        *tab = 0;
+        if (strcmp(line, name))
+            continue;
+        int p, d, score, stars, percent, fc;
+        long when = 0;
+        if (sscanf(tab + 1, "%d %d %d %d %d %d %ld", &p, &d, &score, &stars, &percent, &fc, &when) < 6 || p != part ||
+            d != diff)
+            continue;
+        Played * e = &out[n % max];
+        e->score.score = score;
+        e->score.stars = (uint8_t)stars;
+        e->score.percent = (uint8_t)percent;
+        e->score.fc = (uint8_t)fc;
+        e->when = when;
+        n++;
+    }
+    fclose(f);
+    if (n > max) {
+        Played tmp[64];
+        int k = max > 64 ? 64 : max;
+        for (int i = 0; i < k; i++)
+            tmp[i] = out[(n + i) % max];
+        memcpy(out, tmp, sizeof(Played) * k);
+        n = k;
+    }
+    return n;
 }
 
 // ------------------------------------------------------------------------------------------------------- settings

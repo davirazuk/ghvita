@@ -54,6 +54,11 @@ static uint8_t sel_diffs[PART_COUNT];   // the difficulties each part of the cho
 static int menu_index;
 static Result result;
 static bool result_best;
+// the results screen's other page: this chart's last plays (this one last)
+#define HIST_MAX 10
+static Played hist[HIST_MAX];
+static int hist_n;
+static bool results_history, hist_has_this;   // this play is hist's last (it was saved)
 static int options_from;
 // calibration
 static double calib_hits[32];
@@ -2517,6 +2522,9 @@ static void finish_song(int how)
         if (!autoplay)
             songs_save_score(s, result.part, result.diff, sc);
     }
+    hist_n = s && !practicing ? songs_history(s, result.part, result.diff, hist, HIST_MAX) : 0;
+    hist_has_this = s && !result.failed && !autoplay;
+    results_history = false;
     if (!autoplay && !practicing)
         career_add(result.part, result.score, result.stars, result.notes_hit, result.notes_total, result.best_streak,
                    result.overhits, result.played_s, result.failed, result.fc);
@@ -2711,6 +2719,10 @@ static void results_screen(void)
         go(pr_count ? S_PRACTICE : S_SELECT);
         return;
     }
+    if ((pressed & (BTN_L | BTN_R | BTN_SELECT)) && hist_n >= (hist_has_this ? 2 : 1)) {
+        ui_sound(SND_UI_MOVE);
+        results_history = !results_history;
+    }
     if ((pressed & BTN_TRIANGLE) && s) {
         ui_sound(SND_UI_SELECT);
         if (game_start(s, result.part, result.diff)) {
@@ -2775,7 +2787,41 @@ static void results_screen(void)
     bool strip = false;
     for (int i = 0; i < RESULT_STRIP; i++)
         strip |= result.strip[i] != 255;
-    if (result.fc)
+    if (results_history) {
+        // the last plays as bars, this one lit; the best and the average beside
+        const float x = 84, w = 792, top = 396, h = 34;
+        int best = 0;
+        long sum = 0;
+        for (int i = 0; i < hist_n; i++) {
+            best = hist[i].score.score > best ? hist[i].score.score : best;
+            sum += hist[i].score.score;
+        }
+        gfx_rect(x - 3, top - 3, w + 6, h + 6, RGBA(0, 0, 0, 200));
+        float cell = w / HIST_MAX;
+        for (int i = 0; i < hist_n; i++) {
+            const Score * sc = &hist[i].score;
+            float bh = best ? h * sc->score / (float)best : 0;
+            bh = bh < 3 ? 3 : bh;
+            bool last = i == hist_n - 1 && hist_has_this;
+            uint32_t c = last ? RGBA(255, 210, 90, 255) : sc->fc ? RGBA(120, 220, 255, 255) : RGBA(150, 150, 160, 255);
+            gfx_rect(x + i * cell + 4, top + h - bh, cell - 8, bh, c);
+            char v[16];
+            snprintf(v, sizeof(v), "%d%%", sc->percent);
+            font_draw(res.ui, v, x + i * cell + cell / 2, top + h - 18, 16,
+                      bh >= 18 ? RGBA(20, 20, 20, 255) : RGBA(230, 230, 230, 255), ALIGN_CENTER);
+        }
+        char line[120];
+        snprintf(line, sizeof(line), "Last %d %s   best %d   average %ld", hist_n, hist_n == 1 ? "play" : "plays", best,
+                 sum / hist_n);
+        font_draw_fit(res.ui, line, x, 436, 24, 600, RGBA(220, 210, 200, 255), ALIGN_LEFT);
+        int before = hist_n - (hist_has_this ? 2 : 1);   // the play before this one
+        if (before >= 0 && !result.failed) {
+            int prev = hist[before].score.score, d = result.score - prev;
+            snprintf(line, sizeof(line), "%+d vs last time", d);
+            font_draw_fit(res.ui, line, x + w, 436, 24, 260, d >= 0 ? RGBA(130, 230, 130, 255) : RGBA(255, 150, 120, 255),
+                          ALIGN_RIGHT);
+        }
+    } else if (result.fc)
         font_draw_shadow(res.title, "FULL COMBO!", SCREEN_W / 2, 392, 56, RGBA(255, 210, 60, 255), ALIGN_CENTER);
     else if (strip) {
         // the song start to end: green all hit, down to red; it fills in as the stars come
@@ -2804,8 +2850,13 @@ static void results_screen(void)
     }
     if (result_best)
         font_draw_shadow(res.title, "NEW BEST!", 870, 148, 36, RGBA(120, 220, 255, 255), ALIGN_RIGHT);
-    static const char * help[] = {"btn_cross", "Continue", "btn_triangle", "Retry", "btn_square", "Practice it"};
-    help_bar(help, results_can_practice() ? 6 : 4);
+    const char * help[8] = {"btn_cross", "Continue", "btn_triangle", "Retry"};
+    int nh = 4;
+    if (results_can_practice())
+        help[nh++] = "btn_square", help[nh++] = "Practice it";
+    if (hist_n >= (hist_has_this ? 2 : 1))
+        help[nh++] = "btn_r", help[nh++] = results_history ? "This play" : "History";
+    help_bar(help, nh);
     gfx_end();
 }
 
