@@ -285,6 +285,7 @@ static void draw_toast(void)
 // ------------------------------------------------------------------------------------------------------ the title
 
 static int players_row;
+static int pause_options_at = 2;   // OPTIONS' row in the pause menu (it moves when PRACTICE THIS PART shows)
 static bool players_from_title;    // the picker came up at start: back goes to the title
 
 static void title_screen(void)
@@ -2982,8 +2983,27 @@ static void play_screen(void)
 
 static void pause_screen(void)
 {
-    const char * items[] = {"RESUME", "RESTART", "OPTIONS", practicing ? "PRACTICE MENU" : "QUIT"};
-    const int n = 4;
+    // RESUME, RESTART, PRACTICE THIS PART (a named section, out of practice and the tour), OPTIONS, QUIT
+    enum { P_RESUME, P_RESTART, P_PART, P_OPTIONS, P_QUIT };
+    char part[48];
+    game_section_now(part, sizeof(part));
+    section_title(part);
+    int ids[5], n = 0;
+    ids[n++] = P_RESUME;
+    ids[n++] = P_RESTART;
+    if (part[0] && !practicing && !tour_on)
+        ids[n++] = P_PART;
+    ids[n++] = P_OPTIONS;
+    ids[n++] = P_QUIT;
+    static const char * const names[] = {"RESUME", "RESTART", "PRACTICE THIS PART", "OPTIONS", "QUIT"};
+    const char * items[5];
+    for (int i = 0; i < n; i++)
+        items[i] = ids[i] == P_QUIT && practicing ? "PRACTICE MENU" : names[ids[i]];
+    if (menu_index >= n)
+        menu_index = 0;
+    for (int i = 0; i < n; i++)
+        if (ids[i] == P_OPTIONS)
+            pause_options_at = i;      // where Options comes back to
     if (repeat & BTN_UP) {
         menu_index = (menu_index + n - 1) % n;
         ui_sound(SND_UI_MOVE);
@@ -2995,14 +3015,31 @@ static void pause_screen(void)
     bool resume = pressed & (BTN_START | BTN_CIRCLE);
     if (pressed & BTN_CROSS) {
         ui_sound(SND_UI_SELECT);
-        if (menu_index == 0)
+        int id = ids[menu_index];
+        if (id == P_RESUME)
             resume = true;
-        else if (menu_index == 1) {
+        else if (id == P_RESTART) {
             game_pause(false);
             game_restart();
             go(S_PLAY);
             return;
-        } else if (menu_index == 2) {
+        } else if (id == P_PART) {
+            // straight into practice on the section the song was in, at the speed practice had last
+            // (not game_result: half a run mustn't be kept as the chart's best ghost)
+            Song * s = songs_get(sel);
+            game_playing(&sel_part, &sel_diff);
+            game_stop();
+            setlist_at = -1;
+            if (s)
+                read_sections(s);
+            for (int i = 0; i < pr_count; i++)
+                if (!strcmp(pr[i].name, part))
+                    pr_from = pr_to = pr_focus = i;
+            pr_step = PR_STEP_SET;
+            pr_set_row = 0;
+            go(pr_count ? S_PRACTICE : S_SELECT);
+            return;
+        } else if (id == P_OPTIONS) {
             options_from = S_PAUSE;
             go(S_OPTIONS);
             return;
@@ -3029,14 +3066,21 @@ static void pause_screen(void)
     // GHWT's stitched patch with its emblem
     gfx_sprite(atlas_get(res.hud, "dialog_bg"), SCREEN_W / 2 - 210, 40, 420, 420, WHITE);
     font_draw_shadow(res.title, "PAUSED", SCREEN_W / 2, 138, 46, RGBA(255, 225, 160, 255), ALIGN_CENTER);
+    // the rows close up a little when there are five
+    float step = n > 4 ? 44 : 54, size = n > 4 ? 34 : 40;
     for (int i = 0; i < n; i++) {
-        float y = 200 + i * 54;
+        float y = 192 + i * step;
         if (i == menu_index)
-            gfx_sprite(atlas_get(res.hud, "wor_select"), SCREEN_W / 2 - 160, y - 4, 320, 48, WHITE);
-        font_draw_shadow(res.title, items[i], SCREEN_W / 2, y, 40, i == menu_index ? RGBA(255, 230, 150, 255)
-                                                                                    : RGBA(210, 200, 190, 255),
-                         ALIGN_CENTER);
+            gfx_sprite(atlas_get(res.hud, "wor_select"), SCREEN_W / 2 - 170, y - 4, 340, step - 4, WHITE);
+        uint32_t col = i == menu_index ? RGBA(255, 230, 150, 255) : RGBA(210, 200, 190, 255);
+        if (font_width(res.title, items[i], size) > 320)
+            font_draw_fit(res.title, items[i], SCREEN_W / 2, y, size, 320, col, ALIGN_CENTER);
+        else
+            font_draw_shadow(res.title, items[i], SCREEN_W / 2, y, size, col, ALIGN_CENTER);
     }
+    // where in the song: the section, and a bar
+    if (part[0])
+        font_draw_fit(res.ui, part, SCREEN_W / 2, 412, 18, 300, RGBA(255, 215, 110, 255), ALIGN_CENTER);
     int song_pct, notes_pct;
     game_status(&song_pct, &notes_pct);
     char line[64];
@@ -3051,7 +3095,9 @@ static void pause_screen(void)
         snprintf(more, sizeof(more), "   %d %s, best %d%%", pruns, pruns == 1 ? "run" : "runs", pbest);
         strncat(line, more, sizeof(line) - strlen(line) - 1);
     }
-    font_draw_shadow(res.ui, line, SCREEN_W / 2, 418, 22, RGBA(225, 215, 200, 255), ALIGN_CENTER);
+    font_draw_shadow(res.ui, line, SCREEN_W / 2, 432, 20, RGBA(225, 215, 200, 255), ALIGN_CENTER);
+    gfx_rect(SCREEN_W / 2 - 130, 458, 260, 5, RGBA(0, 0, 0, 180));
+    gfx_rect(SCREEN_W / 2 - 130, 458, 260 * song_pct / 100.0f, 5, RGBA(255, 200, 90, 255));
     gfx_end();
 }
 
@@ -3842,7 +3888,7 @@ static void options_screen(void)
         int back = options_from;
         go(back);
         if (back == S_PAUSE || back == S_MAIN)
-            menu_index = back == S_MAIN ? 4 : 2;    // back on OPTIONS
+            menu_index = back == S_MAIN ? 4 : pause_options_at;    // back on OPTIONS
         return;
     }
     gfx_begin(0, 0, 0);
@@ -4688,7 +4734,7 @@ static void news_screen(void)
         "  and has a name. New attack: Speed Up. INCOMING warns you a second before one lands. Options > Game > Battle rival.",
         "GET READY shows the cover, the song's details and your best. Options' tabs fit, with more rows.",
         "The strikeline buttons lost the off-centre arch on top. Player pictures: Guitar Hero art or any album cover.",
-        "Results: how many hits were on time. Medals in the song list. Downloads and updates work again.",
+        "Pause: PRACTICE THIS PART takes you to practice on the section you were in. Medals in the song list.",
     };
     int n = (int)(sizeof(lines) / sizeof(lines[0]));
     gfx_begin(0, 0, 0);

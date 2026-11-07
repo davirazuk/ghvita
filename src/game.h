@@ -51,6 +51,10 @@ void game_pause(bool pause);
 void game_log_whammy(void);
 // how far through the song, and the percent hit so far (-1: nothing yet), for the pause screen
 void game_status(int * song_pct, int * notes_pct);
+// the chart's name for the section the song is in now, "" when it names none
+void game_section_now(char * out, int size);
+// the part and difficulty being played
+void game_playing(int * part, int * diff);
 void game_restart(void);
 void game_stop(void);
 Result game_result(void);
