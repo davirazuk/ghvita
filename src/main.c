@@ -3302,6 +3302,17 @@ static void results_screen(void)
         int shown = (int)(a * result.stars + 0.999f);
         if (shown > result.stars)
             shown = result.stars;
+        // a tick as each star lands
+        static int ticked;
+        static double ticked_for;
+        if (ticked_for != screen_t) {
+            ticked_for = screen_t;
+            ticked = 0;
+        }
+        if (shown > ticked && shown < 6) {
+            ticked = shown;
+            sound_play(res.snd[SND_STAR], 0.35f, false);
+        }
         draw_stars(shown >= 6 || (result.stars >= 6 && a >= 1) ? 6 : shown, 460, 136, 56);
     }
     int pct = result.notes_total ? result.notes_hit * 100 / result.notes_total : 0;
@@ -3309,7 +3320,13 @@ static void results_screen(void)
         const char * label;
         char value[48];
     } rows[6];
-    snprintf(rows[0].value, sizeof(rows[0].value), "%d", result.score);
+    {
+        // the score counts up as the stars come
+        float a = (float)((now_s - screen_t) / 1.2);
+        a = a > 1 ? 1 : a < 0 ? 0 : a;
+        a = 1 - (1 - a) * (1 - a) * (1 - a);
+        snprintf(rows[0].value, sizeof(rows[0].value), "%d", (int)(result.score * a));
+    }
     rows[0].label = "Score";
     snprintf(rows[1].value, sizeof(rows[1].value), "%d%%  (%d / %d)", pct, result.notes_hit, result.notes_total);
     rows[1].label = "Notes hit";
@@ -3430,8 +3447,13 @@ static void results_screen(void)
     if (result_medal) {
         char d[48];
         snprintf(d, sizeof(d), "%s MEDAL!", medal_names[result_medal]);
-        draw_medal(result_medal, 70, 54, 16);
-        font_draw_shadow(res.title, d, 96, 38, 32, medal_cols[result_medal], ALIGN_LEFT);
+        // stamped on once the stars are in: big, then settling
+        float a = (float)((now_s - screen_t - 1.3) / 0.25);
+        if (a > 0) {
+            float k = a > 1 ? 1 : a, sz = 16 * (2.2f - 1.2f * k);
+            draw_medal(result_medal, 70, 54, sz);
+            font_draw_shadow(res.title, d, 96, 38, 32, fade_alpha(medal_cols[result_medal], k), ALIGN_LEFT);
+        }
     }
     for (int i = 0; i < result_ach_n && i < 2; i++) {
         // what this song unlocked, under the stars
