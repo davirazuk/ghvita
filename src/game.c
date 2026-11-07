@@ -171,6 +171,11 @@ static struct {
     Tex * art;                          // the song's cover, for the stage's screens
     double party_t;                     // when the confetti last came down
     bool end_party;
+    double sp_on_t;                     // when Star Power last went on: the band spins round with it
+    double intro_end;                   // the camera's on the drummer for the count-in, and pulls back from here
+    bool cam_snap;                      // the next frame puts the camera straight where it's going
+    double start_t;                     // the song time the run began at (a practice run starts partway in)
+    int metro_next;                     // practice's metronome: the chart's next beat line
 } G;
 
 static struct {
@@ -627,7 +632,7 @@ static void draw_crowd(double beat)
     gfx_tex(t);
     gfx_blend(BLEND_ALPHA);
     for (int row = 0; row < 3; row++) {
-        float k = 0.4f + row * 0.3f;        // nearer rows are darker: the light's behind them
+        float k = 0.4f + row * 0.3f;       // nearer rows are darker: the light's behind them
         for (int i = 0; i < 3; i++)
             lit[i] = (0.03f + G.stage_col[i] * 0.05f + G.key_col[i] * 0.14f) * (1.1f - k);
         uint32_t col = col3(lit, 1);
@@ -637,8 +642,8 @@ static void draw_crowd(double beat)
         float x = -40 + sinf((float)G.t * (0.3f + row * 0.1f) + row) * 16 + row * 90.0f;
         const float wid = 1100;
         float v0 = sheet * 0.25f + 0.01f, v1 = v0 + 0.23f;
-        const float p[4][3] = {{x, top, 0}, {x + wid, top, 0}, {x + wid, top + h, 0}, {x, top + h, 0}};
         const float uv[4][2] = {{0, v0}, {1, v0}, {1, v1}, {0, v1}};
+        const float p[4][3] = {{x, top, 0}, {x + wid, top, 0}, {x + wid, top + h, 0}, {x, top + h, 0}};
         const uint32_t c[4] = {col, col, col, col};
         gfx_quad(p, uv, c);
     }
@@ -805,14 +810,21 @@ static void draw_stage(void)
     static const int turns[4] = {2, 1, 3, 0};
     int slot = (int)floor(beat / 16);
     G.focus = -1;
-    if (solo)
+    bool intro = G.t < G.intro_end;
+    if (intro)
+        ;                               // the whole band, close: the camera pulls back from it as the song comes in
+    else if (solo)
         G.focus = member_me();
     else if (!G.sp_active && G.t > 0 && (slot & 1))
         G.focus = turns[(slot / 2) & 3];
     if (G.focus >= 0 && !G.band[G.focus])
         G.focus = -1;
     float zoom = 1.04f + 0.012f * G.band_loud, aim_x = 0, aim_y = 0;
-    if (G.focus >= 0) {
+    if (intro) {
+        // held about the middle of the band, at chest height, so nobody slides off the edges as it widens
+        zoom = 1.22f;
+        aim_y = (272 - 205) * (zoom - 1);
+    } else if (G.focus >= 0) {
         float m[3];
         member_spot(G.focus, m);
         zoom = 1.2f;
@@ -822,7 +834,12 @@ static void draw_stage(void)
         aim_x = aim_x > rx ? rx : aim_x < -rx ? -rx : aim_x;
         aim_y = aim_y > ry ? ry : aim_y < -ry ? -ry : aim_y;
     }
-    float glide = 1 - expf((float)-dt * 1.4f);
+    // pulling back from the count-in is slower: the stage is revealed rather than cut to
+    float glide = 1 - expf((float)-dt * (G.t < G.intro_end + 2.5 ? 0.9f : 1.4f));
+    if (G.cam_snap) {
+        glide = 1;
+        G.cam_snap = false;
+    }
     G.cam_tz += (zoom - G.cam_tz) * glide;
     G.cam_tx += (aim_x - G.cam_tx) * glide;
     G.cam_ty += (aim_y - G.cam_ty) * glide;
@@ -835,6 +852,13 @@ static void draw_stage(void)
     if (G.t > G.last_note_end && G.t > 0 && !G.end_party) {
         G.end_party = true;
         party();
+        if (G.rock >= 0.5f && !G.failed) {
+            // a song played well goes out with the jets and the lights hit white
+            G.pyro_t = G.t;
+            G.strobe_t = G.t;
+            G.kick = 0.6f;
+            G.cheer = 1;
+        }
         sound_play(res.snd[SND_APPLAUSE], cfg.crowd_vol * 0.1f, false);
     }
     stage_layer(G.venue, col3(G.stage_col, 1));
@@ -1067,6 +1091,15 @@ static void draw_band(double beat)
         float s = m[2] / ppm, w = cw * s * (1 - 0.16f * bp->turn), h = ch * s;
         // the kit stays where it stands; what's on their feet moves from the knees up, and a jump leaves the stage
         float bottom = m[1] - y0 * m[2] - (r ? hop : 0) * m[2];
+        // Star Power goes on and the front line spins round in the air, one after the other: a card turning about its
+        // middle, edge-on halfway, its back (the picture mirrored) at the half turn
+        float spun = (float)(G.t - G.sp_on_t) - (r == 1 ? 0.12f : r == 3 ? 0.24f : 0);
+        if (r && spun > 0 && spun < 0.6f) {
+            float k = spun / 0.6f;
+            k = k * k * (3 - 2 * k);
+            w *= cosf(k * 2 * pi);
+            bottom -= sinf(k * pi) * 0.22f * m[2];
+        }
         float dip = (r ? bob * (playing ? 1 : 0.5f) + bp->pulse * 0.05f : bob * 0.3f + bp->pulse * 0.035f) * m[2] +
                     slump * m[2];
         float lean = (r ? (i & 1 ? sway : -sway) * (playing ? 1 : 0.4f) : 0) * m[2];
@@ -1520,6 +1553,8 @@ static void reset_play(void)
     G.cam_z = G.cam_tz = 1.04f;
     G.cam_tx = G.cam_ty = 0;
     G.focus = -1;
+    G.sp_on_t = -100;
+    G.cam_snap = true;
     for (int i = 0; i < 6; i++) {
         G.flame_t[i] = -100;
         G.miss_t[i] = -100;
@@ -1536,6 +1571,8 @@ static void reset_play(void)
     if (G.lead_in < 1.2)
         G.lead_in = 1.2;
     G.t = -G.lead_in;
+    // the count-in is on the drummer, and as the song comes in the camera pulls back to the whole stage
+    G.intro_end = first - 1.2 < G.t + 2.6 ? first - 1.2 : G.t + 2.6;
     double from = 0;
     if (practice.on) {
         // only the stretch's notes, after a run-up of the highway's length
@@ -1552,7 +1589,12 @@ static void reset_play(void)
         G.t = practice.from - Z_FAR / G.speed - 0.6;
         from = G.t > 0 ? G.t : 0;
         G.lead_in = from - G.t;
+        G.intro_end = -100;             // straight to the notes: no camera show
     }
+    G.start_t = G.t;
+    G.metro_next = 0;
+    while (G.metro_next < G.chart->beat_count && G.chart->beats[G.metro_next].time / 1e6 < G.t)
+        G.metro_next++;
     static const int band_parts[4] = {PART_DRUMS, -1, PART_GUITAR, PART_BASS};
     for (int r = 0; r < 4; r++) {
         memset(&G.band_part[r], 0, sizeof(G.band_part[r]));
@@ -2386,6 +2428,7 @@ static void activate_sp(void)
         return;
     G.sp_active = true;
     G.kick = 1;
+    G.sp_on_t = G.t;
     G.sp_last_q = chart_quarters(G.chart, G.t);
     G.sp_flash = 1;
     G.pyro_t = G.t;
@@ -2682,18 +2725,36 @@ static void update_vocals(void)
 static void count_in(void)
 {
     const Part * p = G.part;
-    if (cfg.no_count_in || !p->note_count || G.count_done >= 4)
+    if (cfg.no_count_in || G.first >= p->note_count || G.count_done >= 4)
         return;
-    double first = p->notes[0].time / 1e6;
+    // the first note of the run: a practice run starts at its stretch, not the song's first note
+    double first = p->notes[G.first].time / 1e6;
     double beat = 60.0 / ((chart_quarters(G.chart, first + 0.5) - chart_quarters(G.chart, first)) * 120 + 1e-6);
     double at = first - (4 - G.count_done) * beat;
-    if (first > 60 || (G.count_done == 0 && at < -G.lead_in)) {
+    if (first - G.start_t > 60 || (G.count_done == 0 && at < G.start_t)) {
         G.count_done = 4;
         return;
     }
     if (G.t >= at) {
         G.count_done++;
         sound_play(res.snd[SND_DRUM_HAT], 0.55f, false);
+    }
+}
+
+// practice's metronome: a tick on every beat the chart marks, the bar's first louder
+static void metronome(void)
+{
+    if (!practice.on || !cfg.metronome || G.failed)
+        return;
+    const Chart * c = G.chart;
+    bool ticked = false;
+    while (G.metro_next < c->beat_count && c->beats[G.metro_next].time / 1e6 <= G.t) {
+        const BeatLine * b = &c->beats[G.metro_next++];
+        // a frame late is fine; a hitch that skipped several isn't worth a burst of them
+        if (!ticked && G.t - b->time / 1e6 < 0.1) {
+            sound_play(res.snd[SND_DRUM_HAT], b->kind == 0 ? 0.7f : 0.38f, false);
+            ticked = true;
+        }
     }
 }
 
@@ -2727,6 +2788,7 @@ int game_update(const Pad * pad, uint32_t pressed)
     if (pressed & BTN_START)
         return GAME_PAUSE;
     count_in();
+    metronome();
 
     // lanes held and newly pressed: buttons, then the touch screen
     uint32_t held = 0, lanes_pressed = 0;
