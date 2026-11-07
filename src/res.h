@@ -44,6 +44,7 @@ extern Res res;
 
 void res_load(void);
 // the loading screen (the title picture, text and a bar 0..1); res_load draws it as it goes
+void res_title_art(void);
 void res_loading(float done, const char * text);
 // the sound effects load on a thread after res_load: a song waits for them
 void res_wait_sounds(void);

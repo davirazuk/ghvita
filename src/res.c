@@ -86,11 +86,20 @@ static int by_string(const void * a, const void * b)
     return strcmp((const char *)a, (const char *)b);
 }
 
+// the title: World Tour's own logo on its menu wall (not the picture with a made-up edition's name on it)
+void res_title_art(void)
+{
+    draw_background(res.bg_menu, RGBA(140, 140, 140, 255));
+    gfx_rect_grad(0, 0, SCREEN_W, SCREEN_H, RGBA(0, 0, 0, 40), RGBA(0, 0, 0, 160));
+    if (res.logo)
+        gfx_sprite(&(Sprite){res.logo, 0, 0, 1, 1, 512, 370}, (SCREEN_W - 500) / 2, 34, 500, 361, WHITE);
+}
+
 void res_loading(float done, const char * text)
 {
     gfx_begin(0, 0, 0);
     gfx_2d();
-    draw_background(res.bg_title, WHITE);
+    res_title_art();
     gfx_rect_grad(0, 420, SCREEN_W, 90, RGBA(0, 0, 0, 0), RGBA(0, 0, 0, 210));
     if (res.title)
         font_draw_shadow(res.title, text, SCREEN_W / 2, 440, 34, RGBA(255, 220, 120, 255), ALIGN_CENTER);
@@ -136,8 +145,7 @@ void res_load(void)
     char a[512], b[512];
     const char * dir = plat_asset_dir();
     int64_t t0 = plat_now_us();
-    // first what the loading screen shows: the title picture (it has the logo) and the title font
-    res.bg_title = load_tex("bg_title.jpg", 0);
+    // first what the loading screen shows: World Tour's menu wall, its logo and the title font
     snprintf(a, sizeof(a), "%sfont_title.png", dir);
     snprintf(b, sizeof(b), "%sfont_title.fnt", dir);
     res.title = font_load(a, b);
