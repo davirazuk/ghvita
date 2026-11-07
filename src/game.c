@@ -3432,6 +3432,15 @@ static void draw_ghost(void)
     snprintf(t, sizeof(t), "GHOST %+d", d);
     font_draw_shadow(res.ui, t, SCREEN_W - 16, 214, 22, d >= 0 ? RGBA(130, 230, 150, 255) : RGBA(255, 140, 120, 255),
                      ALIGN_RIGHT);
+    // the race: how far through the song each run has scored, out of the best run's final score
+    int best = ghost.ref[ghost.ref_n - 1] > 0 ? ghost.ref[ghost.ref_n - 1] : 1;
+    const float w = 120, x = SCREEN_W - 16 - w, y = 240;
+    float me = (float)G.score / best, them = (float)then / best;
+    me = me > 1 ? 1 : me;
+    them = them > 1 ? 1 : them;
+    gfx_rect(x - 2, y - 2, w + 4, 14, RGBA(0, 0, 0, 170));
+    gfx_rect(x, y, w * them, 4, RGBA(200, 200, 210, 200));
+    gfx_rect(x, y + 5, w * me, 5, d >= 0 ? RGBA(130, 230, 150, 255) : RGBA(255, 140, 120, 255));
 }
 
 // ----------------------------------------------------------------------------------------------------------- battle
