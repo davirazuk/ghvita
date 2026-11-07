@@ -3176,7 +3176,8 @@ static void finish_song(int how)
                    result.overhits, result.played_s, result.failed, result.fc);
     AchPlay ap = {result.part, result.diff, result.stars, result.score, result.best_streak, result.overhits, result.sp_hit,
                   result.sp_total, result.notes_total ? result.notes_hit * 100 / result.notes_total : 0, result.failed,
-                  result.fc, practicing || result_slowed, autoplay, daily_streak(), songs_count(), result.battle, result.rival_level};
+                  result.fc, practicing || result_slowed, autoplay, daily_streak(), songs_count(), result.battle, result.rival_level,
+                  (int)(game_song_speed() * 100 + 0.5f)};
     result_ach_n = achieve_check(&ap, result_ach, 6);
     for (int i = 0; i < result_ach_n && i < 6; i++)
         plat_log("achievement: %s", achieve_get(result_ach[i])->name);

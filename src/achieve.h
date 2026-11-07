@@ -12,6 +12,7 @@ typedef struct {
     bool failed, fc, practice, autoplay;
     int daily_streak, library;
     int battle, rival;          // battle: 0 none, 1 won, 2 lost; the rival's level (0 easy .. 3 brutal)
+    int speed;                  // the song speed, % (100 as written)
 } AchPlay;
 
 int achieve_count(void);

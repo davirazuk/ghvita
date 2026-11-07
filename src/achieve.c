@@ -39,6 +39,8 @@ static const Achievement list[] = {
     {"battle1", "Rival Slayer", "Win a battle"},
     {"battle10", "Duelist", "Win 10 battles"},
     {"brutal", "Giant Killer", "Beat a Brutal rival on Expert"},
+    {"speed125", "Speed Demon", "Finish a song at 125% song speed or faster"},
+    {"speed150", "Ludicrous", "4 stars at 150% song speed"},
 };
 #define N (int)(sizeof(list) / sizeof(list[0]))
 static bool have[N];
@@ -131,6 +133,8 @@ int achieve_check(const AchPlay * p, int * out, int max)
         else if (!strcmp(id, "fc_expert")) v = done && p->fc && expert;
         else if (!strcmp(id, "five_expert")) v = done && expert && p->stars >= 5;
         else if (!strcmp(id, "gold")) v = done && p->stars >= 6;
+        else if (!strcmp(id, "speed125")) v = done && p->speed >= 125;
+        else if (!strcmp(id, "speed150")) v = done && p->speed >= 150 && p->stars >= 4;
         else if (!strcmp(id, "streak100")) v = !p->practice && p->best_streak >= 100;
         else if (!strcmp(id, "streak500")) v = !p->practice && p->best_streak >= 500;
         else if (!strcmp(id, "streak1000")) v = !p->practice && p->best_streak >= 1000;
