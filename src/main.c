@@ -5115,20 +5115,13 @@ static void news_screen(void)
 {
     static const char * const lines[] = {
         "FACE-OFF: Select on GET READY. Play, PASS THE VITA to a friend, they play the same chart, then the verdict.",
-        "Titles: show any achievement you've unlocked on your player card (Edit Player > Title).",
-        "SONG COMPLETE! as the crowd cheers before the results. The ghost race has bars. Menu highlights breathe.",
-        "Every hit flashes and sends a ring of light out; a miss flashes red; held sustains burn; every 50 streak sweeps the neck.",
-        "Star Power: the neck glows blue on the beat and comets run up the rails (no more spiky lightning).",
-        "The band is backlit in the stage's colours; cameras flash in the crowd when you're rocking.",
-        "Results: the score counts up and the stars land one by one. Menus fade in. The song list shows the cover big.",
-        "Calibrate shows the beat and where each of your taps landed. Song list: sort by Recently played.",
-        "World Tour: each leg ends on a BOSS BATTLE encore against a rival who gets tougher leg by leg.",
-        "Battles show a tug-of-war bar across the top. The song list shows every song's cover.",
-        "Fixed: the SOLO! percent could go past 100%.",
-        "Career counts your battles won. New achievements: Rival Slayer, Duelist, Giant Killer (beat a Brutal rival).",
-        "A singer's results show phrases sung, not frets. Singing along: the vocals' score sits on a dark backing.",
-        "Pause: PRACTICE THIS PART. Battle: a smarter rival, Speed Up, INCOMING warnings, Options > Game > Battle rival.",
-        "The main menu shows who's playing. New GET READY and Options screens.",
+        "Every hit flashes and rings out across the neck; misses flash red; sustains burn; streaks sweep the neck.",
+        "Star Power: the neck glows blue on the beat and comets run up the rails. The camera punches in.",
+        "The band is backlit, cameras flash in the crowd, choruses strobe the stage. SONG COMPLETE! before results.",
+        "Results count up with the stars landing one by one. Menus fade in and their highlights breathe.",
+        "Song intro card slides in with the cover. Loading screens show tips. Main menu lights drift.",
+        "Titles: show an unlocked achievement on your player card. Song list menu: Random gig of 5 songs.",
+        "The ghost race has bars. The song list shows the cover big behind it.",
     };
     int n = (int)(sizeof(lines) / sizeof(lines[0]));
     gfx_begin(0, 0, 0);
@@ -5137,9 +5130,25 @@ static void news_screen(void)
     banner("WHAT'S NEW IN THIS BUILD");
     panel(150, 96, 660, 400);
     // each item on up to two lines
-    float y = 114;
-    for (int i = 0; i < n; i++)
-        y += draw_wrapped(lines[i], 170, y, 18, 620, 2, RGBA(230, 230, 235, 255)) + 11;
+    // up and down scroll it when it runs past the panel
+    static float scroll;
+    if (repeat & BTN_DOWN)
+        scroll += 40;
+    if (repeat & BTN_UP)
+        scroll -= 40;
+    scroll = scroll < 0 ? 0 : scroll > 600 ? 600 : scroll;
+    float y = 114 - scroll, bottom = 114;
+    for (int i = 0; i < n; i++) {
+        float h = 0;
+        if (y > 100 && y < 470)
+            h = draw_wrapped(lines[i], 170, y, 18, 620, 2, RGBA(230, 230, 235, 255));
+        else
+            h = 40;
+        y += h + 11;
+        bottom = y + scroll;
+    }
+    if (scroll > bottom - 470)
+        scroll = bottom - 470 > 0 ? bottom - 470 : 0;
     font_draw_shadow(res.ui, "X  continue", SCREEN_W / 2, 498, 20, RGBA(180, 220, 255, 255), ALIGN_CENTER);
     draw_toast();
     gfx_end();
