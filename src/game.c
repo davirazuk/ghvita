@@ -3248,6 +3248,13 @@ static void draw_flames(void)
             board(px, 0.04f, pz, 0.2f, 0.2f, dot, 0, 0, 1, 1, with_alpha(lc, 0.7f * ra * ra));
         }
     }
+    // a fret held: its lane lights faintly up the neck, so the fingers show on the highway
+    for (int l = 0; l < G.lanes && !G.autoplay; l++)
+        if (G.held & (1 << l)) {
+            uint32_t lc = G.sp_active ? RGBA(150, 220, 255, 255) : lane_colour[lane_art(l)];
+            flat(lane_x(l) - 0.45f, lane_x(l) + 0.45f, -0.3f, 4.5f, 0.014f, NULL, 0, 1, with_alpha(lc, 0.22f),
+                 with_alpha(lc, 0));
+        }
     // a miss: the cup flashes red
     for (int l = 0; l < G.lanes; l++) {
         double since = G.t - G.miss_t[l];
