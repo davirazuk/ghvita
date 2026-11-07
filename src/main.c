@@ -5261,17 +5261,12 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
-        "Options > Game > Timing window: Strict, Normal or Lenient. The score counter rolls up; the crowd surges on big moments.",
-        "Fixed: a held fret's lane light tinted the notes over it; it now sits under them. The picker shows stars.",
-        "Streak achievements (100, 500, 1000) are announced the moment you earn them.",
-        "Star Power notes glitter as they come. The band leaps when a chorus hits.",
-        "Practice: each section shows how dense it is, so the hard parts stand out. Smoke rolls after the chorus jets.",
-        "GIG COMPLETE!: a setlist or random gig ends on a summary of the whole gig.",
-        "Held frets light their lane. The screen edges pulse red when you're about to fail.",
-        "The multiplier bursts with light as it goes up. Confetti on results for a full combo or a new best.",
-        "Fixed: winning a battle early said SONG COMPLETE!; quitting a face-off left the second player chosen.",
-        "Earlier: FACE-OFF, titles, tips while loading, the song intro card, camera kicks, chorus strobes,",
-        "  hit flashes and rings, the blue Star Power neck, SONG COMPLETE!, the ghost race bars.",
+        "A hit gem swells and fades at the strikeline. In slow songs the crowd holds up lighters.",
+        "The rock meter glows red and its needle trembles when you're about to fail; full, it glows green.",
+        "Options > Screen > Effects: Light turns off the heavier effects for a steadier frame rate.",
+        "Options > Game > Timing window: Strict, Normal or Lenient. The score counter rolls up.",
+        "Fixed: a held fret's lane light tinted the notes over it. Streak achievements pop up as you earn them.",
+        "Earlier: GIG COMPLETE!, FACE-OFF, titles, practice section density, smoke after the chorus jets.",
     };
     int n = (int)(sizeof(lines) / sizeof(lines[0]));
     gfx_begin(0, 0, 0);

@@ -646,6 +646,25 @@ static void draw_crowd(double beat)
 
 static void draw_flashes(void)
 {
+    // a slow song going well: lighters up in the crowd, swaying with the beat
+    double bpm = G.t > 0 ? (chart_quarters(G.chart, G.t + 0.5) - chart_quarters(G.chart, G.t)) * 120 : 120;
+    if (bpm > 1 && bpm < 96 && G.rock > 0.5f && G.t > 2) {
+        const Sprite * dot = atlas_get(res.stage, "dot");
+        double q = chart_quarters(G.chart, G.t);
+        float sway = sinf((float)q * 3.14159265f / 2);
+        gfx_blend(BLEND_ADD);
+        for (int j = 0; j < 22; j++) {
+            uint32_t h = (uint32_t)j * 2654435761u;
+            float x = (h >> 12 & 1023) / 1023.0f * 280, y = 440 + (h >> 22 & 63) * 1.4f;
+            if (h & 1)
+                x = SCREEN_W - x;
+            x += sway * (8 + (h >> 4 & 7));
+            float fl = 0.75f + 0.25f * sinf((float)G.t * (9 + (h >> 8 & 7)) + j);
+            gfx_sprite(dot, x - 9, y - 12, 18, 22, RGBA(255, 190, 90, (int)(200 * fl)));
+            gfx_sprite(dot, x - 3, y - 6, 6, 9, RGBA(255, 250, 220, (int)(230 * fl)));
+        }
+        gfx_blend(BLEND_ALPHA);
+    }
     // phones and cameras going off in the crowd: more the better it's going, a storm under Star Power
     {
         const Sprite * dot = atlas_get(res.stage, "dot");
