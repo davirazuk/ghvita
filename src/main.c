@@ -64,6 +64,7 @@ static int result_ach[6], result_ach_n;   // achievements this song unlocked
 static int result_medal;                  // a better medal than the chart had, or 0
 static bool result_best, result_daily;   // a new best; today's daily song done
 static int result_slowed;                 // the Song speed % of a run played slower than the song (it isn't saved), or 0
+static int result_faster;                 // the Song speed % of a run played faster (it's saved), or 0
 // the results screen's other page: this chart's last plays (this one last)
 #define HIST_MAX 10
 static Played hist[HIST_MAX];
@@ -2701,6 +2702,18 @@ static void draw_select(const Song * s, bool loading)
                       ALIGN_CENTER);
     } else
         font_draw(res.ui, "Not played yet", 770, 404, 22, RGBA(180, 178, 172, 255), ALIGN_CENTER);
+    {
+        // the song's speed, changed right here with L and R
+        snprintf(t, sizeof(t), "Speed %d%%", cfg.song_speed);
+        float tw = font_width(res.ui, t, 18), bx = 770 - tw / 2;
+        const Sprite * l = atlas_get(res.hud, "btn_l"), * r = atlas_get(res.hud, "btn_r");
+        float lw = l->w * 20.0f / l->h, rw = r->w * 20.0f / r->h;
+        uint32_t c = cfg.song_speed < 100 ? RGBA(255, 160, 90, 255) : cfg.song_speed > 100 ? RGBA(255, 225, 150, 255)
+                                                                                        : RGBA(170, 168, 162, 255);
+        gfx_sprite(l, bx - lw - 8, 455, lw, 20, WHITE);
+        font_draw(res.ui, t, bx, 454, 18, c, ALIGN_LEFT);
+        gfx_sprite(r, bx + tw + 8, 455, rw, 20, WHITE);
+    }
     if (setlist_at >= 0 && setlist_n > 1 && !tour_on) {
         char t2[48];
         snprintf(t2, sizeof(t2), "Setlist: song %d of %d", setlist_at + 1, setlist_n);
@@ -2820,6 +2833,8 @@ static void read_sections(const Song * s)
     snprintf(pr_song, sizeof(pr_song), "%s", s->folder);
     pr_song_part = sel_part, pr_song_diff = sel_diff, pr_song_count = pr_count;
 }
+
+static int clampi(int v, int lo, int hi);
 
 // the settings rows of practice's last step, as what each is: Up to only while it speeds up
 enum { PR_START, PR_SPEED, PR_RAMP, PR_TARGET, PR_METRO };
@@ -3091,6 +3106,13 @@ static void select_screen(void)
         if (sel_part != was)
             ui_sound(SND_UI_MOVE);
     }
+    if (repeat & (BTN_L | BTN_R)) {
+        // the song's speed, 5% a press (saved with the rest when the song starts)
+        int was = cfg.song_speed;
+        cfg.song_speed = clampi(cfg.song_speed + (repeat & BTN_L ? -5 : 5), 50, 150);
+        if (cfg.song_speed != was)
+            ui_sound(SND_UI_MOVE);
+    }
     if (repeat & (BTN_UP | BTN_DOWN)) {
         int dir = repeat & BTN_UP ? -1 : 1, was = sel_diff;
         for (int k = 0; k < DIFF_COUNT; k++) {
@@ -3161,6 +3183,7 @@ static void finish_song(int how)
     // a run counts (scores, medals, the career, the tour, achievements) at the song's own speed or faster, and not in
     // practice: a practised stretch, or a slowed song, would otherwise go down as the chart's best
     result_slowed = !practicing && game_song_speed() < 0.995f ? (int)(game_song_speed() * 100 + 0.5f) : 0;
+    result_faster = !practicing && game_song_speed() > 1.005f ? (int)(game_song_speed() * 100 + 0.5f) : 0;
     bool counts = !autoplay && !practicing && !result_slowed;
     if (setlist_at >= 0 && !tour_on) {
         gig.songs++;
@@ -3738,6 +3761,10 @@ static void results_screen(void)
         snprintf(d, sizeof(d), "SONG SPEED %d%%", result_slowed);
         font_draw_shadow(res.ui, d, 185, 398, 22, RGBA(255, 160, 90, 255), ALIGN_CENTER);
         font_draw_shadow(res.ui, "Not saved", 185, 424, 20, RGBA(255, 190, 140, 255), ALIGN_CENTER);
+    } else if (result_faster && !result_daily) {
+        char d[48];
+        snprintf(d, sizeof(d), "SONG SPEED %d%%", result_faster);
+        font_draw_shadow(res.ui, d, 185, 398, 22, RGBA(255, 225, 150, 255), ALIGN_CENTER);
     }
     if (result_daily) {
         char d[48];
@@ -5393,6 +5420,7 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "GET READY: L and R change the song speed right there.",
         "The stage lights flash white on the drummer's crash cymbals, from the song's drum chart.",
         "Main menu: the time and the Vita's battery, top right.",
         "Fixed: the daily song changed at midnight UTC instead of the Vita's own midnight.",
@@ -5400,7 +5428,7 @@ static void news_screen(void)
         "Options > Game > Song speed, 50% to 150%: shown on the HUD. A run below 100% isn't saved.",
         "Achievements: Speed Demon (finish a song at 125% speed) and Ludicrous (4 stars at 150%).",
         "Fixed: a practice run was saved as a score, so a slowed whole-song practice could earn the gold medal.",
-        "Earlier: Star Power spin and spark fountains, lasers, camera reveal, practice metronome and section name.",
+        "Earlier: Star Power spin and sparks, lasers, camera reveal, practice metronome.",
     };
     int n = (int)(sizeof(lines) / sizeof(lines[0]));
     gfx_begin(0, 0, 0);
