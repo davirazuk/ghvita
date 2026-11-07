@@ -110,7 +110,8 @@ static struct {
     int drum_stems[MAX_STEMS], drum_stem_count;
     double flame_t[6];
     double miss_t[6];                   // a lane's last miss: its cup flashes red
-    double wave_t;                      // a streak milestone: a wave of light up the neck
+    double wave_t;
+    float kick;                         // the camera's jolt: Star Power, a big moment (decays)                      // a streak milestone: a wave of light up the neck
     uint32_t held;              // lanes held (bit per lane, LANE_OPEN = bit 5)
     float miss_flash, sp_flash;
     bool vocal;                         // the Vocals part: no highway, vocals.c has the notes
@@ -786,9 +787,12 @@ static void draw_stage(void)
     G.cam_tz += (zoom - G.cam_tz) * glide;
     G.cam_tx += (aim_x - G.cam_tx) * glide;
     G.cam_ty += (aim_y - G.cam_ty) * glide;
-    G.cam_z = G.cam_tz;
-    G.cam_x = G.cam_tx + sinf((float)G.t * 0.23f) * 13;
-    G.cam_y = G.cam_ty + sinf((float)G.t * 0.17f + 1) * 6;
+    // a jolt punches the camera in and shakes it, settling in half a second
+    float kick = cfg.flashes < 2 ? G.kick : 0;
+    G.cam_z = G.cam_tz * (1 + 0.05f * kick);
+    G.cam_x = G.cam_tx + sinf((float)G.t * 0.23f) * 13 + sinf((float)G.t * 61) * 9 * kick;
+    G.cam_y = G.cam_ty + sinf((float)G.t * 0.17f + 1) * 6 + sinf((float)G.t * 47 + 2) * 6 * kick;
+    G.kick *= 0.9f;
     if (G.t > G.last_note_end && G.t > 0 && !G.end_party) {
         G.end_party = true;
         party();
@@ -1479,6 +1483,7 @@ static void reset_play(void)
         G.miss_t[i] = -100;
     }
     G.wave_t = -100;
+    G.kick = 0;
     G.held = 0;
     G.touch_count = 0;
     double first = p->note_count ? p->notes[0].time / 1e6 : 0;
@@ -2007,6 +2012,8 @@ static void hit_note(int i)
         snprintf(t, sizeof(t), "%d NOTE STREAK!", G.streak);
         popup(t);
         G.wave_t = G.t;
+        if (G.streak % 100 == 0)
+            G.kick = 0.6f;
         G.cheer = 1;
         sound_play(res.snd[SND_CHEER1 + rand() % 3], cfg.crowd_vol * 0.05f, false);
         if (G.streak % 100 == 0)
@@ -2322,6 +2329,7 @@ static void activate_sp(void)
     if (G.sp_active || G.sp < 0.5f)
         return;
     G.sp_active = true;
+    G.kick = 1;
     G.sp_last_q = chart_quarters(G.chart, G.t);
     G.sp_flash = 1;
     G.pyro_t = G.t;
