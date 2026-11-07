@@ -5356,14 +5356,14 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "Options > Game > Song speed, 50% to 150%: shown on the HUD. A run below 100% isn't saved.",
+        "Achievements: Speed Demon (finish a song at 125% speed) and Ludicrous (4 stars at 150%).",
+        "Fixed: a practice run was saved as a score, so a slowed whole-song practice could earn the gold medal.",
+        "Practice: the section you're in shows under the PRACTICE label, and a Metronome setting ticks the beat.",
+        "Fixed: the results' DAILY SONG DONE covered the stars; it's under the cover now.",
         "Star Power: the band spins round as it goes on, and sparks fountain up either side of the guitarists.",
-        "Lasers sweep over the band in a chorus that's going well, and under Star Power.",
+        "Lasers sweep over the band in a good chorus and under Star Power; the lights leave pools on the stage.",
         "The camera pulls back from the band through the count-in. A song played well ends with the jets.",
-        "Practice: a Metronome setting ticks along with the beat.",
-        "Fixed: a practice run that started partway into a song clicked the whole count-in at once.",
-        "Vocals: your voice's trail now scrolls with the notes, and the pitch marker glows when you're on the note.",
-        "Fixed: the streak lamps beside the highway floated off the rope; they sit on it, evenly spaced.",
-        "Earlier: lighters in slow songs, Timing window, Effects: Light, rock meter danger glow, highway previews.",
     };
     int n = (int)(sizeof(lines) / sizeof(lines[0]));
     gfx_begin(0, 0, 0);
