@@ -259,9 +259,10 @@ bool vox_load(const char * folder)
     return kept > 0;
 }
 
-#define WAKE 40
+#define WAKE 48
 static float wake_y[WAKE];
 static bool wake_hit[WAKE];
+static int wake_ms[WAKE];               // when each point of the wake was sung: it scrolls with the notes, whatever the frame rate
 
 void vox_free(void)
 {
@@ -555,16 +556,30 @@ void vox_draw(double t)
     // the voice leaves a wake running back from the now line, green where it was on the note
     memmove(wake_y + 1, wake_y, sizeof(wake_y) - sizeof(wake_y[0]));
     memmove(wake_hit + 1, wake_hit, sizeof(wake_hit) - sizeof(wake_hit[0]));
+    memmove(wake_ms + 1, wake_ms, sizeof(wake_ms) - sizeof(wake_ms[0]));
     wake_y[0] = voice_y;
     wake_hit[0] = hit;
-    for (int i = 1; i < WAKE; i++)
-        if (wake_y[i] >= 0) {
-            float a = 1 - (float)i / WAKE;
-            uint32_t c = wake_hit[i] ? RGBA(140, 255, 160, 255) : RGBA(255, 130, 90, 255);
-            gfx_rect(voice_x - i * 3.0f - 3, wake_y[i] - 2 * a - 1, 3, 4 * a + 2, (c & 0xFFFFFF) | ((uint32_t)(a * 170) << 24));
-        }
+    wake_ms[0] = ms;
+    for (int i = 1; i < WAKE; i++) {
+        float age = (ms - wake_ms[i]) / 1000.0f, a = 1 - age / 0.75f;
+        if (wake_y[i] < 0 || a <= 0 || age < 0)
+            continue;
+        // from this point to the next newer one, so the wake is a line however far apart the frames are
+        float x1 = voice_x - age * PX_PER_S, x0 = voice_x - (ms - wake_ms[i - 1]) / 1000.0f * PX_PER_S;
+        float w = x0 - x1 > 1 ? x0 - x1 + 1 : 2;
+        uint32_t c = wake_hit[i] ? RGBA(140, 255, 160, 255) : RGBA(255, 130, 90, 255);
+        gfx_rect(x1, wake_y[i] - 2 * a - 1, w, 4 * a + 2, (c & 0xFFFFFF) | ((uint32_t)(a * 170) << 24));
+    }
     if (voice_y >= 0) {
         uint32_t c = hit ? RGBA(140, 255, 160, 255) : RGBA(255, 130, 90, 255);
+        // a glow round the point: it swells while you're on the note
+        const Sprite * dot = atlas_get(res.stage, "dot");
+        if (dot) {
+            float g = hit ? 34 : 22;
+            gfx_blend(BLEND_ADD);
+            gfx_sprite(dot, voice_x - g / 2 - 4, voice_y - g / 2, g, g, (c & 0xFFFFFF) | (hit ? 150u : 90u) << 24);
+            gfx_blend(BLEND_ALPHA);
+        }
         for (int i = 0; i < 6; i++)
             gfx_rect(voice_x - 18 + i * 3, voice_y - (6 - i), 3, (6 - i) * 2, c);
     }

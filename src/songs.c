@@ -849,6 +849,8 @@ void config_load(void)
             cfg.no_ghost = n != 0;
         else if (strcmp(k, "light_fx") == 0)
             cfg.light_fx = n != 0;
+        else if (strcmp(k, "metronome") == 0)
+            cfg.metronome = n != 0;
         else if (strcmp(k, "hit_window") == 0)
             cfg.hit_window = n < 0 ? 0 : n > 2 ? 2 : n;
         else if (strcmp(k, "rival") == 0)
@@ -967,7 +969,8 @@ void config_save(void)
             cfg.no_popups, cfg.timing_bar, cfg.live_stats, cfg.vanish, cfg.no_miss_sound, cfg.no_rear_whammy, cfg.no_bend, cfg.no_countdown);
     fprintf(f, "double_kick = %d\nfive_pads = %d\neasy_sustains = %d\nno_count_in = %d\nstage_screens = %d\nno_progress = %d\ncup_skin = %d\n", cfg.double_kick, cfg.five_pads, cfg.easy_sustains,
             cfg.no_count_in, cfg.stage_screens, cfg.no_progress, cfg.cup_skin);
-    fprintf(f, "no_ghost = %d\nnotes_look = 1\nrival = %d\nhit_window = %d\nlight_fx = %d\n", cfg.no_ghost, cfg.rival, cfg.hit_window, cfg.light_fx);
+    fprintf(f, "no_ghost = %d\nnotes_look = 1\nrival = %d\nhit_window = %d\nlight_fx = %d\nmetronome = %d\n", cfg.no_ghost, cfg.rival, cfg.hit_window, cfg.light_fx,
+            cfg.metronome);
     fclose(f);
     remove(path);
     rename(tmp, path);

@@ -2781,6 +2781,20 @@ static void read_sections(const Song * s)
     pr_song_part = sel_part, pr_song_diff = sel_diff, pr_song_count = pr_count;
 }
 
+// the settings rows of practice's last step, as what each is: Up to only while it speeds up
+enum { PR_START, PR_SPEED, PR_RAMP, PR_TARGET, PR_METRO };
+static int pr_rows(int kinds[5])
+{
+    int n = 0;
+    kinds[n++] = PR_START;
+    kinds[n++] = PR_SPEED;
+    kinds[n++] = PR_RAMP;
+    if (pr_ramp)
+        kinds[n++] = PR_TARGET;
+    kinds[n++] = PR_METRO;
+    return n;
+}
+
 static void practice_screen(void)
 {
     Song * s = songs_get(sel);
@@ -2845,29 +2859,40 @@ static void practice_screen(void)
             }
         }
     } else {
-        // Start, Speed, Speed up, Up to (only while speeding up)
-        int rows = pr_ramp ? 4 : 3, was_row = pr_set_row, sp = pr_speed, ra = pr_ramp, ta = pr_target;
+        // Start, Speed, Speed up, Up to (only while speeding up), Metronome
+        int kinds[5], rows = pr_rows(kinds), was_row = pr_set_row, sp = pr_speed, ra = pr_ramp, ta = pr_target;
+        bool me = cfg.metronome;
         if (repeat & BTN_UP)
             pr_set_row = (pr_set_row + rows - 1) % rows;
         if (repeat & BTN_DOWN)
             pr_set_row = (pr_set_row + 1) % rows;
         int dir = (repeat & BTN_LEFT) ? -1 : (repeat & BTN_RIGHT) ? 1 : 0;
-        if (pr_set_row == 1)
+        int kind = kinds[pr_set_row];
+        if (kind == PR_SPEED)
             pr_speed += 5 * dir;
-        else if (pr_set_row == 2)
+        else if (kind == PR_RAMP)
             pr_ramp = (pr_ramp / 5 + dir + 3) % 3 * 5;     // off, +5%, +10%
-        else if (pr_set_row == 3)
+        else if (kind == PR_TARGET)
             pr_target += 5 * dir;
+        else if (kind == PR_METRO && dir)
+            cfg.metronome = !cfg.metronome;
         pr_speed = pr_speed < 50 ? 50 : pr_speed > 150 ? 150 : pr_speed;
         pr_target = pr_target < 55 ? 55 : pr_target > 150 ? 150 : pr_target;
         if (pr_ramp && pr_target <= pr_speed)
             pr_target = pr_speed + 5 > 150 ? 150 : pr_speed + 5;
-        if (!pr_ramp && pr_set_row > 2)
-            pr_set_row = 2;
-        moved = pr_set_row != was_row || sp != pr_speed || ra != pr_ramp || ta != pr_target;
+        rows = pr_rows(kinds);
+        if (pr_set_row >= rows)
+            pr_set_row = rows - 1;
+        if (me != cfg.metronome)
+            config_save();
+        moved = pr_set_row != was_row || sp != pr_speed || ra != pr_ramp || ta != pr_target || me != cfg.metronome;
         if (pressed & BTN_CROSS) {
             if (pr_set_row == 0) {
                 start = true;
+            } else if (kinds[pr_set_row] == PR_METRO) {
+                cfg.metronome = !cfg.metronome;
+                config_save();
+                ui_sound(SND_UI_MOVE);
             } else {
                 pr_set_row = 0;
                 ui_sound(SND_UI_MOVE);
@@ -2955,23 +2980,25 @@ static void practice_screen(void)
         snprintf(t, sizeof(t), "%d:%02d long", len / 60, len % 60);
     font_draw(res.ui, t, 636, 288, 18, RGBA(200, 200, 200, 255), ALIGN_LEFT);
     // the settings: live in the last step, a summary before it
-    const char * labels[] = {"START", "Speed", "Speed up", "Up to"};
-    char vals[4][24] = {""};
-    snprintf(vals[1], sizeof(vals[1]), "< %d%% >", pr_speed);
-    snprintf(vals[2], sizeof(vals[2]), pr_ramp ? "< +%d%% a clear >" : "< Off >", pr_ramp);
-    snprintf(vals[3], sizeof(vals[3]), "< %d%% >", pr_target);
-    int rows = pr_ramp ? 4 : 3;
+    const char * labels[] = {"START", "Speed", "Speed up", "Up to", "Metronome"};
+    char vals[5][24] = {""};
+    snprintf(vals[PR_SPEED], sizeof(vals[1]), "< %d%% >", pr_speed);
+    snprintf(vals[PR_RAMP], sizeof(vals[2]), pr_ramp ? "< +%d%% a clear >" : "< Off >", pr_ramp);
+    snprintf(vals[PR_TARGET], sizeof(vals[3]), "< %d%% >", pr_target);
+    snprintf(vals[PR_METRO], sizeof(vals[4]), "< %s >", cfg.metronome ? "On" : "Off");
+    int kinds[5], rows = pr_rows(kinds);
+    const float gap = rows > 4 ? 34 : 40;
     for (int r = 0; r < rows; r++) {
-        float y = 318 + r * 40;
+        float y = 318 + r * gap;
         bool cur = pr_step == PR_STEP_SET && r == pr_set_row;
         if (cur)
-            select_bar(622, y - 4, 312, 38, WHITE);
+            select_bar(622, y - 4, 312, gap - 2, WHITE);
         uint32_t col = pr_step != PR_STEP_SET ? RGBA(150, 150, 150, 255) : cur ? RGBA(255, 236, 170, 255) : RGBA(220, 220, 220, 255);
-        if (r == 0)
-            font_draw_shadow(res.title, labels[0], 778, y - 2, 32, col, ALIGN_CENTER);
+        if (kinds[r] == PR_START)
+            font_draw_shadow(res.title, labels[0], 778, y - 2, gap > 36 ? 32 : 28, col, ALIGN_CENTER);
         else {
-            font_draw(res.ui, labels[r], 636, y + 4, 20, col, ALIGN_LEFT);
-            font_draw(res.ui, vals[r], 924, y + 4, 20, col, ALIGN_RIGHT);
+            font_draw(res.ui, labels[kinds[r]], 636, y + (gap - 32) / 2 + 1, 20, col, ALIGN_LEFT);
+            font_draw(res.ui, vals[kinds[r]], 924, y + (gap - 32) / 2 + 1, 20, col, ALIGN_RIGHT);
         }
     }
     if (start)
@@ -5303,14 +5330,14 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
-        "A hit gem swells and fades at the strikeline. In slow songs the crowd holds up lighters.",
-        "Fixed: Retry after a battle played the song without the battle.",
-        "Options: choosing a highway or a venue shows a preview of it. Fixed: Highway solid's value was cut to \"10...\".",
-        "The rock meter glows red and its needle trembles when you're about to fail; full, it glows green.",
-        "Options > Screen > Effects: Light turns off the heavier effects for a steadier frame rate.",
-        "Options > Game > Timing window: Strict, Normal or Lenient. The score counter rolls up.",
-        "Fixed: a held fret's lane light tinted the notes over it. Streak achievements pop up as you earn them.",
-        "Earlier: GIG COMPLETE!, FACE-OFF, titles, practice section density, smoke after the chorus jets.",
+        "Star Power: the band spins round as it goes on, and sparks fountain up either side of the guitarists.",
+        "Lasers sweep over the band in a chorus that's going well, and under Star Power.",
+        "The camera pulls back from the band through the count-in. A song played well ends with the jets.",
+        "Practice: a Metronome setting ticks along with the beat.",
+        "Fixed: a practice run that started partway into a song clicked the whole count-in at once.",
+        "Vocals: your voice's trail now scrolls with the notes, and the pitch marker glows when you're on the note.",
+        "Fixed: the streak lamps beside the highway floated off the rope; they sit on it, evenly spaced.",
+        "Earlier: lighters in slow songs, Timing window, Effects: Light, rock meter danger glow, highway previews.",
     };
     int n = (int)(sizeof(lines) / sizeof(lines[0]));
     gfx_begin(0, 0, 0);
@@ -5508,7 +5535,12 @@ int main(void)
         int diff = getenv("GHV_DIFF") ? atoi(getenv("GHV_DIFF")) : 3;
         if (getenv("GHV_BATTLE"))
             game_battle(-1);        // tests: a battle (GHV_BATTLE=1)
-        if (s && game_start(s, part, diff)) {
+        if (s && getenv("GHV_PRACTICE")) {
+            // tests: the song's practice menu (GHV_PRACTICE=1), to drive with GHV_SCRIPT
+            sel_part = part, sel_diff = diff;
+            read_sections(s);
+            go(S_PRACTICE);
+        } else if (s && game_start(s, part, diff)) {
             game_set_autoplay(autoplay);
             go(S_PLAY);
         } else {
