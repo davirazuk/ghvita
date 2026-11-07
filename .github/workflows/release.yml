@@ -65,5 +65,10 @@ jobs:
           Xvfb :77 -screen 0 1280x720x24 >/dev/null 2>&1 &
           export DISPLAY=:77
           notes="${{ github.event.inputs.notes }}"
-          [ -n "$notes" ] || notes="$(git log -1 --format=%s | sed 's/ *\[release\]//')"
+          if [ -z "$notes" ]; then
+            # every change since the last release, a line each
+            last=$(gh release view --json tagName -q .tagName 2>/dev/null || true)
+            range=$([ -n "$last" ] && git rev-parse -q --verify "$last" >/dev/null && echo "$last..HEAD" || echo "-1")
+            notes="$(git log $range --no-merges --format='- %s' | sed 's/ *\[release\]//')"
+          fi
           python3 tools/release.py --notes "$notes"

@@ -4129,12 +4129,12 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
-        "NEW HIGH SCORE! pops up mid-song, with the crowd cheering, the moment you pass your best on that chart.",
-        "PRESS X TO ROCK on the title no longer fades almost out.",
-        "The bassist no longer wanders into the singer on stage.",
-        "Button bars at the bottom shrink to fit: \"Back\" was cut off on DOWNLOAD SONGS.",
-        "Search filters line up on the right; unset ones say Any, and Genre says Loading while the list comes in.",
-        "Earlier: streak lamps after World Tour, three drum layouts, sing along at its own difficulty.",
+        "Players: WHO'S PLAYING? when the game starts. Each player keeps their own scores, settings, career and streak.",
+        "Battle: Triangle on GET READY. Star Power phrases become attacks against a computer rival.",
+        "DAILY SONG on the main menu, with a streak. Medals (bronze, silver, gold) on every chart.",
+        "28 achievements on CAREER (press R). Race your best: GHOST +/- shows how you're doing against your best run.",
+        "Practice: start, end, then speed, step by step. Speed up as you clear. Speeds over 100% really play faster now.",
+        "Results: R shows your last 10 plays. Singing along shows the vocals' own score. Select > Check for newer charts.",
     };
     int n = (int)(sizeof(lines) / sizeof(lines[0]));
     gfx_begin(0, 0, 0);
