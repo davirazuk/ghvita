@@ -452,6 +452,17 @@ static void draw_pyro(void)
 {
     const float length = 0.55f;
     double since = G.t - G.pyro_t;
+    if (since >= 0 && since < 3.5 && G.marks) {
+        // after the jets, smoke rolls out across the front of the stage and thins away
+        const Sprite * haze = atlas_get(res.stage, "haze");
+        float k = (float)since / 3.5f;
+        for (int j = 0; j < 5; j++) {
+            float x = -120 + j * 260 + sinf((float)since * 0.6f + j) * 40 + (j & 1 ? 1 : -1) * k * 90;
+            float y = 330 - k * 60 - (j % 3) * 18, w = 420 + k * 260, h = 120 + k * 70;
+            uint32_t c = col3(G.stage_col, 1);
+            gfx_sprite(haze, x - w / 2, y - h / 2, w, h, with_alpha(c, 0.5f * (1 - k) * (k < 0.1f ? k / 0.1f : 1)));
+        }
+    }
     if (since < 0 || since >= length || !G.marks)
         return;
     const Sprite * flame = atlas_get(res.game, "flame");
