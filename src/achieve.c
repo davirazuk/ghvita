@@ -58,6 +58,22 @@ bool achieve_has(int i)
     return i >= 0 && i < N && have[i];
 }
 
+bool achieve_has_id(const char * id)
+{
+    for (int i = 0; i < N; i++)
+        if (!strcmp(list[i].id, id))
+            return have[i];
+    return false;
+}
+
+const char * achieve_name(const char * id)
+{
+    for (int i = 0; i < N; i++)
+        if (!strcmp(list[i].id, id))
+            return list[i].name;
+    return NULL;
+}
+
 int achieve_unlocked(void)
 {
     int n = 0;
