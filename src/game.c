@@ -175,6 +175,7 @@ static struct {
     double intro_end;                   // the camera's on the drummer for the count-in, and pulls back from here
     bool cam_snap;                      // the next frame puts the camera straight where it's going
     float fountain;                     // the Star Power sparklers along the stage front: 0 off .. 1 full
+    float laser;                        // the lasers over the crowd: 0 off .. 1 full
     double start_t;                     // the song time the run began at (a practice run starts partway in)
     int metro_next;                     // practice's metronome: the chart's next beat line
 } G;
@@ -598,6 +599,52 @@ static void draw_rig(double beat, float pulse)
     gfx_blend(BLEND_ALPHA);
 }
 
+// lasers from behind the kit, fanned out over the crowd and sweeping with the beat: a chorus with the crowd behind you,
+// and Star Power. They swing in from nothing and fade out the same way
+static void draw_lasers(double beat, float pulse)
+{
+    bool on = (G.big_section && G.rock >= 0.5f) || G.sp_active;
+    G.laser += ((on ? 1 : 0) - G.laser) * 0.05f;
+    if (G.laser < 0.02f || cfg.light_fx || !G.marks)
+        return;
+    enum { BEAMS = 5 };
+    float sweep = sinf((float)beat * 3.14159265f / 4), spread = 0.26f + 0.06f * sinf((float)beat * 3.14159265f / 8);
+    float col[3];
+    for (int i = 0; i < 3; i++)                 // a laser's colour is pure: the key colour, its weakest channel taken out
+        col[i] = G.key_col[i];
+    float lo = fminf(col[0], fminf(col[1], col[2])), hi = fmaxf(col[0], fmaxf(col[1], col[2]));
+    for (int i = 0; i < 3; i++)
+        col[i] = hi > lo + 0.05f ? (col[i] - lo) / (hi - lo) : 1;
+    if (G.sp_active)
+        col[0] = 0.45f, col[1] = 0.75f, col[2] = 1;
+    const Sprite * dot = atlas_get(res.stage, "dot");
+    const float uv[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+    gfx_blend(BLEND_ADD);
+    // two heads on the truss, either side of the kit, fanned out over the band and swinging against each other so the
+    // beams cross
+    for (int side = -1; side <= 1; side += 2) {
+        float ox = 480 + side * 170, oy = 58;
+        stage_point(&ox, &oy);
+        gfx_tex(NULL);
+        for (int b = 0; b < BEAMS; b++) {
+            float ang = (b - (BEAMS - 1) / 2.0f) * spread + side * (0.45f + 0.4f * sweep), len = 900 * G.cam_z;
+            float dx = sinf(ang), dy = cosf(ang), nx = dy, ny = -dx;
+            float w0 = 1.0f * G.cam_z, w1 = 6 * G.cam_z;
+            float ex = ox + dx * len, ey = oy + dy * len;
+            float a = G.laser * (0.3f + 0.25f * pulse);
+            const float p[4][3] = {{ox - nx * w0, oy - ny * w0, 0}, {ox + nx * w0, oy + ny * w0, 0},
+                                   {ex + nx * w1, ey + ny * w1, 0}, {ex - nx * w1, ey - ny * w1, 0}};
+            uint32_t c0 = col3(col, a), c1 = col3(col, a * 0.1f);
+            const uint32_t c[4] = {c0, c0, c1, c1};
+            gfx_quad(p, uv, c);
+        }
+        // where they come from burns
+        float sz = (26 + 16 * pulse) * G.cam_z;
+        gfx_sprite(dot, ox - sz / 2, oy - sz / 2, sz, sz, col3(col, 0.7f * G.laser));
+    }
+    gfx_blend(BLEND_ALPHA);
+}
+
 // the air the lights go through
 static void draw_haze(void)
 {
@@ -912,6 +959,7 @@ static void draw_stage(void)
     if (cfg.stage_screens)
         draw_screens(pulse);
     draw_haze();
+    draw_lasers(beat, pulse);
     draw_band(beat);
     draw_rig(beat, pulse);
     draw_pyro();
@@ -1596,7 +1644,7 @@ static void reset_play(void)
     G.focus = -1;
     G.sp_on_t = -100;
     G.cam_snap = true;
-    G.fountain = 0;
+    G.fountain = G.laser = 0;
     for (int i = 0; i < 6; i++) {
         G.flame_t[i] = -100;
         G.miss_t[i] = -100;
