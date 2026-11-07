@@ -58,6 +58,15 @@ jobs:
           cd /tmp/last/x/sce_sys && find . -name '*.png' -exec cp --parents {} "$GITHUB_WORKSPACE/vita/sce_sys/" \;
           echo "$(find "$GITHUB_WORKSPACE/assets" -type f | wc -l) asset files"
 
+      - name: Guitar Hero pictures, if the last release hadn't any
+        run: |
+          if [ ! -d assets/avatars ] || [ -z "$(ls assets/avatars)" ]; then
+            pip install -q --break-system-packages py7zr pillow
+            gh release download source-art --pattern ghwt-textures.7z --dir /tmp/sa
+            python3 -c "import py7zr,re; z=py7zr.SevenZipFile('/tmp/sa/ghwt-textures.7z'); z.extract(path='/tmp/sa/x', targets=[n for n in z.getnames() if re.search(r'(ghwt_mag_|gh_logo|ghwt_logo_GH4|ghwt_setlist_griffin|ghwt_menu_bg)', n)])"
+            python3 tools/mkavatars.py /tmp/sa/x/mods/yarg-look/YargLook/textures
+          fi
+
       - name: Build, smoke test and publish
         run: |
           git config user.name "github-actions"

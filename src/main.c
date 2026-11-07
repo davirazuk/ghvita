@@ -4113,8 +4113,10 @@ static void players_screen(void)
 // Square on a card: the name, the colour, a picture (one of your songs' covers, one downloaded, or one of yours from
 // the card's avatars folder), or the player gone.
 
-enum { PE_NAME, PE_COLOR, PE_SONGS, PE_WEB, PE_CARD, PE_CLEAR, PE_DELETE, PE_ROWS };
-static int pe_cover = -1, pe_card;
+enum { PE_NAME, PE_COLOR, PE_GH, PE_SONGS, PE_WEB, PE_CARD, PE_CLEAR, PE_DELETE, PE_ROWS };
+static int pe_cover = -1, pe_card, pe_gh;
+static char pe_ghs[48][64];                // the game's own Guitar Hero pictures (assets/avatars)
+static int pe_gh_n = -1;
 static Tex * pe_prev;                   // the picture the row offers, before it's taken
 static char pe_prev_path[460];
 static char pe_files[64][128];          // the avatars folder's pictures
@@ -4199,6 +4201,24 @@ static void pe_show(const char * path)
     snprintf(pe_prev_path, sizeof(pe_prev_path), "%s", path);
 }
 
+static void pe_list_gh(void)
+{
+    pe_gh_n = 0;
+    char d[400];
+    snprintf(d, sizeof(d), "%savatars", plat_asset_dir());
+    DIR * dir = opendir(d);
+    if (!dir)
+        return;
+    struct dirent * e;
+    while ((e = readdir(dir)) && pe_gh_n < 48) {
+        const char * x = strrchr(e->d_name, '.');
+        if (x && !strcasecmp(x, ".jpg"))
+            snprintf(pe_ghs[pe_gh_n++], sizeof(pe_ghs[0]), "%s", e->d_name);
+    }
+    closedir(dir);
+    qsort(pe_ghs, pe_gh_n, sizeof(pe_ghs[0]), (int (*)(const void *, const void *))strcmp);
+}
+
 static void pe_list_files(void)
 {
     pe_file_n = 0;
@@ -4275,6 +4295,8 @@ static void player_edit_screen(void)
     }
     if (pe_file_n < 0)
         pe_list_files();
+    if (pe_gh_n < 0)
+        pe_list_gh();
     int was = pe_row;
     if (repeat & BTN_UP)
         pe_row = (pe_row + PE_ROWS - 1) % PE_ROWS;
@@ -4289,6 +4311,8 @@ static void player_edit_screen(void)
         ui_sound(SND_UI_MOVE);
         if (pe_row == PE_COLOR)
             player_set_color(me, player_color(me) + d);
+        else if (pe_row == PE_GH && pe_gh_n > 0)
+            pe_gh = (pe_gh + d + pe_gh_n) % pe_gh_n;
         else if (pe_row == PE_SONGS)
             pe_next_cover(d);
         else if (pe_row == PE_WEB && pe_cover_n > 0) {
@@ -4312,7 +4336,9 @@ static void player_edit_screen(void)
     }
     // what the row offers, in the preview
     char offer[460] = "";
-    if (pe_row == PE_SONGS) {
+    if (pe_row == PE_GH && pe_gh_n > 0)
+        snprintf(offer, sizeof(offer), "%savatars/%s", plat_asset_dir(), pe_ghs[pe_gh % pe_gh_n]);
+    else if (pe_row == PE_SONGS) {
         if (pe_cover < 0)
             pe_next_cover(1);
         if (pe_cover >= 0)
@@ -4347,6 +4373,7 @@ static void player_edit_screen(void)
             dl_typing = true;
             break;
         case PE_COLOR: player_set_color(me, player_color(me) + 1); break;
+        case PE_GH:
         case PE_SONGS: ok = offer[0] && pe_take_file(offer, false); break;
         case PE_WEB: ok = pe_web_state == 2 && offer[0] && pe_take_file(offer, true); break;
         case PE_CARD: ok = offer[0] && pe_take_file(offer, true); break;
@@ -4380,12 +4407,12 @@ static void player_edit_screen(void)
             say(pe_row == PE_WEB && pe_web_state == 1   ? "Still downloading, a moment"
                 : pe_row == PE_WEB && pe_web_state != 2 ? "The download failed: Triangle tries another"
                                                         : "That picture couldn't be used");
-        else if (pe_row == PE_SONGS || pe_row == PE_WEB || pe_row == PE_CARD)
+        else if (pe_row == PE_GH || pe_row == PE_SONGS || pe_row == PE_WEB || pe_row == PE_CARD)
             say("Picture set");
     } else if (pressed & BTN_CIRCLE) {
         ui_sound(SND_UI_BACK);
         pe_delete_armed = false;
-        pe_file_n = -1;
+        pe_file_n = pe_gh_n = -1;
         tex_free(pe_prev);
         pe_prev = NULL;
         pe_prev_path[0] = 0;
@@ -4398,10 +4425,15 @@ static void player_edit_screen(void)
     banner("EDIT PLAYER");
     panel(30, 84, 560, 400);
     char vals[PE_ROWS][96];
-    static const char * const labels[PE_ROWS] = {"Name", "Colour", "Picture from your songs", "Download an album cover",
+    static const char * const labels[PE_ROWS] = {"Name", "Colour", "Guitar Hero picture", "Picture from your songs",
+                                                 "Download an album cover",
                                                  "Picture from the card", "No picture", "Delete player"};
     snprintf(vals[PE_NAME], 96, "%s", player_name(me));
     snprintf(vals[PE_COLOR], 96, "< %d >", player_color(me) + 1);
+    if (pe_gh_n > 0)
+        snprintf(vals[PE_GH], 96, "< %d of %d >", pe_gh % pe_gh_n + 1, pe_gh_n);
+    else
+        snprintf(vals[PE_GH], 96, "none");
     snprintf(vals[PE_SONGS], 96, "%s", pe_cover >= 0 ? songs_get(pe_cover)->name : "no covers");
     if (pe_search_state == 1)
         snprintf(vals[PE_WEB], 96, "searching...");
@@ -4413,7 +4445,7 @@ static void player_edit_screen(void)
     snprintf(vals[PE_CLEAR], 96, "%s", "");
     snprintf(vals[PE_DELETE], 96, "%s", pe_delete_armed ? "X again to delete" : "");
     for (int i = 0; i < PE_ROWS; i++) {
-        float y = 102 + i * 52;
+        float y = 98 + i * 47;
         bool cur = i == pe_row;
         if (cur)
             gfx_sprite(atlas_get(res.hud, "wor_select"), 44, y - 4, 532, 46, WHITE);
@@ -4425,7 +4457,7 @@ static void player_edit_screen(void)
     // the card as it is, and what the row offers
     draw_player_face(me, 770, 100, 170, true);
     font_draw_fit(res.ui, player_name(me), 770, 280, 28, 300, RGBA(255, 236, 190, 255), ALIGN_CENTER);
-    if (pe_row == PE_SONGS || pe_row == PE_WEB || pe_row == PE_CARD) {
+    if (pe_row == PE_GH || pe_row == PE_SONGS || pe_row == PE_WEB || pe_row == PE_CARD) {
         font_draw(res.ui, "Picture:", 650, 330, 18, RGBA(180, 180, 185, 255), ALIGN_LEFT);
         if (pe_prev)
             gfx_sprite(&(Sprite){pe_prev, 0, 0, 1, 1, 120, 120}, 770 - 60, 350, 120, 120, WHITE);
@@ -4448,7 +4480,7 @@ static void player_edit_screen(void)
     } else if (pe_row == PE_WEB) {
         static const char * help[] = {"btn_cross", "Use it", "btn_left", "Browse", "btn_triangle", "Search", "btn_circle", "Back"};
         help_bar(help, 8);
-    } else if (pe_row == PE_SONGS || pe_row == PE_CARD) {
+    } else if (pe_row == PE_GH || pe_row == PE_SONGS || pe_row == PE_CARD) {
         static const char * help[] = {"btn_cross", "Use it", "btn_left", "Browse", "btn_circle", "Back"};
         help_bar(help, 6);
     } else {
