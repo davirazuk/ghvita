@@ -475,6 +475,7 @@ static void medal_totals(int out[4])
 static void open_select(const Song * s);
 static void draw_player_face(int i, float x, float top, float w, bool lit);
 static void faceoff_screen(void);
+static Tex * thumb_get(const Song * s);
 static void gigdone_screen(void);
 static void player_switch(int i);
 static const char * player_title_text(void);
@@ -678,10 +679,17 @@ static void main_menu(void)
         }
     }
     if (menu_index == M_DAILY && songs_count()) {
+        // today's song: its cover over the logo's corner, its name under
         const Song * ds = songs_get(daily_pick());
+        Tex * th = thumb_get(ds);
+        if (th) {
+            gfx_rect(646, 186, 128, 128, RGBA(0, 0, 0, 200));
+            gfx_sprite(&(Sprite){th, 0, 0, 1, 1, 120, 120}, 650, 190, 120, 120, WHITE);
+            gfx_rect(646, 186, 128, 2, RGBA(255, 210, 90, 255));
+        }
         char d[240];
         snprintf(d, sizeof(d), "Today: %s - %s", ds->name, ds->artist);
-        font_draw_fit(res.ui, d, 710, 312, 20, 420, RGBA(255, 230, 160, 255), ALIGN_CENTER);
+        font_draw_fit(res.ui, d, 710, 318, 20, 420, RGBA(255, 230, 160, 255), ALIGN_CENTER);
     }
     // who's playing: their card, their rank, their stars and medals
     {
