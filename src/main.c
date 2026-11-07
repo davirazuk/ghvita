@@ -5067,6 +5067,7 @@ int main(void)
         pressed = pad.buttons & ~last_buttons;
         last_buttons = pad.buttons;
         update_repeat();
+        int drawn = screen;
         switch (screen) {
         case S_TITLE: title_screen(); break;
         case S_MAIN: main_menu(); break;
@@ -5087,6 +5088,15 @@ int main(void)
         case S_EMPTY: empty_screen(); break;
         case S_DOWNLOAD: download_screen(); break;
         case S_UPDATE: update_screen(); break;
+        }
+        // a menu comes in out of black, quickly, rather than cutting (not the song and its pause: those stay instant)
+        {
+            double in = now_s - screen_t;
+            if (in < 0.16 && drawn == screen && screen != S_PLAY && screen != S_PAUSE && screen != S_RESUME) {
+                gfx_2d();
+                gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(0, 0, 0, (int)(230 * (1 - in / 0.16))));
+                gfx_flush();
+            }
         }
         take_downloads();
         // downloads keep the Vita from sleeping (a second at a time)
