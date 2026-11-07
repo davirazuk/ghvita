@@ -3,22 +3,24 @@
 Written by the Claude working on this repo in the cloud, for the Claude that Davi runs on his PC with the PS Vita
 plugged in. Do both jobs, in order, then **delete this file** (last section). Ask Davi before anything that isn't here.
 
-## 1. Put the newest GH Vita on the Vita
+## 1. Build the newest GH Vita here and put it on the Vita
 
-Builds 62 to 71 were linked with an OpenSSL curl that can't connect on the Vita: no song downloads and no update checks.
-The Vita is on build 68, so it can't fetch the fix itself. Install it by hand, once.
+Builds 62 to 71 (made on GitHub) were linked with an OpenSSL curl that can't connect on the Vita: no song downloads
+and no update checks. The Vita is on build 68, so it can't fetch the fix itself. This PC has VitaSDK and the art in
+`assets/` (its builds always worked), so build here and install by hand, once.
 
-1. Download `GHVita.vpk` from the newest release of the private repo `davirazuk/ghvita`:
-   `gh release download --repo davirazuk/ghvita --pattern GHVita.vpk --dir .`
-   Make sure the release is **newer than 71** and its notes say *Downloads and updates work on the Vita again*. If the
-   newest is still 71, the fixed build isn't out yet: look at the repo's Actions tab, wait, and don't install
-   an older one.
-2. Davi opens VitaShell on the Vita and presses SELECT for USB mode. The memory card (`ux0:`) shows up as a drive.
-3. Copy `GHVita.vpk` to the root of that drive (`ux0:/GHVita.vpk`), then eject the drive.
-4. Davi presses Circle to leave USB mode, highlights `ux0:/GHVita.vpk` in VitaShell, presses X and confirms the install.
+1. `git pull` on `main` in this repo's folder.
+2. Build: `cmake -S . -B build-vita -G Ninja -DCMAKE_TOOLCHAIN_FILE=$VITASDK/share/vita.toolchain.cmake && ninja -C build-vita`
+   (or the folder README.md says). It makes `build-vita/GHVita.vpk`. If linking fails with undefined `EVP_...`
+   symbols, this SDK's curl is the OpenSSL one: `vdpm install curl-mbedtls` (it replaces `curl`) and build again.
+   Check `assets/` isn't empty first: the VPK packs whatever is in it.
+3. Davi opens VitaShell on the Vita and presses SELECT for USB mode. The memory card (`ux0:`) shows up as a drive.
+4. Copy `build-vita/GHVita.vpk` to the root of that drive (`ux0:/GHVita.vpk`), then eject the drive.
+5. Davi presses Circle to leave USB mode, highlights `ux0:/GHVita.vpk` in VitaShell, presses X and confirms the install.
    It goes over the old game. Songs, players, scores and settings live in `ux0:data/ghvita/` and are untouched; don't
    touch that folder.
-5. Check: GH Vita opens, and DOWNLOAD SONGS lists Chorus Encore charts. Afterwards the VPK can be deleted from `ux0:/`.
+6. Check: GH Vita opens, and DOWNLOAD SONGS lists Chorus Encore charts. Afterwards the VPK can be deleted from `ux0:/`.
+   From then on the Vita updates itself from GitHub's releases again.
 
 ## 2. Give the cloud Claude the World Tour source files
 
