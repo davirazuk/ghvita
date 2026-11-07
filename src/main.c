@@ -3789,7 +3789,7 @@ static void options_screen(void)
         int back = options_from;
         go(back);
         if (back == S_PAUSE || back == S_MAIN)
-            menu_index = back == S_MAIN ? 3 : 2;    // back on OPTIONS
+            menu_index = back == S_MAIN ? 4 : 2;    // back on OPTIONS
         return;
     }
     gfx_begin(0, 0, 0);
@@ -3797,14 +3797,25 @@ static void options_screen(void)
     draw_background(res.bg_menu, RGBA(170, 170, 170, 255));
     banner("OPTIONS");
     panel(110, 96, 740, 356);
-    for (int i = 0; i < OPT_TABS; i++) {
-        float x = 110 + 740 * (i + 0.5f) / OPT_TABS;
-        font_draw(res.ui, opt_tab_names[i], x, 106, 21, i == opt_tab ? RGBA(255, 215, 110, 255) : RGBA(150, 145, 140, 255),
-                  ALIGN_CENTER);
-        if (i == opt_tab)
-            gfx_rect(x - 50, 134, 100, 2, RGBA(255, 215, 110, 255));
+    // the tabs spaced by their widths across the panel, the current one in a lit box
+    {
+        const float size = 19, left = 128, room = 704;
+        float widths[OPT_TABS], total = 0;
+        for (int i = 0; i < OPT_TABS; i++)
+            total += widths[i] = font_width(res.ui, opt_tab_names[i], size);
+        float gap = (room - total) / OPT_TABS, x = left + gap / 2;
+        for (int i = 0; i < OPT_TABS; i++) {
+            bool cur = i == opt_tab;
+            if (cur) {
+                gfx_rect(x - 8, 104, widths[i] + 16, 26, RGBA(255, 215, 110, 60));
+                gfx_rect(x - 8, 128, widths[i] + 16, 2, RGBA(255, 215, 110, 255));
+            }
+            font_draw(res.ui, opt_tab_names[i], x, 107, size, cur ? RGBA(255, 225, 140, 255) : RGBA(160, 155, 150, 255),
+                      ALIGN_LEFT);
+            x += widths[i] + gap;
+        }
     }
-    enum { ROWS = 8 };
+    enum { ROWS = 9 };
     if (menu_index < opt_top)
         opt_top = menu_index;
     if (menu_index >= opt_top + ROWS)
@@ -3813,12 +3824,12 @@ static void options_screen(void)
         int i = opt_tabs[opt_tab][opt_top + r];
         char name[48], value[48];
         option_text(i, name, value, sizeof(value));
-        float y = 142 + r * 36;
+        float y = 140 + r * 32;
         bool on = opt_top + r == menu_index;
         if (on)
-            gfx_sprite(atlas_get(res.hud, "wor_select"), 130, y - 3, 700, 38, WHITE);
+            gfx_sprite(atlas_get(res.hud, "wor_select"), 130, y - 3, 700, 34, WHITE);
         uint32_t c = on ? RGBA(255, 230, 150, 255) : RGBA(220, 215, 205, 255);
-        font_draw(res.ui, name, 160, y + 1, 28, c, ALIGN_LEFT);
+        font_draw(res.ui, name, 160, y + 1, 26, c, ALIGN_LEFT);
         // the volumes and percentages show as a bar as well
         int bar = i == O_MUSIC ? cfg.music_vol : i == O_SFX ? cfg.sfx_vol : i == O_CROWD ? cfg.crowd_vol
                   : i == O_HWALPHA ? cfg.highway_alpha : i == O_VLIGHT ? cfg.venue_light : i == O_SPEED ? cfg.speed : -1;
@@ -3826,13 +3837,13 @@ static void options_screen(void)
             gfx_rect(560, y + 13, 170, 8, RGBA(0, 0, 0, 170));
             gfx_rect(561, y + 14, 168 * bar / 10.0f, 6, on ? RGBA(255, 215, 110, 255) : RGBA(170, 150, 110, 255));
         }
-        font_draw_fit(res.ui, value, 800, y + 1, 28, bar >= 0 ? 60 : 380, c, ALIGN_RIGHT);
+        font_draw_fit(res.ui, value, 800, y + 1, 26, bar >= 0 ? 60 : 380, c, ALIGN_RIGHT);
     }
     // there's more above or below
     if (opt_top > 0)
         font_draw(res.ui, "...", SCREEN_W / 2, 116, 22, RGBA(220, 215, 205, 255), ALIGN_CENTER);
     if (opt_top + ROWS < count)
-        font_draw(res.ui, "...", SCREEN_W / 2, 434, 22, RGBA(220, 215, 205, 255), ALIGN_CENTER);
+        font_draw(res.ui, "...", SCREEN_W / 2, 432, 22, RGBA(220, 215, 205, 255), ALIGN_CENTER);
     static const char * about[O_COUNT] = {
         "How fast the notes come down the highway.",
         "The highway's look, from Guitar Hero 2, 3, World Tour and Metallica.",
@@ -3906,7 +3917,12 @@ static void options_screen(void)
                                 " Kick R or X"
                                                : "Red Left or Down, Yellow Up or Triangle, Blue Square or Circle, Green L,"
                                 " Kick R or X";
-    font_draw_fit(res.ui, text, SCREEN_W / 2, 462, 22, 820, RGBA(200, 200, 200, 255), ALIGN_CENTER);
+    // what the option does, on up to two lines
+    float tw = font_width(res.ui, text, 20);
+    if (tw <= 840)
+        font_draw(res.ui, text, SCREEN_W / 2, 460, 20, RGBA(200, 200, 200, 255), ALIGN_CENTER);
+    else
+        draw_wrapped(text, 60, 452, 18, 840, 2, RGBA(200, 200, 200, 255));
     static const char * help[] = {"btn_left", "Change", "btn_l", "Tab", "btn_r", "Tab", "btn_circle", "Done"};
     help_bar(help, 8);
     gfx_end();
