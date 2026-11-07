@@ -778,7 +778,8 @@ void config_defaults(void)
     cfg.music_vol = 10;
     cfg.sfx_vol = 8;
     cfg.crowd_vol = 5;
-    cfg.flat_notes = false;     // notes facing you: they read better than lying on the neck
+    cfg.flat_notes = false;
+    cfg.rival = 1;     // notes facing you: they read better than lying on the neck
     cfg.note_size = 1;
     cfg.last_diff = DIFF_MEDIUM;
     cfg.sing_diff = DIFF_MEDIUM;    // singing along judges the voice at Medium, not at the instrument's own
@@ -830,6 +831,8 @@ void config_load(void)
             cfg.live_stats = n != 0;
         else if (strcmp(k, "no_ghost") == 0)
             cfg.no_ghost = n != 0;
+        else if (strcmp(k, "rival") == 0)
+            cfg.rival = n < 0 ? 0 : n > 3 ? 3 : n;
         else if (strcmp(k, "vanish") == 0)
             cfg.vanish = n != 0;
         else if (strcmp(k, "no_miss_sound") == 0)
@@ -944,7 +947,7 @@ void config_save(void)
             cfg.no_popups, cfg.timing_bar, cfg.live_stats, cfg.vanish, cfg.no_miss_sound, cfg.no_rear_whammy, cfg.no_bend, cfg.no_countdown);
     fprintf(f, "double_kick = %d\nfive_pads = %d\neasy_sustains = %d\nno_count_in = %d\nstage_screens = %d\nno_progress = %d\ncup_skin = %d\n", cfg.double_kick, cfg.five_pads, cfg.easy_sustains,
             cfg.no_count_in, cfg.stage_screens, cfg.no_progress, cfg.cup_skin);
-    fprintf(f, "no_ghost = %d\nnotes_look = 1\n", cfg.no_ghost);
+    fprintf(f, "no_ghost = %d\nnotes_look = 1\nrival = %d\n", cfg.no_ghost, cfg.rival);
     fclose(f);
     remove(path);
     rename(tmp, path);

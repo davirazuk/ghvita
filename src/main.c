@@ -49,7 +49,7 @@ static int view_n, view_cap;
 static bool view_stale = true;
 static char find_text[64];
 // what the song list shows: the made-up lists (played long ago, never five stars, short ones), then SHOW_PART + each part
-enum { SHOW_ALL, SHOW_FAVS, SHOW_NEW, SHOW_STALE, SHOW_UNSTARRED, SHOW_SHORT, SHOW_LONG, SHOW_PART };
+enum { SHOW_ALL, SHOW_FAVS, SHOW_NEW, SHOW_STALE, SHOW_UNSTARRED, SHOW_NOGOLD, SHOW_SHORT, SHOW_LONG, SHOW_PART };
 static int show;
 static double sel_t;
 static Tex * art;
@@ -1952,6 +1952,16 @@ static void draw_medal(int m, float x, float y, float r)
     font_draw(res.ui, c, x, y - r * 0.8f, r * 1.5f, RGBA(40, 30, 20, 255), ALIGN_CENTER);
 }
 
+// a full combo on some part at some difficulty
+static bool song_has_gold(const Song * s)
+{
+    for (int p = 0; p < PART_COUNT; p++)
+        for (int d = 0; d < DIFF_COUNT; d++)
+            if (s->best[p][d].fc)
+                return true;
+    return false;
+}
+
 // all the medals won, over every song: {bronze, silver, gold}
 static void medal_totals(int out[4])
 {
@@ -1981,6 +1991,7 @@ static bool song_shown(const Song * s)
     if ((show == SHOW_FAVS && !s->fav) || (show == SHOW_NEW && s->plays) ||
         (show == SHOW_STALE && (!s->plays || s->last_played > month_ago)) ||
         (show == SHOW_UNSTARRED && (!s->plays || song_starred(s))) ||
+        (show == SHOW_NOGOLD && (!s->plays || song_has_gold(s))) ||
         (show == SHOW_SHORT && (s->length_ms <= 0 || s->length_ms > 180000)) ||
         (show == SHOW_LONG && s->length_ms <= 360000) ||
         (show >= SHOW_PART && !(s->parts & (1 << (show - SHOW_PART)))))
@@ -2023,6 +2034,8 @@ static const char * show_name(void)
         return "Not played in a month";
     if (show == SHOW_UNSTARRED)
         return "Played, never 5 stars";
+    if (show == SHOW_NOGOLD)
+        return "Played, no gold medal yet";
     if (show == SHOW_SHORT)
         return "Short (3 min or less)";
     if (show == SHOW_LONG)
@@ -2335,6 +2348,7 @@ static void song_list(void)
         const Score * b = &x->best[first_part(x)][cfg.last_diff];
         if (b->stars)
             draw_stars(b->stars, 470, y + 30, 18);
+        draw_medal(medal_of(b), 572, y + 39, 9);
         if (x->fav)
             gfx_sprite(atlas_get(res.hud, "hud_star_gold"), 20, y + 16, 20, 20, WHITE);
     }
@@ -2853,7 +2867,7 @@ static void finish_song(int how)
     if (s && !result.failed) {
         Score sc = {result.score, (uint8_t)result.stars,
                     (uint8_t)(result.notes_total ? result.notes_hit * 100 / result.notes_total : 0), result.fc};
-        result_best = result.score > s->best[result.part][result.diff].score;
+        result_best = !autoplay && result.score > s->best[result.part][result.diff].score;
         int had = medal_of(&s->best[result.part][result.diff]), got = medal_of(&sc);
         result_medal = got > had && !autoplay ? got : 0;
         if (!autoplay)
@@ -3124,11 +3138,15 @@ static void results_screen(void)
     rows[5].label = "Your timing";
     if (!result.timed)
         strcpy(rows[5].value, "-");
-    else if (abs(result.off_ms) < 5)
-        strcpy(rows[5].value, "Right on it");
-    else
-        snprintf(rows[5].value, sizeof(rows[5].value), "%d ms %s", abs(result.off_ms),
-                 result.off_ms > 0 ? "late" : "early");
+    else {
+        // how many hits were within 30 ms, and which way the rest leaned
+        int all = result.early + result.on_time + result.late, on = all ? result.on_time * 100 / all : 0;
+        if (abs(result.off_ms) < 5)
+            snprintf(rows[5].value, sizeof(rows[5].value), "%d%% on time, right on it", on);
+        else
+            snprintf(rows[5].value, sizeof(rows[5].value), "%d%% on time, %d ms %s", on, abs(result.off_ms),
+                     result.off_ms > 0 ? "late" : "early");
+    }
     for (int i = 0; i < 6; i++) {
         float y = 200 + i * 31;
         font_draw_shadow(res.ui, rows[i].label, 330, y, 28, RGBA(220, 210, 200, 255), ALIGN_LEFT);
@@ -3137,6 +3155,17 @@ static void results_screen(void)
     bool strip = false;
     for (int i = 0; i < RESULT_STRIP; i++)
         strip |= result.strip[i] != 255;
+    if (result.timed && !results_history) {
+        // early, on time, late: a thin bar under the timing row
+        int all = result.early + result.on_time + result.late;
+        if (all) {
+            const float x = 330, w = 540, y = 386;
+            float e = w * result.early / all, o = w * result.on_time / all;
+            gfx_rect(x, y, e, 5, RGBA(110, 170, 255, 255));
+            gfx_rect(x + e, y, o, 5, RGBA(110, 220, 120, 255));
+            gfx_rect(x + e + o, y, w - e - o, 5, RGBA(255, 150, 90, 255));
+        }
+    }
     if (results_history) {
         // the last plays as bars, this one lit; the best and the average beside
         const float x = 84, w = 792, top = 396, h = 34;
@@ -3436,13 +3465,13 @@ static void tour_screen(void)
 
 enum { O_SPEED, O_HIGHWAY, O_VENUE, O_BAND, O_SING, O_SINGDIFF, O_OFFSET, O_LAYOUT, O_DRUMKEYS, O_DRUMHITS, O_TILT, O_NOFAIL, O_LEFTY, O_MUSIC, O_SFX, O_CROWD, O_FPS,
        O_CAMERA, O_HWALPHA, O_VLIGHT, O_FLASH, O_POPUPS, O_TIMING, O_LIVE, O_VANISH, O_MISSSND, O_REAR, O_BEND, O_COUNTDOWN,
-       O_RESET, O_FIVEPADS, O_DOUBLEKICK, O_EASYSUS, O_COUNTIN, O_SCREENS, O_PROGRESS, O_CUPS, O_AUTOREPRESS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, O_CROWDHANDS, O_VIGNETTE, O_LYRICS, O_MENUMUSIC, O_SINGSP, O_SHRINKCHECK, O_GHOST, O_COUNT };
+       O_RESET, O_FIVEPADS, O_DOUBLEKICK, O_EASYSUS, O_COUNTIN, O_SCREENS, O_PROGRESS, O_CUPS, O_AUTOREPRESS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, O_CROWDHANDS, O_VIGNETTE, O_LYRICS, O_MENUMUSIC, O_SINGSP, O_SHRINKCHECK, O_GHOST, O_RIVAL, O_COUNT };
 
 // the options by subject, L and R between them
 enum { OPT_TABS = 7, OPT_TAB_MAX = 11 };
 static const char * opt_tab_names[OPT_TABS] = {"GAME", "CONTROLS", "HIGHWAY", "STAGE", "SCREEN", "SOUND", "LIBRARY"};
 static const int opt_tabs[OPT_TABS][OPT_TAB_MAX + 1] = {
-    {O_SPEED, O_OFFSET, O_NOFAIL, O_EASYSUS, O_AUTOREPRESS, O_VANISH, O_COUNTDOWN, O_SING, O_SINGDIFF, O_RESET, -1},
+    {O_SPEED, O_OFFSET, O_NOFAIL, O_EASYSUS, O_AUTOREPRESS, O_VANISH, O_COUNTDOWN, O_SING, O_SINGDIFF, O_RIVAL, O_RESET, -1},
     {O_LAYOUT, O_DRUMKEYS, O_FIVEPADS, O_DOUBLEKICK, O_LEFTY, O_TILT, O_REAR, O_SINGSP, -1},
     {O_HIGHWAY, O_HWALPHA, O_CAMERA, O_CUPS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, -1},
     {O_VENUE, O_VLIGHT, O_BAND, O_CROWDHANDS, O_VIGNETTE, O_SCREENS, O_FLASH, -1},
@@ -3568,6 +3597,12 @@ static void option_text(int i, char * name, char * value, size_t n)
     case O_POPUPS: strcpy(name, "Streak messages"); snprintf(value, n, "%s", cfg.no_popups ? "Off" : "On"); break;
     case O_TIMING: strcpy(name, "Timing bar"); snprintf(value, n, "%s", cfg.timing_bar ? "On" : "Off"); break;
     case O_LIVE: strcpy(name, "Live percent"); snprintf(value, n, "%s", cfg.live_stats ? "On" : "Off"); break;
+    case O_RIVAL: {
+        static const char * const lv[4] = {"Easy", "Normal", "Hard", "Brutal"};
+        strcpy(name, "Battle rival");
+        snprintf(value, n, "%s", lv[cfg.rival & 3]);
+        break;
+    }
     case O_GHOST: strcpy(name, "Race your best"); snprintf(value, n, "%s", cfg.no_ghost ? "Off" : "On"); break;
     case O_VANISH: strcpy(name, "Vanishing notes"); snprintf(value, n, "%s", cfg.vanish ? "On" : "Off"); break;
     case O_MISSSND: strcpy(name, "Wrong note sounds"); snprintf(value, n, "%s", cfg.no_miss_sound ? "Off" : "On"); break;
@@ -3665,6 +3700,7 @@ static void change_option(int i, int d)
     case O_TIMING: cfg.timing_bar = !cfg.timing_bar; break;
     case O_LIVE: cfg.live_stats = !cfg.live_stats; break;
     case O_GHOST: cfg.no_ghost = !cfg.no_ghost; break;
+    case O_RIVAL: cfg.rival = (cfg.rival + d + 4) % 4; break;
     case O_VANISH: cfg.vanish = !cfg.vanish; break;
     case O_MISSSND: cfg.no_miss_sound = !cfg.no_miss_sound; break;
     case O_REAR: cfg.no_rear_whammy = !cfg.no_rear_whammy; break;
@@ -3843,6 +3879,7 @@ static void options_screen(void)
         "While Star Power is banked, singing a note in tune starts it, like YARG's voice-activated option.",
         "X counts the songs whose audio isn't shrunk to Opus yet, then X shrinks them, right on the Vita.",
         "GHOST +1200: how far ahead (or behind) your best run on the chart you were at this point.",
+        "How good the computer rival is in a battle (Triangle on GET READY).",
     };
     char line[160];
     const char * text = about[opt];
@@ -4076,8 +4113,10 @@ static void players_screen(void)
 // Square on a card: the name, the colour, a picture (one of your songs' covers, one downloaded, or one of yours from
 // the card's avatars folder), or the player gone.
 
-enum { PE_NAME, PE_COLOR, PE_SONGS, PE_WEB, PE_CARD, PE_CLEAR, PE_DELETE, PE_ROWS };
-static int pe_cover = -1, pe_card;
+enum { PE_NAME, PE_COLOR, PE_GH, PE_SONGS, PE_WEB, PE_CARD, PE_CLEAR, PE_DELETE, PE_ROWS };
+static int pe_cover = -1, pe_card, pe_gh;
+static char pe_ghs[48][64];                // the game's own Guitar Hero pictures (assets/avatars)
+static int pe_gh_n = -1;
 static Tex * pe_prev;                   // the picture the row offers, before it's taken
 static char pe_prev_path[460];
 static char pe_files[64][128];          // the avatars folder's pictures
@@ -4162,6 +4201,24 @@ static void pe_show(const char * path)
     snprintf(pe_prev_path, sizeof(pe_prev_path), "%s", path);
 }
 
+static void pe_list_gh(void)
+{
+    pe_gh_n = 0;
+    char d[400];
+    snprintf(d, sizeof(d), "%savatars", plat_asset_dir());
+    DIR * dir = opendir(d);
+    if (!dir)
+        return;
+    struct dirent * e;
+    while ((e = readdir(dir)) && pe_gh_n < 48) {
+        const char * x = strrchr(e->d_name, '.');
+        if (x && !strcasecmp(x, ".jpg"))
+            snprintf(pe_ghs[pe_gh_n++], sizeof(pe_ghs[0]), "%s", e->d_name);
+    }
+    closedir(dir);
+    qsort(pe_ghs, pe_gh_n, sizeof(pe_ghs[0]), (int (*)(const void *, const void *))strcmp);
+}
+
 static void pe_list_files(void)
 {
     pe_file_n = 0;
@@ -4238,6 +4295,8 @@ static void player_edit_screen(void)
     }
     if (pe_file_n < 0)
         pe_list_files();
+    if (pe_gh_n < 0)
+        pe_list_gh();
     int was = pe_row;
     if (repeat & BTN_UP)
         pe_row = (pe_row + PE_ROWS - 1) % PE_ROWS;
@@ -4252,6 +4311,8 @@ static void player_edit_screen(void)
         ui_sound(SND_UI_MOVE);
         if (pe_row == PE_COLOR)
             player_set_color(me, player_color(me) + d);
+        else if (pe_row == PE_GH && pe_gh_n > 0)
+            pe_gh = (pe_gh + d + pe_gh_n) % pe_gh_n;
         else if (pe_row == PE_SONGS)
             pe_next_cover(d);
         else if (pe_row == PE_WEB && pe_cover_n > 0) {
@@ -4275,7 +4336,9 @@ static void player_edit_screen(void)
     }
     // what the row offers, in the preview
     char offer[460] = "";
-    if (pe_row == PE_SONGS) {
+    if (pe_row == PE_GH && pe_gh_n > 0)
+        snprintf(offer, sizeof(offer), "%savatars/%s", plat_asset_dir(), pe_ghs[pe_gh % pe_gh_n]);
+    else if (pe_row == PE_SONGS) {
         if (pe_cover < 0)
             pe_next_cover(1);
         if (pe_cover >= 0)
@@ -4310,6 +4373,7 @@ static void player_edit_screen(void)
             dl_typing = true;
             break;
         case PE_COLOR: player_set_color(me, player_color(me) + 1); break;
+        case PE_GH:
         case PE_SONGS: ok = offer[0] && pe_take_file(offer, false); break;
         case PE_WEB: ok = pe_web_state == 2 && offer[0] && pe_take_file(offer, true); break;
         case PE_CARD: ok = offer[0] && pe_take_file(offer, true); break;
@@ -4343,12 +4407,12 @@ static void player_edit_screen(void)
             say(pe_row == PE_WEB && pe_web_state == 1   ? "Still downloading, a moment"
                 : pe_row == PE_WEB && pe_web_state != 2 ? "The download failed: Triangle tries another"
                                                         : "That picture couldn't be used");
-        else if (pe_row == PE_SONGS || pe_row == PE_WEB || pe_row == PE_CARD)
+        else if (pe_row == PE_GH || pe_row == PE_SONGS || pe_row == PE_WEB || pe_row == PE_CARD)
             say("Picture set");
     } else if (pressed & BTN_CIRCLE) {
         ui_sound(SND_UI_BACK);
         pe_delete_armed = false;
-        pe_file_n = -1;
+        pe_file_n = pe_gh_n = -1;
         tex_free(pe_prev);
         pe_prev = NULL;
         pe_prev_path[0] = 0;
@@ -4361,10 +4425,15 @@ static void player_edit_screen(void)
     banner("EDIT PLAYER");
     panel(30, 84, 560, 400);
     char vals[PE_ROWS][96];
-    static const char * const labels[PE_ROWS] = {"Name", "Colour", "Picture from your songs", "Download an album cover",
+    static const char * const labels[PE_ROWS] = {"Name", "Colour", "Guitar Hero picture", "Picture from your songs",
+                                                 "Download an album cover",
                                                  "Picture from the card", "No picture", "Delete player"};
     snprintf(vals[PE_NAME], 96, "%s", player_name(me));
     snprintf(vals[PE_COLOR], 96, "< %d >", player_color(me) + 1);
+    if (pe_gh_n > 0)
+        snprintf(vals[PE_GH], 96, "< %d of %d >", pe_gh % pe_gh_n + 1, pe_gh_n);
+    else
+        snprintf(vals[PE_GH], 96, "none");
     snprintf(vals[PE_SONGS], 96, "%s", pe_cover >= 0 ? songs_get(pe_cover)->name : "no covers");
     if (pe_search_state == 1)
         snprintf(vals[PE_WEB], 96, "searching...");
@@ -4376,7 +4445,7 @@ static void player_edit_screen(void)
     snprintf(vals[PE_CLEAR], 96, "%s", "");
     snprintf(vals[PE_DELETE], 96, "%s", pe_delete_armed ? "X again to delete" : "");
     for (int i = 0; i < PE_ROWS; i++) {
-        float y = 102 + i * 52;
+        float y = 98 + i * 47;
         bool cur = i == pe_row;
         if (cur)
             gfx_sprite(atlas_get(res.hud, "wor_select"), 44, y - 4, 532, 46, WHITE);
@@ -4388,7 +4457,7 @@ static void player_edit_screen(void)
     // the card as it is, and what the row offers
     draw_player_face(me, 770, 100, 170, true);
     font_draw_fit(res.ui, player_name(me), 770, 280, 28, 300, RGBA(255, 236, 190, 255), ALIGN_CENTER);
-    if (pe_row == PE_SONGS || pe_row == PE_WEB || pe_row == PE_CARD) {
+    if (pe_row == PE_GH || pe_row == PE_SONGS || pe_row == PE_WEB || pe_row == PE_CARD) {
         font_draw(res.ui, "Picture:", 650, 330, 18, RGBA(180, 180, 185, 255), ALIGN_LEFT);
         if (pe_prev)
             gfx_sprite(&(Sprite){pe_prev, 0, 0, 1, 1, 120, 120}, 770 - 60, 350, 120, 120, WHITE);
@@ -4411,7 +4480,7 @@ static void player_edit_screen(void)
     } else if (pe_row == PE_WEB) {
         static const char * help[] = {"btn_cross", "Use it", "btn_left", "Browse", "btn_triangle", "Search", "btn_circle", "Back"};
         help_bar(help, 8);
-    } else if (pe_row == PE_SONGS || pe_row == PE_CARD) {
+    } else if (pe_row == PE_GH || pe_row == PE_SONGS || pe_row == PE_CARD) {
         static const char * help[] = {"btn_cross", "Use it", "btn_left", "Browse", "btn_circle", "Back"};
         help_bar(help, 6);
     } else {
@@ -4541,12 +4610,11 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
-        "Players: WHO'S PLAYING? at the start. Square edits a card: name, colour, a picture (your songs' covers, album covers downloaded from Chorus, or your own), delete.",
-        "Battle: Triangle on GET READY. Star Power phrases become attacks against a computer rival.",
-        "DAILY SONG on the main menu, with a streak. Medals (bronze, silver, gold) on every chart.",
-        "28 achievements on CAREER (press R). Race your best: GHOST +/- shows how you're doing against your best run.",
-        "Practice: start, end, then speed, step by step. Speed up as you clear. Speeds over 100% really play faster now.",
-        "Results: R shows your last 10 plays. Singing along shows the vocals' own score. Select > Check for newer charts.",
+        "Downloads and update checks work on the Vita again (builds 62 to 75 couldn't connect).",
+        "Player pictures: Guitar Hero logos, the griffin and World Tour's magazines, or download any album cover.",
+        "Results: how many hits were on time, with an early / on time / late bar under Your timing.",
+        "Medals show in the song list. Show > Played, no gold medal yet. Options > Game > Battle rival: Easy to Brutal.",
+        "Earlier: players, battle mode, medals, achievements, race your best, daily song, practice speed-ups.",
     };
     int n = (int)(sizeof(lines) / sizeof(lines[0]));
     gfx_begin(0, 0, 0);
