@@ -22,6 +22,11 @@ n = int(run('git', 'rev-list', '--count', 'HEAD')); tag = f'v{n}'
 # the bot plays the test songs on the desktop build first: a build that crashes or drops notes never goes out
 if not a.no_smoke and subprocess.run(['bash', 'test/smoke.sh']).returncode != 0:
     sys.exit('the smoke test failed (test/smoke.sh): fix it, or --no-smoke to release anyway')
+# the build number also has to pass the newest release (a squash or a merge can leave the count behind it), or the
+# Vita's updater would never offer it
+newest = subprocess.run(['gh', 'release', 'view', '--json', 'tagName', '-q', '.tagName'], capture_output=True, text=True).stdout.strip()
+if newest[1:].isdigit() and int(newest[1:]) >= n:
+    n = int(newest[1:]) + 1; tag = f'v{n}'
 if subprocess.run(['gh', 'release', 'view', tag], capture_output=True).returncode == 0:
     sys.exit(f'{tag} is out already')
 sdk = os.environ.get('VITASDK', os.path.expanduser('~/opt/vitasdk'))
