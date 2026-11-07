@@ -638,6 +638,18 @@ static void main_menu(void)
     gfx_begin(0, 0, 0);
     gfx_2d();
     draw_background(res.bg_menu, WHITE);
+    {
+        // two stage lights drifting over the wall, in World Tour's amber and blue
+        const Sprite * glow = atlas_get(res.game, "glow");
+        float t = (float)now_s;
+        gfx_blend(BLEND_ADD);
+        for (int k = 0; k < 2; k++) {
+            float x = SCREEN_W / 2 + sinf(t * (0.23f + k * 0.11f) + k * 2.4f) * 380;
+            float y = 220 + sinf(t * (0.31f + k * 0.07f) + k) * 120, r = 260 + 40 * sinf(t * 0.5f + k);
+            gfx_sprite(glow, x - r, y - r, r * 2, r * 2, k ? RGBA(70, 120, 255, 140) : RGBA(255, 160, 60, 140));
+        }
+        gfx_blend(BLEND_ALPHA);
+    }
     if (res.logo)
         gfx_sprite(&(Sprite){res.logo, 0, 0, 1, 1, 512, 370}, 535, 46, 350, 253, WHITE);
     panel(40, 108, 420, 340);
