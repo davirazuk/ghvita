@@ -109,6 +109,8 @@ static struct {
     float band_loud;            // the song's loudness, smoothed
     int drum_stems[MAX_STEMS], drum_stem_count;
     double flame_t[6];
+    double miss_t[6];                   // a lane's last miss: its cup flashes red
+    double wave_t;                      // a streak milestone: a wave of light up the neck
     uint32_t held;              // lanes held (bit per lane, LANE_OPEN = bit 5)
     float miss_flash, sp_flash;
     bool vocal;                         // the Vocals part: no highway, vocals.c has the notes
@@ -1436,8 +1438,11 @@ static void reset_play(void)
     G.cam_z = G.cam_tz = 1.04f;
     G.cam_tx = G.cam_ty = 0;
     G.focus = -1;
-    for (int i = 0; i < 6; i++)
+    for (int i = 0; i < 6; i++) {
         G.flame_t[i] = -100;
+        G.miss_t[i] = -100;
+    }
+    G.wave_t = -100;
     G.held = 0;
     G.touch_count = 0;
     double first = p->note_count ? p->notes[0].time / 1e6 : 0;
@@ -1905,6 +1910,9 @@ static void miss_note(int i)
     }
 #endif
     mark_judged(G.part->notes[i].frets);
+    for (int l = 0; l < 6; l++)
+        if (G.part->notes[i].frets & (1 << l))
+            G.miss_t[l] = G.t;
     G.misses++;
     break_streak();
     G.miss_flash = 1;
@@ -1962,6 +1970,7 @@ static void hit_note(int i)
         char t[32];
         snprintf(t, sizeof(t), "%d NOTE STREAK!", G.streak);
         popup(t);
+        G.wave_t = G.t;
         G.cheer = 1;
         sound_play(res.snd[SND_CHEER1 + rand() % 3], cfg.crowd_vol * 0.05f, false);
         if (G.streak % 100 == 0)
@@ -3185,6 +3194,21 @@ static void draw_flames(void)
             float ang = j * 6.2831853f / 14;
             float px = x + cosf(ang) * r * 0.9f, pz = sinf(ang) * r * 0.55f;
             board(px, 0.04f, pz, 0.2f, 0.2f, dot, 0, 0, 1, 1, with_alpha(lc, 0.7f * ra * ra));
+        }
+    }
+    // a miss: the cup flashes red
+    for (int l = 0; l < G.lanes; l++) {
+        double since = G.t - G.miss_t[l];
+        if (since >= 0 && since < 0.25)
+            lay(lane_x(l), 0.07f, 0, 1.6f, 1.3f, dot, with_alpha(RGBA(255, 40, 30, 255), 0.9f * (1 - (float)since / 0.25f)));
+    }
+    // a streak milestone: a band of light sweeps from the strikeline to the far end
+    {
+        double since = G.t - G.wave_t;
+        if (since >= 0 && since < 0.7) {
+            float z = (float)since / 0.7f * Z_FAR, a = 1 - (float)since / 0.7f;
+            uint32_t c = G.sp_active ? RGBA(120, 200, 255, 255) : RGBA(255, 210, 120, 255);
+            flat(-HALF_W, HALF_W, z - 1.4f, z + 0.3f, 0.025f, NULL, 0, 1, with_alpha(c, 0), with_alpha(c, 0.55f * a));
         }
     }
     // a held sustain: its cup burns steady, a flicker on top
