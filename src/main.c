@@ -638,6 +638,18 @@ static void main_menu(void)
     gfx_begin(0, 0, 0);
     gfx_2d();
     draw_background(res.bg_menu, WHITE);
+    {
+        // two stage lights drifting over the wall, in World Tour's amber and blue
+        const Sprite * glow = atlas_get(res.game, "glow");
+        float t = (float)now_s;
+        gfx_blend(BLEND_ADD);
+        for (int k = 0; k < 2; k++) {
+            float x = SCREEN_W / 2 + sinf(t * (0.23f + k * 0.11f) + k * 2.4f) * 380;
+            float y = 220 + sinf(t * (0.31f + k * 0.07f) + k) * 120, r = 260 + 40 * sinf(t * 0.5f + k);
+            gfx_sprite(glow, x - r, y - r, r * 2, r * 2, k ? RGBA(70, 120, 255, 140) : RGBA(255, 160, 60, 140));
+        }
+        gfx_blend(BLEND_ALPHA);
+    }
     if (res.logo)
         gfx_sprite(&(Sprite){res.logo, 0, 0, 1, 1, 512, 370}, 535, 46, 350, 253, WHITE);
     panel(40, 108, 420, 340);
@@ -2198,7 +2210,7 @@ static int setlist_find(int song)
 
 static void list_menu_update(void)
 {
-    enum { ROWS = 9 };
+    enum { ROWS = 10 };
     Song * s = songs_get(sel);
     if (repeat & BTN_UP)
         list_row = (list_row + ROWS - 1) % ROWS;
@@ -2258,6 +2270,21 @@ static void list_menu_update(void)
         else if (list_row == 8) {
             updates_check();
             list_menu = false;
+        } else if (list_row == 9 && view_n) {
+            // a gig of five songs picked at random from what the list shows, played as a setlist
+            setlist_n = 0;
+            for (int tries = 0; setlist_n < 5 && setlist_n < view_n && tries < 200; tries++) {
+                int k = view[rand() % view_n];
+                if (setlist_find(k) < 0)
+                    setlist[setlist_n++] = k;
+            }
+            setlist_at = 0;
+            sel = setlist[0];
+            list_menu = false;
+            stop_preview();
+            open_select(songs_get(sel));
+            pressed = repeat = 0;
+            return;
         }
     }
     if (pressed & (BTN_CIRCLE | BTN_SELECT)) {
@@ -2270,8 +2297,8 @@ static void list_menu_update(void)
 static void list_menu_draw(const Song * s)
 {
     gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(0, 0, 0, 170));
-    panel(200, 70, 560, 426);
-    char rows[9][64];
+    panel(200, 62, 560, 440);
+    char rows[10][64];
     snprintf(rows[0], sizeof(rows[0]), "Sort by   %s", sort_name(cfg.sort));
     snprintf(rows[1], sizeof(rows[1]), "Show   %s", show_name());
     snprintf(rows[2], sizeof(rows[2]), "%s", s && s->fav ? "Take out of favourites" : "Add to favourites");
@@ -2285,10 +2312,11 @@ static void list_menu_draw(const Song * s)
         snprintf(rows[8], sizeof(rows[8]), "Checking for newer charts %d/%d", done, total);
     else
         snprintf(rows[8], sizeof(rows[8]), "Check for newer charts");
-    for (int i = 0; i < 9; i++) {
-        float y = 86 + i * 44;
+    snprintf(rows[9], sizeof(rows[9]), "Random gig: 5 songs from this list");
+    for (int i = 0; i < 10; i++) {
+        float y = 78 + i * 42;
         if (i == list_row)
-            select_bar(224, y - 4, 512, 42, WHITE);
+            select_bar(224, y - 4, 512, 40, WHITE);
         font_draw_fit(res.ui, rows[i], SCREEN_W / 2, y + 2, 28, 460, i == list_row ? RGBA(255, 230, 150, 255)
                                                                                    : RGBA(220, 215, 205, 255), ALIGN_CENTER);
     }
@@ -2617,15 +2645,22 @@ static void draw_select(const Song * s, bool loading)
                       ALIGN_CENTER);
     } else
         font_draw(res.ui, "Not played yet", 770, 404, 22, RGBA(180, 178, 172, 255), ALIGN_CENTER);
+    if (setlist_at >= 0 && setlist_n > 1 && !tour_on) {
+        char t2[48];
+        snprintf(t2, sizeof(t2), "Setlist: song %d of %d", setlist_at + 1, setlist_n);
+        font_draw_fit(res.ui, t2, SCREEN_W / 2, 74, 22, 560, RGBA(255, 200, 120, 255), ALIGN_CENTER);
+    }
     if (tour_on) {
         char t2[80];
         snprintf(t2, sizeof(t2), "%s%s", tour_boss() ? "Boss battle at " : tour_slot == TOUR_ENCORE ? "Encore at " : "Live at ",
                  res_venue_title(tour_zone(tour_leg, tour_gig)));
         font_draw_fit(res.ui, t2, SCREEN_W / 2, 84, 24, 560, RGBA(255, 200, 120, 255), ALIGN_CENTER);
     }
-    if (loading)
-        font_draw_shadow(res.title, "LOADING", SCREEN_W / 2, 488, 36, RGBA(255, 220, 120, 255), ALIGN_CENTER);
-    else {
+    if (loading) {
+        gfx_rect(0, 480, SCREEN_W, 64, RGBA(0, 0, 0, 200));
+        font_draw_shadow(res.title, "LOADING", SCREEN_W / 2, 482, 30, RGBA(255, 220, 120, 255), ALIGN_CENTER);
+        font_draw(res.ui, res_tip(false), SCREEN_W / 2, 516, 17, RGBA(220, 215, 205, 255), ALIGN_CENTER);
+    } else {
         const char * help[16] = {"btn_cross", "Rock!", "btn_circle", "Back", "btn_left", "Part", "btn_up", "Difficulty",
                                  "btn_square", "Practice"};
         int nh = 10;
@@ -2939,6 +2974,7 @@ static void select_screen(void)
     if (select_starting) {
         // the chart, the highway picture and the stems take the Vita a second or so: the screen says so meanwhile
         select_starting = false;
+        res_tip(true);
         if (tour_boss() && sel_part != PART_VOCALS)
             game_battle(tour_boss_level());
         if (game_start(s, sel_part, sel_diff)) {
@@ -5079,20 +5115,13 @@ static void news_screen(void)
 {
     static const char * const lines[] = {
         "FACE-OFF: Select on GET READY. Play, PASS THE VITA to a friend, they play the same chart, then the verdict.",
-        "Titles: show any achievement you've unlocked on your player card (Edit Player > Title).",
-        "SONG COMPLETE! as the crowd cheers before the results. The ghost race has bars. Menu highlights breathe.",
-        "Every hit flashes and sends a ring of light out; a miss flashes red; held sustains burn; every 50 streak sweeps the neck.",
-        "Star Power: the neck glows blue on the beat and comets run up the rails (no more spiky lightning).",
-        "The band is backlit in the stage's colours; cameras flash in the crowd when you're rocking.",
-        "Results: the score counts up and the stars land one by one. Menus fade in. The song list shows the cover big.",
-        "Calibrate shows the beat and where each of your taps landed. Song list: sort by Recently played.",
-        "World Tour: each leg ends on a BOSS BATTLE encore against a rival who gets tougher leg by leg.",
-        "Battles show a tug-of-war bar across the top. The song list shows every song's cover.",
-        "Fixed: the SOLO! percent could go past 100%.",
-        "Career counts your battles won. New achievements: Rival Slayer, Duelist, Giant Killer (beat a Brutal rival).",
-        "A singer's results show phrases sung, not frets. Singing along: the vocals' score sits on a dark backing.",
-        "Pause: PRACTICE THIS PART. Battle: a smarter rival, Speed Up, INCOMING warnings, Options > Game > Battle rival.",
-        "The main menu shows who's playing. New GET READY and Options screens.",
+        "Every hit flashes and rings out across the neck; misses flash red; sustains burn; streaks sweep the neck.",
+        "Star Power: the neck glows blue on the beat and comets run up the rails. The camera punches in.",
+        "The band is backlit, cameras flash in the crowd, choruses strobe the stage. SONG COMPLETE! before results.",
+        "Results count up with the stars landing one by one. Menus fade in and their highlights breathe.",
+        "Song intro card slides in with the cover. Loading screens show tips. Main menu lights drift.",
+        "Titles: show an unlocked achievement on your player card. Song list menu: Random gig of 5 songs.",
+        "The ghost race has bars. The song list shows the cover big behind it.",
     };
     int n = (int)(sizeof(lines) / sizeof(lines[0]));
     gfx_begin(0, 0, 0);
@@ -5101,9 +5130,25 @@ static void news_screen(void)
     banner("WHAT'S NEW IN THIS BUILD");
     panel(150, 96, 660, 400);
     // each item on up to two lines
-    float y = 114;
-    for (int i = 0; i < n; i++)
-        y += draw_wrapped(lines[i], 170, y, 18, 620, 2, RGBA(230, 230, 235, 255)) + 11;
+    // up and down scroll it when it runs past the panel
+    static float scroll;
+    if (repeat & BTN_DOWN)
+        scroll += 40;
+    if (repeat & BTN_UP)
+        scroll -= 40;
+    scroll = scroll < 0 ? 0 : scroll > 600 ? 600 : scroll;
+    float y = 114 - scroll, bottom = 114;
+    for (int i = 0; i < n; i++) {
+        float h = 0;
+        if (y > 100 && y < 470)
+            h = draw_wrapped(lines[i], 170, y, 18, 620, 2, RGBA(230, 230, 235, 255));
+        else
+            h = 40;
+        y += h + 11;
+        bottom = y + scroll;
+    }
+    if (scroll > bottom - 470)
+        scroll = bottom - 470 > 0 ? bottom - 470 : 0;
     font_draw_shadow(res.ui, "X  continue", SCREEN_W / 2, 498, 20, RGBA(180, 220, 255, 255), ALIGN_CENTER);
     draw_toast();
     gfx_end();

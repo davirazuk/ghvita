@@ -110,7 +110,9 @@ static struct {
     int drum_stems[MAX_STEMS], drum_stem_count;
     double flame_t[6];
     double miss_t[6];                   // a lane's last miss: its cup flashes red
-    double wave_t;                      // a streak milestone: a wave of light up the neck
+    double wave_t;
+    double strobe_t;                    // a chorus came in: the stage strobes
+    float kick;                         // the camera's jolt: Star Power, a big moment (decays)                      // a streak milestone: a wave of light up the neck
     uint32_t held;              // lanes held (bit per lane, LANE_OPEN = bit 5)
     float miss_flash, sp_flash;
     bool vocal;                         // the Vocals part: no highway, vocals.c has the notes
@@ -422,6 +424,7 @@ static bool update_section(void)
         G.section_pal = (big ? warm : cool)[h % 3];
         if (strstr(low, "chorus") && G.rock >= 0.5f) {
             G.pyro_t = G.t;
+            G.strobe_t = G.t;
             party();
         }
     }
@@ -786,9 +789,12 @@ static void draw_stage(void)
     G.cam_tz += (zoom - G.cam_tz) * glide;
     G.cam_tx += (aim_x - G.cam_tx) * glide;
     G.cam_ty += (aim_y - G.cam_ty) * glide;
-    G.cam_z = G.cam_tz;
-    G.cam_x = G.cam_tx + sinf((float)G.t * 0.23f) * 13;
-    G.cam_y = G.cam_ty + sinf((float)G.t * 0.17f + 1) * 6;
+    // a jolt punches the camera in and shakes it, settling in half a second
+    float kick = cfg.flashes < 2 ? G.kick : 0;
+    G.cam_z = G.cam_tz * (1 + 0.05f * kick);
+    G.cam_x = G.cam_tx + sinf((float)G.t * 0.23f) * 13 + sinf((float)G.t * 61) * 9 * kick;
+    G.cam_y = G.cam_ty + sinf((float)G.t * 0.17f + 1) * 6 + sinf((float)G.t * 47 + 2) * 6 * kick;
+    G.kick *= 0.9f;
     if (G.t > G.last_note_end && G.t > 0 && !G.end_party) {
         G.end_party = true;
         party();
@@ -1479,6 +1485,8 @@ static void reset_play(void)
         G.miss_t[i] = -100;
     }
     G.wave_t = -100;
+    G.kick = 0;
+    G.strobe_t = -100;
     G.held = 0;
     G.touch_count = 0;
     double first = p->note_count ? p->notes[0].time / 1e6 : 0;
@@ -2007,6 +2015,8 @@ static void hit_note(int i)
         snprintf(t, sizeof(t), "%d NOTE STREAK!", G.streak);
         popup(t);
         G.wave_t = G.t;
+        if (G.streak % 100 == 0)
+            G.kick = 0.6f;
         G.cheer = 1;
         sound_play(res.snd[SND_CHEER1 + rand() % 3], cfg.crowd_vol * 0.05f, false);
         if (G.streak % 100 == 0)
@@ -2322,6 +2332,7 @@ static void activate_sp(void)
     if (G.sp_active || G.sp < 0.5f)
         return;
     G.sp_active = true;
+    G.kick = 1;
     G.sp_last_q = chart_quarters(G.chart, G.t);
     G.sp_flash = 1;
     G.pyro_t = G.t;
@@ -3782,18 +3793,28 @@ static void draw_hud(void)
     }
     // the song's card at the start
     if (G.t < 4.5 && !G.sing) {
+        // the song's card slides in from the left, the cover beside the name, and fades out as the notes arrive
         float a = G.t < 3.5 ? 1 : (float)(4.5 - G.t);
         if (a > 1)
             a = 1;
-        gfx_rect_grad(0, 40, 520, 110, RGBA(0, 0, 0, (int)(200 * a)), RGBA(0, 0, 0, (int)(120 * a)));
-        font_draw_fit(res.title, G.song->name, 24, 44, 52, 480, with_alpha(RGBA(255, 210, 90, 255), a), ALIGN_LEFT);
-        font_draw_fit(res.ui, G.song->artist, 26, 100, 28, 480, with_alpha(WHITE, a), ALIGN_LEFT);
+        float in = (float)(G.t + G.lead_in) / 0.45f;
+        in = in < 0 ? 0 : in > 1 ? 1 : in;
+        float dx = -560 * (1 - in) * (1 - in) * (1 - in);
+        float tx = G.art ? 128 : 24;
+        gfx_rect_grad(dx, 40, 560, 110, RGBA(0, 0, 0, (int)(200 * a)), RGBA(0, 0, 0, (int)(120 * a)));
+        gfx_rect(dx, 148, 560 * in, 3, with_alpha(RGBA(255, 200, 90, 255), a));
+        if (G.art) {
+            const Sprite art = sprite_whole(G.art);
+            gfx_sprite(&art, dx + 16, 48, 96, 96, with_alpha(WHITE, a));
+        }
+        font_draw_fit(res.title, G.song->name, dx + tx, 44, 52, 540 - tx, with_alpha(RGBA(255, 210, 90, 255), a), ALIGN_LEFT);
+        font_draw_fit(res.ui, G.song->artist, dx + tx + 2, 100, 28, 540 - tx, with_alpha(WHITE, a), ALIGN_LEFT);
         char t[96];
         if (G.venue_title)
             snprintf(t, sizeof(t), "%s  %s   at %s", part_name(G.part_id), diff_name(G.diff), G.venue_title);
         else
             snprintf(t, sizeof(t), "%s  %s", part_name(G.part_id), diff_name(G.diff));
-        font_draw(res.ui, t, 26, 126, 20, with_alpha(RGBA(200, 200, 200, 255), a), ALIGN_LEFT);
+        font_draw_fit(res.ui, t, dx + tx + 2, 126, 20, 540 - tx, with_alpha(RGBA(200, 200, 200, 255), a), ALIGN_LEFT);
     }
     // messages
     if (G.popup[0] && G.t - G.popup_t < 2.0) {
@@ -3866,6 +3887,12 @@ void game_draw(void)
     draw_stage();
     if (cfg.venue_light < 10)
         gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(0, 0, 0, (10 - cfg.venue_light) * 24));
+    {
+        // the chorus comes in: three white strobes over the stage (behind the highway, so the notes stay clear)
+        double since = G.t - G.strobe_t;
+        if (since >= 0 && since < 0.36 && fmod(since, 0.12) < 0.05 && cfg.flashes == 0)
+            gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(255, 250, 240, 90));
+    }
     if (G.sp_flash > 0.02f && cfg.flashes < 2)
         gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(80, 160, 255, (int)(G.sp_flash * (cfg.flashes ? 25 : 70))));
     if (!G.vocal) {
