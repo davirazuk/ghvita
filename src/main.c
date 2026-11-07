@@ -5393,14 +5393,14 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "The stage lights flash white on the drummer's crash cymbals, from the song's drum chart.",
+        "Main menu: the time and the Vita's battery, top right.",
+        "Fixed: the daily song changed at midnight UTC instead of the Vita's own midnight.",
+        "Pause: the section and how far through the song you are sit on their own plate, readable over the highway.",
         "Options > Game > Song speed, 50% to 150%: shown on the HUD. A run below 100% isn't saved.",
         "Achievements: Speed Demon (finish a song at 125% speed) and Ludicrous (4 stars at 150%).",
         "Fixed: a practice run was saved as a score, so a slowed whole-song practice could earn the gold medal.",
-        "Practice: the section you're in shows under the PRACTICE label, and a Metronome setting ticks the beat.",
-        "Fixed: the results' DAILY SONG DONE covered the stars; it's under the cover now.",
-        "Star Power: the band spins round as it goes on, and sparks fountain up either side of the guitarists.",
-        "Lasers sweep over the band in a good chorus and under Star Power; the lights leave pools on the stage.",
-        "The camera pulls back from the band through the count-in. A song played well ends with the jets.",
+        "Earlier: Star Power spin and spark fountains, lasers, camera reveal, practice metronome and section name.",
     };
     int n = (int)(sizeof(lines) / sizeof(lines[0]));
     gfx_begin(0, 0, 0);
