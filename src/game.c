@@ -1089,11 +1089,14 @@ static void draw_band(double beat)
             gfx_sprite(pool, m[0] - pw / 2, bottom - ph / 2, pw, ph, col3(G.key_col, G.focus == r ? 0.75f : 0.3f + 0.2f * G.band_loud));
             gfx_blend(BLEND_ALPHA);
             band_frame(t, f, cw, ch, m[0], bottom, w, -h * 0.18f, -lean * 0.18f, 0, RGBA(6, 3, 12, 120));
-            // backlit: their own shape a little larger, added in the stage's key colour, swelling on the beat
+            // backlit: their own shape a little larger, added in the stage's key colour, swelling on the beat (whoever the
+            // camera's on, or everyone under Star Power: a second draw of a member costs the Vita's fill rate)
+            if (G.focus == r || G.sp_active) {
             gfx_blend(BLEND_ADD);
             band_frame(t, f, cw, ch, m[0], bottom + h * 0.01f, w * 1.07f, h * 1.035f, lean, dip,
                        col3(G.key_col, (0.3f + 0.45f * on_beat * G.band_loud) * (G.focus == r ? 1.4f : 1)));
             gfx_blend(BLEND_ALPHA);
+            }
             band_frame(t, f, cw, ch, m[0], bottom, w, h, lean, dip, tint);
         }
         // Star Power: they burn with it
