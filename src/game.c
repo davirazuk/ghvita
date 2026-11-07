@@ -425,6 +425,7 @@ static bool update_section(void)
         if (strstr(low, "chorus") && G.rock >= 0.5f) {
             G.pyro_t = G.t;
             G.strobe_t = G.t;
+            G.cheer = 1;            // the band leaps as the chorus hits
             party();
         }
     }
