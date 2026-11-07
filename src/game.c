@@ -3905,6 +3905,21 @@ void game_draw(void)
         if (since >= 0 && since < 0.36 && fmod(since, 0.12) < 0.05 && cfg.flashes == 0)
             gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(255, 250, 240, 90));
     }
+    if (G.rock < 0.2f && !G.failed && !G.autoplay && G.t > 0 && cfg.flashes < 2) {
+        // about to fail: the edges of the picture pulse red, faster the closer it gets
+        float danger = (0.2f - G.rock) / 0.2f, beat = 0.5f + 0.5f * sinf((float)G.t * (6 + 6 * danger));
+        int a = (int)((40 + 90 * danger) * beat);
+        gfx_tex(NULL);
+        const float uv[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+        const float w = SCREEN_W, h = SCREEN_H, in = 140;
+        uint32_t e = RGBA(200, 20, 10, a), n = RGBA(200, 20, 10, 0);
+        const float l[4][3] = {{0, 0, 0}, {in, 0, 0}, {in, h, 0}, {0, h, 0}};
+        const uint32_t lc[4] = {e, n, n, e};
+        gfx_quad(l, uv, lc);
+        const float r[4][3] = {{w - in, 0, 0}, {w, 0, 0}, {w, h, 0}, {w - in, h, 0}};
+        const uint32_t rc[4] = {n, e, e, n};
+        gfx_quad(r, uv, rc);
+    }
     if (G.sp_flash > 0.02f && cfg.flashes < 2)
         gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(80, 160, 255, (int)(G.sp_flash * (cfg.flashes ? 25 : 70))));
     if (!G.vocal) {

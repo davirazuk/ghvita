@@ -3242,6 +3242,11 @@ static void pause_screen(void)
         } else {
             game_stop();
             setlist_at = -1;
+            if (faceoff) {
+                // a face-off called off mid-song: back to whoever started it
+                player_switch(faceoff_p[0]);
+                faceoff = 0;
+            }
             go(practicing ? S_PRACTICE : from_list());
             practicing = false;
             sel_t = now_s;
@@ -3379,6 +3384,10 @@ static void results_screen(void)
     }
     if ((pressed & BTN_SQUARE) && s && results_can_practice()) {
         ui_sound(SND_UI_SELECT);
+        if (faceoff) {
+            player_switch(faceoff_p[0]);
+            faceoff = 0;
+        }
         sel_part = result.part;
         sel_diff = result.diff;
         read_sections(s);
