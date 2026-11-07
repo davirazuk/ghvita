@@ -4380,6 +4380,23 @@ static const char * player_title_text(void)
     return career_rank(&next);
 }
 
+// another player's stars, read from their own career file (the loaded career is only the current player's)
+static int player_stars_of(int i)
+{
+    char d[400], p[460], line[96];
+    player_dir_of(i, d, sizeof(d));
+    snprintf(p, sizeof(p), "%scareer.txt", d);
+    FILE * f = fopen(p, "r");
+    int stars = 0;
+    if (f) {
+        while (fgets(line, sizeof(line), f))
+            if (sscanf(line, "stars = %d", &stars) == 1)
+                break;
+        fclose(f);
+    }
+    return stars;
+}
+
 // after a delete: the current player may be someone else now
 static void player_switch_force(void)
 {
@@ -4537,8 +4554,19 @@ static void players_screen(void)
             draw_player_face(i, x, top, w, cur);
             font_draw_fit(res.ui, player_name(i), x, top + w + 14, cur ? 30 : 24, gap - 16,
                           cur ? RGBA(255, 236, 190, 255) : RGBA(200, 200, 200, 255), ALIGN_CENTER);
+            // their stars, so the cards tell apart at a glance; who played last
+            if (cur) {
+                static int stars_for = -1, stars_n;
+                if (stars_for != i) {
+                    stars_for = i;
+                    stars_n = player_stars_of(i);
+                }
+                char st[32];
+                snprintf(st, sizeof(st), "%d stars", stars_n);
+                font_draw(res.ui, st, x, top + w + 50, 18, RGBA(255, 215, 110, 255), ALIGN_CENTER);
+            }
             if (i == player_current())
-                font_draw(res.ui, "last played", x, top + w + 50, 18, RGBA(130, 230, 130, 255), ALIGN_CENTER);
+                font_draw(res.ui, "last played", x, top + w + (cur ? 72 : 50), 16, RGBA(130, 230, 130, 255), ALIGN_CENTER);
         } else {
             gfx_rect(x - w / 2, top, w, w, RGBA(40, 40, 48, 230));
             gfx_rect(x - 4, top + w * 0.25f, 8, w * 0.5f, dim);
