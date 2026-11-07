@@ -4245,10 +4245,41 @@ static void options_screen(void)
         int bar = i == O_MUSIC ? cfg.music_vol : i == O_SFX ? cfg.sfx_vol : i == O_CROWD ? cfg.crowd_vol
                   : i == O_HWALPHA ? cfg.highway_alpha : i == O_VLIGHT ? cfg.venue_light : i == O_SPEED ? cfg.speed : -1;
         if (bar >= 0) {
-            gfx_rect(560, y + 13, 170, 8, RGBA(0, 0, 0, 170));
-            gfx_rect(561, y + 14, 168 * bar / 10.0f, 6, on ? RGBA(255, 215, 110, 255) : RGBA(170, 150, 110, 255));
+            gfx_rect(548, y + 13, 170, 8, RGBA(0, 0, 0, 170));
+            gfx_rect(549, y + 14, 168 * bar / 10.0f, 6, on ? RGBA(255, 215, 110, 255) : RGBA(170, 150, 110, 255));
         }
-        font_draw_fit(res.ui, value, 800, y + 1, 26, bar >= 0 ? 60 : 380, c, ALIGN_RIGHT);
+        font_draw_fit(res.ui, value, 800, y + 1, 26, bar >= 0 ? 66 : 380, c, ALIGN_RIGHT);
+    }
+    if (opt == O_HIGHWAY) {
+        // the highway as it'll look: a strip of it running away into the distance beside the panel
+        Tex * hw = res_highway_preview(cfg.highway);
+        if (hw) {
+            gfx_tex(hw);
+            const float x = 906, top = 130, bot = 440, wn = 50, wf = 20;
+            const float p[4][3] = {{x - wf, top, 0}, {x + wf, top, 0}, {x + wn, bot, 0}, {x - wn, bot, 0}};
+            const float uv[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+            const uint32_t c[4] = {RGBA(150, 150, 150, 120), RGBA(150, 150, 150, 120), RGBA(225, 225, 225, 255),
+                                   RGBA(225, 225, 225, 255)};
+            gfx_quad(p, uv, c);
+            gfx_tex(NULL);
+            // silver rails, the strikeline, and a few notes coming down it
+            for (int side = -1; side <= 1; side += 2) {
+                const float r[4][3] = {{x + side * wf - 1, top, 0}, {x + side * wf + 1, top, 0}, {x + side * wn + 1.5f, bot, 0},
+                                       {x + side * wn - 1.5f, bot, 0}};
+                const uint32_t rc[4] = {RGBA(230, 230, 240, 80), RGBA(230, 230, 240, 80), WHITE, WHITE};
+                gfx_quad(r, uv, rc);
+            }
+            gfx_rect(x - wn, bot - 22, wn * 2, 3, RGBA(235, 235, 245, 220));
+            static const float gy[3] = {0.35f, 0.6f, 0.85f};
+            static const int gl[3] = {3, 1, 0};
+            for (int k = 0; k < 3; k++) {
+                float fy = top + (bot - 30 - top) * gy[k], half = wf + (wn - wf) * gy[k];
+                float gx = x - half + half * 2 * (gl[k] + 0.5f) / 5, gw = half * 2 / 5 * 0.95f;
+                char gname[20];
+                snprintf(gname, sizeof(gname), "gem_normal_%d", gl[k]);
+                gfx_sprite(atlas_get(res.game, gname), gx - gw / 2, fy - gw * 0.25f, gw, gw * 0.5f, WHITE);
+            }
+        }
     }
     // there's more above or below
     if (opt_top > 0)
@@ -5262,6 +5293,7 @@ static void news_screen(void)
 {
     static const char * const lines[] = {
         "A hit gem swells and fades at the strikeline. In slow songs the crowd holds up lighters.",
+        "Options: choosing a highway shows a preview of it. Fixed: Highway solid's value was cut to \"10...\".",
         "The rock meter glows red and its needle trembles when you're about to fail; full, it glows green.",
         "Options > Screen > Effects: Light turns off the heavier effects for a steadier frame rate.",
         "Options > Game > Timing window: Strict, Normal or Lenient. The score counter rolls up.",

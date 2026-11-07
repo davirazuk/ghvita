@@ -276,6 +276,21 @@ Tex * res_highway(const char * name)
     return tex;
 }
 
+// the Options' preview of a highway: its own copy, so the one a paused song is drawing is never freed under it
+Tex * res_highway_preview(const char * name)
+{
+    static Tex * tex;
+    static char loaded[32];
+    if (tex && strcmp(loaded, name) == 0)
+        return tex;
+    tex_free(tex);
+    char path[96];
+    snprintf(path, sizeof(path), "hw_%s.png", name);
+    tex = load_tex(path, TEX_MIPMAP);
+    snprintf(loaded, sizeof(loaded), "%s", name);
+    return tex;
+}
+
 bool res_venue(const char * zone, Tex ** stage, Tex ** lights)
 {
     static Tex * base, * glow;
