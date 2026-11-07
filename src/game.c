@@ -425,6 +425,7 @@ static bool update_section(void)
         if (strstr(low, "chorus") && G.rock >= 0.5f) {
             G.pyro_t = G.t;
             G.strobe_t = G.t;
+            G.cheer = 1;            // the band leaps as the chorus hits
             party();
         }
     }
@@ -3205,6 +3206,20 @@ static void draw_gems(void)
             if (accent) {
                 gfx_blend(BLEND_ADD);
                 board(lane_x(l), 0, z, gw * 1.3f, gh * 1.5f, atlas_get(res.game, "glow"), 0, 0, 1, 1, with_alpha(WHITE, a * 0.55f));
+                gfx_blend(BLEND_ALPHA);
+            }
+            if (star && !G.drums) {
+                // a Star Power note glitters: a halo and a few twinkles trailing behind it up the neck
+                const Sprite * dot = atlas_get(res.game, "glow");
+                gfx_blend(BLEND_ADD);
+                board(lane_x(l), 0.01f, z, gw * 1.6f, gh * 2.2f, dot, 0, 0, 1, 1,
+                      with_alpha(RGBA(120, 210, 255, 255), a * (0.35f + 0.15f * sinf((float)G.t * 9 + i))));
+                for (int k2 = 0; k2 < 3; k2++) {
+                    uint32_t h = (uint32_t)(i * 7 + l) * 2654435761u + (uint32_t)k2 * 40503u;
+                    float ph = fmodf((float)G.t * 2.5f + (h >> 8 & 255) / 255.0f, 1.0f);
+                    float tx = lane_x(l) + ((h >> 16 & 255) / 255.0f - 0.5f) * 0.6f, tz = z + 0.2f + ph * 0.9f;
+                    board(tx, 0.15f + ph * 0.25f, tz, 0.16f, 0.16f, dot, 0, 0, 1, 1, with_alpha(WHITE, a * (1 - ph) * 0.9f));
+                }
                 gfx_blend(BLEND_ALPHA);
             }
         }

@@ -5203,6 +5203,7 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "Star Power notes glitter as they come. The band leaps when a chorus hits.",
         "GIG COMPLETE!: a setlist or random gig ends on a summary of the whole gig.",
         "Held frets light their lane. The screen edges pulse red when you're about to fail.",
         "The multiplier bursts with light as it goes up. Confetti on results for a full combo or a new best.",
