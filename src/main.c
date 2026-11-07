@@ -30,7 +30,7 @@
 #include "update.h"
 
 enum { S_TITLE, S_MAIN, S_TOUR, S_SONGS, S_SELECT, S_PRACTICE, S_PLAY, S_PAUSE, S_RESUME, S_RESULTS, S_OPTIONS, S_CALIBRATE, S_EMPTY,
-       S_DOWNLOAD, S_UPDATE, S_CAREER, S_NEWS, S_PLAYERS, S_PLAYER_EDIT };
+       S_DOWNLOAD, S_UPDATE, S_CAREER, S_NEWS, S_PLAYERS, S_PLAYER_EDIT, S_FACEOFF };
 
 static int screen = S_TITLE;
 static double now_s, screen_t;
@@ -300,6 +300,10 @@ static void draw_toast(void)
 // ------------------------------------------------------------------------------------------------------ the title
 
 static int players_row;
+// FACE-OFF: two players take turns on the same chart. 1: the first is playing; 2: handing over; 3: the second is
+// playing; 4: the verdict
+static int faceoff, faceoff_p[2], faceoff_part, faceoff_diff, faceoff_pick;
+static Result faceoff_r[2];
 static int pause_options_at = 2;   // OPTIONS' row in the pause menu (it moves when PRACTICE THIS PART shows)
 static bool players_from_title;    // the picker came up at start: back goes to the title
 
@@ -461,6 +465,8 @@ static void medal_totals(int out[4])
 
 static void open_select(const Song * s);
 static void draw_player_face(int i, float x, float top, float w, bool lit);
+static void faceoff_screen(void);
+static void player_switch(int i);
 static const char * player_title_text(void);
 
 // days since 1970 by the local calendar, so the song changes at the player's midnight
@@ -2616,9 +2622,14 @@ static void draw_select(const Song * s, bool loading)
     if (loading)
         font_draw_shadow(res.title, "LOADING", SCREEN_W / 2, 488, 36, RGBA(255, 220, 120, 255), ALIGN_CENTER);
     else {
-        static const char * help[] = {"btn_cross", "Rock!", "btn_circle", "Back", "btn_left", "Part", "btn_up",
-                                      "Difficulty", "btn_square", "Practice", "btn_triangle", "Battle"};
-        help_bar(help, sel_part != PART_VOCALS && !tour_on ? 12 : 10);
+        const char * help[16] = {"btn_cross", "Rock!", "btn_circle", "Back", "btn_left", "Part", "btn_up", "Difficulty",
+                                 "btn_square", "Practice"};
+        int nh = 10;
+        if (sel_part != PART_VOCALS && !tour_on)
+            help[nh++] = "btn_triangle", help[nh++] = "Battle";
+        if (player_count() > 1 && !tour_on)
+            help[nh++] = "btn_select", help[nh++] = "Face-off";
+        help_bar(help, nh);
     }
     gfx_end();
 }
@@ -2962,6 +2973,15 @@ static void select_screen(void)
         go(from_list());
         return;
     }
+    if ((pressed & BTN_SELECT) && !tour_on && player_count() > 1) {
+        // a face-off: this player now, someone else after
+        ui_sound(SND_UI_SELECT);
+        faceoff = 1;
+        faceoff_p[0] = player_current();
+        faceoff_part = sel_part;
+        faceoff_diff = sel_diff;
+        select_starting = true;
+    }
     if ((pressed & BTN_TRIANGLE) && sel_part != PART_VOCALS && !tour_on) {
         // a battle with a computer rival on this chart
         stop_preview();
@@ -3241,6 +3261,18 @@ static bool results_can_practice(void)
 static void results_screen(void)
 {
     Song * s = songs_get(sel);
+    if ((pressed & (BTN_CROSS | BTN_CIRCLE)) && (faceoff == 1 || faceoff == 3)) {
+        // a face-off's turn is over: on to the hand-over, or the verdict
+        ui_sound(SND_UI_SELECT);
+        faceoff_r[faceoff == 1 ? 0 : 1] = result;
+        if (faceoff == 1) {
+            faceoff = 2;
+            faceoff_pick = (faceoff_p[0] + 1) % player_count();
+        } else
+            faceoff = 4;
+        go(S_FACEOFF);
+        return;
+    }
     if (pressed & (BTN_CROSS | BTN_CIRCLE)) {
         ui_sound(SND_UI_SELECT);
         // on to the next of the setlist, on the same part and difficulty when it has them
@@ -4824,6 +4856,86 @@ static void player_edit_screen(void)
     gfx_end();
 }
 
+// FACE-OFF: the hand-over (who plays next) and the verdict
+static void faceoff_screen(void)
+{
+    Song * s = songs_get(sel);
+    int n = player_count();
+    if (faceoff == 2) {
+        if (repeat & (BTN_LEFT | BTN_RIGHT)) {
+            int d = repeat & BTN_LEFT ? -1 : 1;
+            do
+                faceoff_pick = (faceoff_pick + d + n) % n;
+            while (faceoff_pick == faceoff_p[0] && n > 1);
+            ui_sound(SND_UI_MOVE);
+        }
+        if ((pressed & BTN_CROSS) && s) {
+            ui_sound(SND_UI_SELECT);
+            faceoff_p[1] = faceoff_pick;
+            player_switch(faceoff_pick);
+            if (game_start(s, faceoff_part, faceoff_diff)) {
+                faceoff = 3;
+                practicing = false;
+                game_set_autoplay(autoplay);
+                go(S_PLAY);
+                return;
+            }
+        }
+    } else if (pressed & (BTN_CROSS | BTN_CIRCLE)) {
+        // the verdict's read: back to the first player and the list
+        ui_sound(SND_UI_SELECT);
+        player_switch(faceoff_p[0]);
+        faceoff = 0;
+        go(from_list());
+        return;
+    }
+    if (faceoff == 2 && (pressed & BTN_CIRCLE)) {
+        ui_sound(SND_UI_BACK);
+        faceoff = 0;
+        go(from_list());
+        return;
+    }
+    gfx_begin(0, 0, 0);
+    gfx_2d();
+    draw_background(res.bg_menu, RGBA(150, 150, 150, 255));
+    banner("FACE-OFF");
+    char t[120];
+    if (faceoff == 2) {
+        font_draw_shadow(res.title, "PASS THE VITA!", SCREEN_W / 2, 96, 46, RGBA(255, 220, 140, 255), ALIGN_CENTER);
+        snprintf(t, sizeof(t), "%s scored %d. Who's taking them on?", player_name(faceoff_p[0]), faceoff_r[0].score);
+        font_draw_fit(res.ui, t, SCREEN_W / 2, 152, 24, 820, WHITE, ALIGN_CENTER);
+        draw_player_face(faceoff_pick, SCREEN_W / 2, 196, 170, true);
+        snprintf(t, sizeof(t), "<  %s  >", player_name(faceoff_pick));
+        font_draw_shadow(res.title, t, SCREEN_W / 2, 378, 36, RGBA(255, 236, 190, 255), ALIGN_CENTER);
+        static const char * help[] = {"btn_cross", "Play", "btn_left", "Choose", "btn_circle", "Call it off"};
+        help_bar(help, 6);
+    } else {
+        // the verdict: both cards, both scores, the winner crowned
+        int win = faceoff_r[0].score == faceoff_r[1].score ? -1 : faceoff_r[0].score > faceoff_r[1].score ? 0 : 1;
+        font_draw_shadow(res.title, win < 0 ? "A DRAW!" : "WINNER!", SCREEN_W / 2, 84, 46,
+                         RGBA(255, 220, 140, 255), ALIGN_CENTER);
+        for (int k = 0; k < 2; k++) {
+            float x = SCREEN_W / 2 + (k ? 210 : -210);
+            const Result * r = &faceoff_r[k];
+            float sz = win == k ? 170 : 140;
+            if (win == k)
+                gfx_rect(x - sz / 2 - 6, 150 - 6, sz + 12, sz + 12, RGBA(255, 210, 90, 255));
+            draw_player_face(faceoff_p[k], x, 150, sz, win != 1 - k);
+            font_draw_shadow(res.title, player_name(faceoff_p[k]), x, 150 + sz + 12, 32,
+                             win == k ? RGBA(255, 220, 140, 255) : RGBA(210, 205, 195, 255), ALIGN_CENTER);
+            snprintf(t, sizeof(t), "%d", r->score);
+            font_draw_shadow(res.title, t, x, 150 + sz + 48, 34, WHITE, ALIGN_CENTER);
+            int pct = r->notes_total ? r->notes_hit * 100 / r->notes_total : 0;
+            snprintf(t, sizeof(t), "%d%%   streak %d%s", pct, r->best_streak, r->fc ? "   FC" : "");
+            font_draw(res.ui, t, x, 150 + sz + 88, 20, RGBA(210, 205, 195, 255), ALIGN_CENTER);
+        }
+        font_draw_shadow(res.title, "VS", SCREEN_W / 2, 220, 40, RGBA(255, 120, 90, 255), ALIGN_CENTER);
+        static const char * help[] = {"btn_cross", "Done"};
+        help_bar(help, 2);
+    }
+    gfx_end();
+}
+
 // the career's other pages: the achievements, fourteen to a page
 static int career_page;
 
@@ -5186,6 +5298,7 @@ int main(void)
         case S_CAREER: career_screen(); break;
         case S_PLAYERS: players_screen(); break;
         case S_PLAYER_EDIT: player_edit_screen(); break;
+        case S_FACEOFF: faceoff_screen(); break;
         case S_NEWS: news_screen(); break;
         case S_PLAY: play_screen(); break;
         case S_PAUSE: pause_screen(); break;
