@@ -304,7 +304,8 @@ static void title_screen(void)
     gfx_2d();
     res_title_art();
     float a = 0.8f + 0.2f * sinf((float)now_s * 4);   // breathes, never fades out
-    font_draw_shadow(res.title, "PRESS X TO ROCK", SCREEN_W / 2, 430, 46, fade_alpha(RGBA(255, 220, 120, 255), a),
+    gfx_rect_grad(0, 420, SCREEN_W, 90, RGBA(0, 0, 0, 0), RGBA(0, 0, 0, 210));
+    font_draw_shadow(res.title, "PRESS X TO ROCK", SCREEN_W * 0.74f, 452, 46, fade_alpha(RGBA(255, 220, 120, 255), a),
                      ALIGN_CENTER);
     gfx_end();
 }
@@ -4806,7 +4807,7 @@ static void news_screen(void)
         "Career counts your battles won. New achievements: Rival Slayer, Duelist, Giant Killer (beat a Brutal rival).",
         "A singer's results show phrases sung, not frets. Singing along: the vocals' score sits on a dark backing.",
         "Pause: PRACTICE THIS PART. Battle: a smarter rival, Speed Up, INCOMING warnings, Options > Game > Battle rival.",
-        "The title shows World Tour's own logo; the main menu shows who's playing. New GET READY and Options screens.",
+        "The main menu shows who's playing. New GET READY and Options screens.",
     };
     int n = (int)(sizeof(lines) / sizeof(lines[0]));
     gfx_begin(0, 0, 0);
