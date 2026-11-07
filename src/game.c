@@ -457,7 +457,7 @@ static void draw_pyro(void)
 {
     const float length = 0.55f;
     double since = G.t - G.pyro_t;
-    if (since >= 0 && since < 3.5 && G.marks) {
+    if (since >= 0 && since < 3.5 && G.marks && !cfg.light_fx) {
         // after the jets, smoke rolls out across the front of the stage and thins away
         const Sprite * haze = atlas_get(res.stage, "haze");
         float k = (float)since / 3.5f;
@@ -835,7 +835,7 @@ static void draw_stage(void)
     draw_party();
     if (!cfg.no_vignette)
         vignette();
-    if (!cfg.no_crowd)
+    if (!cfg.no_crowd && !cfg.light_fx)
         draw_flashes();
 }
 
@@ -1091,7 +1091,7 @@ static void draw_band(double beat)
             band_frame(t, f, cw, ch, m[0], bottom, w, -h * 0.18f, -lean * 0.18f, 0, RGBA(6, 3, 12, 120));
             // backlit: their own shape a little larger, added in the stage's key colour, swelling on the beat (whoever the
             // camera's on, or everyone under Star Power: a second draw of a member costs the Vita's fill rate)
-            if (G.focus == r || G.sp_active) {
+            if ((G.focus == r || G.sp_active) && !cfg.light_fx) {
             gfx_blend(BLEND_ADD);
             band_frame(t, f, cw, ch, m[0], bottom + h * 0.01f, w * 1.07f, h * 1.035f, lean, dip,
                        col3(G.key_col, (0.3f + 0.45f * on_beat * G.band_loud) * (G.focus == r ? 1.4f : 1)));
@@ -3236,7 +3236,7 @@ static void draw_gems(void)
                 board(lane_x(l), 0, z, gw * 1.3f, gh * 1.5f, atlas_get(res.game, "glow"), 0, 0, 1, 1, with_alpha(WHITE, a * 0.55f));
                 gfx_blend(BLEND_ALPHA);
             }
-            if (star && !G.drums && z < 7) {
+            if (star && !G.drums && z < 7 && !cfg.light_fx) {
                 // a Star Power note glitters: a halo and a few twinkles trailing behind it up the neck
                 const Sprite * dot = atlas_get(res.game, "glow");
                 gfx_blend(BLEND_ADD);
@@ -3305,9 +3305,16 @@ static void draw_flames(void)
             lay(x, 0.08f, 0, sz, sz * 0.8f, flare, with_alpha(WHITE, 0.85f * a));
             lay(x, 0.07f, 0, sz * 1.5f, sz * 1.2f, dot, with_alpha(lc, 0.9f * a));
         }
+        // the gem itself, caught at the strikeline: it swells and fades for a moment as it's taken
+        if (k < 0.1f) {
+            char gname[24];
+            snprintf(gname, sizeof(gname), "gem_normal_%d", G.sp_active ? 5 : lane_art(l));
+            float g = 1 + k * 5, ga = 1 - k / 0.1f;
+            lay(x, 0.09f, 0, 1.04f * g, 0.48f * 2.1f * g, atlas_get(res.game, gname), with_alpha(WHITE, 0.8f * ga));
+        }
         // and a ring of light running out across the neck
         float r = 0.35f + k * 3.2f, ra = 1 - k / 0.3f;
-        for (int j = 0; j < 10; j++) {
+        for (int j = 0; j < (cfg.light_fx ? 0 : 10); j++) {
             float ang = j * 6.2831853f / 10;
             float px = x + cosf(ang) * r * 0.9f, pz = sinf(ang) * r * 0.55f;
             board(px, 0.04f, pz, 0.2f, 0.2f, dot, 0, 0, 1, 1, with_alpha(lc, 0.7f * ra * ra));
