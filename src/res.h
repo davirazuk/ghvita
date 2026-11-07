@@ -54,6 +54,7 @@ void res_wait_sounds(void);
 // the highway picture by name ("classic"...): loaded on demand, one at a time
 Tex * res_highway(const char * name);
 Tex * res_highway_preview(const char * name);
+Tex * res_venue_preview(const char * zone);
 // a venue's two pictures, the stage and its lights alone (loaded on demand, one venue at a time); false: no such venue
 bool res_venue(const char * zone, Tex ** stage, Tex ** lights);
 // "House of Blues" for "hob" (the zone itself when unknown)

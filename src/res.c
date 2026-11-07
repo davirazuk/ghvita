@@ -291,6 +291,21 @@ Tex * res_highway_preview(const char * name)
     return tex;
 }
 
+// the Options' look at a venue: its own copy, apart from the one a paused song is drawing
+Tex * res_venue_preview(const char * zone)
+{
+    static Tex * tex;
+    static char loaded[16];
+    if (tex && strcmp(loaded, zone) == 0)
+        return tex;
+    tex_free(tex);
+    char path[96];
+    snprintf(path, sizeof(path), "venues/%s.jpg", zone);
+    tex = load_tex(path, 0);
+    snprintf(loaded, sizeof(loaded), "%s", zone);
+    return tex;
+}
+
 bool res_venue(const char * zone, Tex ** stage, Tex ** lights)
 {
     static Tex * base, * glow;
