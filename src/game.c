@@ -3691,15 +3691,19 @@ static void draw_hud(void)
     const Part * p = G.part;
     for (int k = 0; k < p->solo_count; k++) {
         if (G.t >= p->solos[k].start / 1e6 && G.t < p->solos[k].end / 1e6) {
-            int total = 0, before = 0;
-            for (int i = 0; i < p->note_count; i++)
-                if (G.solo[i] == k) {
-                    total++;
-                    if (p->notes[i].time / 1e6 < G.t - WINDOW)
-                        before++;
-                }
+            // of the solo's notes judged so far (hit, early ones too, or missed): never past 100%
+            int judged = 0;
+            for (int i = G.first > 0 ? G.first - 1 : 0; i >= 0 && i < p->note_count; i--)
+                if (G.solo[i] == k && G.state[i] != PENDING)
+                    judged++;
+                else if (p->notes[i].time / 1e6 < p->solos[k].start / 1e6)
+                    break;
+            for (int i = G.first; i < p->note_count && p->notes[i].time / 1e6 < G.t + WINDOW; i++)
+                if (G.solo[i] == k && G.state[i] != PENDING)
+                    judged++;
+            int pct = judged ? G.solo_hit[k] * 100 / judged : 100;
             char t[32];
-            snprintf(t, sizeof(t), "SOLO! %d%%", before ? G.solo_hit[k] * 100 / before : 100);
+            snprintf(t, sizeof(t), "SOLO! %d%%", pct > 100 ? 100 : pct);
             font_draw_shadow(res.title, t, SCREEN_W / 2 + 230, 210, 40, RGBA(255, 120, 60, 255), ALIGN_CENTER);
         }
     }
