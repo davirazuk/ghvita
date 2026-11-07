@@ -4799,6 +4799,8 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "World Tour: each leg ends on a BOSS BATTLE encore against a rival who gets tougher leg by leg.",
+        "Battles show a tug-of-war bar across the top. The song list shows every song's cover.",
         "Fixed: the SOLO! percent could go past 100%.",
         "Career counts your battles won. New achievements: Rival Slayer, Duelist, Giant Killer (beat a Brutal rival).",
         "A singer's results show phrases sung, not frets. Singing along: the vocals' score sits on a dark backing.",
