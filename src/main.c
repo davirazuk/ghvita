@@ -3338,9 +3338,12 @@ static void pause_screen(void)
         else
             font_draw_shadow(res.title, items[i], SCREEN_W / 2, y, size, col, ALIGN_CENTER);
     }
-    // where in the song: the section, and a bar
+    // where in the song: the section, and a bar, on a plate of their own so they read over the highway's cups
+    gfx_rect_grad(SCREEN_W / 2 - 200, 402, 400, 72, RGBA(12, 8, 18, 230), RGBA(4, 2, 8, 240));
+    gfx_rect(SCREEN_W / 2 - 200, 402, 400, 2, RGBA(210, 170, 90, 210));
+    gfx_rect(SCREEN_W / 2 - 200, 472, 400, 2, RGBA(210, 170, 90, 120));
     if (part[0])
-        font_draw_fit(res.ui, part, SCREEN_W / 2, 412, 18, 300, RGBA(255, 215, 110, 255), ALIGN_CENTER);
+        font_draw_fit(res.ui, part, SCREEN_W / 2, 408, 18, 360, RGBA(255, 215, 110, 255), ALIGN_CENTER);
     int song_pct, notes_pct;
     game_status(&song_pct, &notes_pct);
     char line[64];
@@ -3355,9 +3358,10 @@ static void pause_screen(void)
         snprintf(more, sizeof(more), "   %d %s, best %d%%", pruns, pruns == 1 ? "run" : "runs", pbest);
         strncat(line, more, sizeof(line) - strlen(line) - 1);
     }
-    font_draw_shadow(res.ui, line, SCREEN_W / 2, 432, 20, RGBA(225, 215, 200, 255), ALIGN_CENTER);
-    gfx_rect(SCREEN_W / 2 - 130, 458, 260, 5, RGBA(0, 0, 0, 180));
-    gfx_rect(SCREEN_W / 2 - 130, 458, 260 * song_pct / 100.0f, 5, RGBA(255, 200, 90, 255));
+    font_draw_fit(res.ui, line, SCREEN_W / 2, 429, 20, 380, RGBA(225, 215, 200, 255), ALIGN_CENTER);
+    gfx_rect(SCREEN_W / 2 - 171, 454, 342, 10, RGBA(70, 60, 50, 255));
+    gfx_rect(SCREEN_W / 2 - 170, 455, 340, 8, RGBA(0, 0, 0, 255));
+    gfx_rect_grad(SCREEN_W / 2 - 170, 455, 340 * song_pct / 100.0f, 8, RGBA(255, 220, 120, 255), RGBA(220, 140, 40, 255));
     gfx_end();
 }
 
