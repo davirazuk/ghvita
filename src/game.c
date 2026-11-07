@@ -3105,22 +3105,30 @@ static void draw_rail_meter(void)
     int lit = base_m >= max_m ? 5 : (G.streak % 10) / 2;
     bool half = base_m < max_m && G.streak % 2;
     const char * hue = G.sp_active ? "_blue" : base_m >= 3 ? "_purple" : base_m == 2 ? "_green" : "";
+    // the rope first, so each lamp's foot sits on it rather than under it
     gfx_blend(BLEND_ALPHA);
+    rail_quad(atlas_get(res.hud, "hud_rope"), rope0, rope1, z0, z1, true, false, WHITE);
     gfx_2d();
     for (int i = 0; i < 5; i++) {
         char name[32];
         int state = i < lit ? 2 : half && i == lit ? 1 : 0;
         snprintf(name, sizeof(name), "lamp_%d%s", state, hue);
         const Sprite * s = atlas_get(res.game, name);
-        // where its foot lies on the rope, on the screen; the dome stands square to that, as deep as it's wide
-        const float lz = z0 + 0.52f, lg = (z1 - 0.42f - lz) / 5, fx = rope1 + 0.08f;
-        const float a3[3] = {fx, 0.016f, lz + lg * (i - 0.02f)}, b3[3] = {fx, 0.016f, lz + lg * (i + 1.02f)};
+        // its stretch of the rope, on the screen: the foot on the rope's outer edge, the dome standing straight out from
+        // the rope (square to its slant, so every lamp sits the same on it, near or far)
+        const float lz = z0 + 0.52f, lg = (z1 - 0.42f - lz) / 5, fx = rope1 + 0.02f;
+        const float a3[3] = {fx, 0.016f, lz + lg * (i + 0.08f)}, b3[3] = {fx, 0.016f, lz + lg * (i + 0.92f)};
         float a[2], b[2];
         project(a3[0], a3[1], a3[2], &a[0], &a[1]);
         project(b3[0], b3[1], b3[2], &b[0], &b[1]);
-        // a stiff lamp pointing straight out to the side of the screen, as in the footage, not square to the slanted rope
-        const float tilt = -0.09f, ux = cosf(tilt), uy = sinf(tilt), wide = hypotf(b[0] - a[0], b[1] - a[1]) * 0.5f;
-        const float len = wide * 2.0f, mx0 = (a[0] + b[0]) / 2, my0 = (a[1] + b[1]) / 2, vx = -uy * wide, vy = ux * wide;
+        float dx = b[0] - a[0], dy = b[1] - a[1], seg = hypotf(dx, dy);
+        if (seg < 0.5f)
+            continue;
+        float ux = dy / seg, uy = -dx / seg;     // square to the rope, pointing away from the highway
+        if (ux < 0)
+            ux = -ux, uy = -uy;
+        const float wide = seg * 0.5f, len = wide * 1.7f, mx0 = (a[0] + b[0]) / 2, my0 = (a[1] + b[1]) / 2;
+        const float vx = dx / seg * wide, vy = dy / seg * wide;
         const float p[4][3] = {{mx0 + ux * len - vx, my0 + uy * len - vy, 0}, {mx0 - vx, my0 - vy, 0}, {mx0 + vx, my0 + vy, 0},
                                {mx0 + ux * len + vx, my0 + uy * len + vy, 0}};
         const float uv[4][2] = {{s->u0, s->v0}, {s->u1, s->v0}, {s->u1, s->v1}, {s->u0, s->v1}};
@@ -3129,18 +3137,17 @@ static void draw_rail_meter(void)
         gfx_tex(s->tex);
         gfx_quad(p, uv, c);
         if (state == 2) {
-            // lit, it throws light round itself
+            // lit, it throws light round itself, centred on the dome
             const uint32_t light = G.sp_active ? RGBA(95, 225, 255, 255) : base_m >= 3 ? RGBA(255, 130, 225, 255)
                                  : base_m == 2 ? RGBA(90, 245, 110, 255) : RGBA(255, 196, 70, 255);
-            float mx = mx0 + ux * len * 0.8f, my = my0 + uy * len * 0.8f, r = wide * 2.0f;
+            float mx = mx0 + ux * len * 0.5f, my = my0 + uy * len * 0.5f, r = wide * 1.6f;
             gfx_blend(BLEND_ADD);
-            gfx_sprite(atlas_get(res.game, "glow"), mx - r, my - r, r * 2, r * 2, with_alpha(light, 0.6f));
+            gfx_sprite(atlas_get(res.game, "glow"), mx - r, my - r, r * 2, r * 2, with_alpha(light, 0.5f));
             gfx_blend(BLEND_ALPHA);
         }
     }
     gfx_3d(G.proj, G.view);
     gfx_blend(BLEND_ALPHA);
-    rail_quad(atlas_get(res.hud, "hud_rope"), rope0, rope1, z0, z1, true, false, WHITE);
     if (m > 1) {
         char name[16];
         snprintf(name, sizeof(name), "mult_x%d", m);
