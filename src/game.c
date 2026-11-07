@@ -1711,6 +1711,11 @@ void game_stop(void)
     game_log_whammy();
 }
 
+int game_battle_state(void)
+{
+    return battle.on ? (battle.result ? battle.result : 3) : 0;
+}
+
 void game_playing(int * part, int * diff)
 {
     *part = G.part_id;
@@ -3092,6 +3097,15 @@ static void draw_rail_meter(void)
         char name[16];
         snprintf(name, sizeof(name), "mult_x%d", m);
         float pop = 1 + G.mult_pop * 0.45f;
+        if (G.mult_pop > 0.05f) {
+            // a burst of light behind the plate as it goes up, in the multiplier's colour
+            uint32_t bc = G.sp_active ? RGBA(95, 225, 255, 255) : m >= 3 ? RGBA(255, 130, 225, 255)
+                        : RGBA(90, 245, 110, 255);
+            gfx_blend(BLEND_ADD);
+            board(-HALF_W - 0.30f, 0.0f, z1 + 0.05f - 0.4f * G.mult_pop, 2.6f * G.mult_pop, 2.0f * G.mult_pop,
+                  atlas_get(res.game, "glow"), 0, 0, 1, 1, with_alpha(bc, G.mult_pop));
+            gfx_blend(BLEND_ALPHA);
+        }
         board(-HALF_W - 0.30f, 0.02f, z1 + 0.05f, 0.8f * pop, 0.4f * pop, atlas_get(res.game, name), 0, 0, 1, 1,
               G.sp_active ? RGBA(170, 225, 255, 255) : WHITE);
     }
@@ -3243,6 +3257,13 @@ static void draw_flames(void)
             board(px, 0.04f, pz, 0.2f, 0.2f, dot, 0, 0, 1, 1, with_alpha(lc, 0.7f * ra * ra));
         }
     }
+    // a fret held: its lane lights faintly up the neck, so the fingers show on the highway
+    for (int l = 0; l < G.lanes && !G.autoplay; l++)
+        if (G.held & (1 << l)) {
+            uint32_t lc = G.sp_active ? RGBA(150, 220, 255, 255) : lane_colour[lane_art(l)];
+            flat(lane_x(l) - 0.45f, lane_x(l) + 0.45f, -0.3f, 4.5f, 0.014f, NULL, 0, 1, with_alpha(lc, 0.22f),
+                 with_alpha(lc, 0));
+        }
     // a miss: the cup flashes red
     for (int l = 0; l < G.lanes; l++) {
         double since = G.t - G.miss_t[l];
@@ -3892,6 +3913,21 @@ void game_draw(void)
         double since = G.t - G.strobe_t;
         if (since >= 0 && since < 0.36 && fmod(since, 0.12) < 0.05 && cfg.flashes == 0)
             gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(255, 250, 240, 90));
+    }
+    if (G.rock < 0.2f && !G.failed && !G.autoplay && G.t > 0 && cfg.flashes < 2) {
+        // about to fail: the edges of the picture pulse red, faster the closer it gets
+        float danger = (0.2f - G.rock) / 0.2f, beat = 0.5f + 0.5f * sinf((float)G.t * (6 + 6 * danger));
+        int a = (int)((40 + 90 * danger) * beat);
+        gfx_tex(NULL);
+        const float uv[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+        const float w = SCREEN_W, h = SCREEN_H, in = 140;
+        uint32_t e = RGBA(200, 20, 10, a), n = RGBA(200, 20, 10, 0);
+        const float l[4][3] = {{0, 0, 0}, {in, 0, 0}, {in, h, 0}, {0, h, 0}};
+        const uint32_t lc[4] = {e, n, n, e};
+        gfx_quad(l, uv, lc);
+        const float r[4][3] = {{w - in, 0, 0}, {w, 0, 0}, {w, h, 0}, {w - in, h, 0}};
+        const uint32_t rc[4] = {n, e, e, n};
+        gfx_quad(r, uv, rc);
     }
     if (G.sp_flash > 0.02f && cfg.flashes < 2)
         gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(80, 160, 255, (int)(G.sp_flash * (cfg.flashes ? 25 : 70))));

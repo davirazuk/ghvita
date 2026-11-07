@@ -30,7 +30,7 @@
 #include "update.h"
 
 enum { S_TITLE, S_MAIN, S_TOUR, S_SONGS, S_SELECT, S_PRACTICE, S_PLAY, S_PAUSE, S_RESUME, S_RESULTS, S_OPTIONS, S_CALIBRATE, S_EMPTY,
-       S_DOWNLOAD, S_UPDATE, S_CAREER, S_NEWS, S_PLAYERS, S_PLAYER_EDIT, S_FACEOFF };
+       S_DOWNLOAD, S_UPDATE, S_CAREER, S_NEWS, S_PLAYERS, S_PLAYER_EDIT, S_FACEOFF, S_GIGDONE };
 
 static int screen = S_TITLE;
 static double now_s, screen_t;
@@ -79,6 +79,11 @@ static double toast_t = -10;
 
 static void menu_music_stop(void);
 
+// a setlist's running totals, for its summary at the end
+static struct {
+    int songs, score, stars, hit, total, fcs, best_score;
+    char best[96];
+} gig;
 static double outro_t = -1;          // the song's done: when its closing moment began (-1 none)
 
 static void go(int s)
@@ -470,6 +475,7 @@ static void medal_totals(int out[4])
 static void open_select(const Song * s);
 static void draw_player_face(int i, float x, float top, float w, bool lit);
 static void faceoff_screen(void);
+static void gigdone_screen(void);
 static void player_switch(int i);
 static const char * player_title_text(void);
 
@@ -2259,6 +2265,7 @@ static void list_menu_update(void)
                 setlist[setlist_n++] = sel;
         } else if (list_row == 6 && setlist_n) {
             setlist_at = 0;
+            memset(&gig, 0, sizeof(gig));
             sel = setlist[0];
             list_menu = false;
             stop_preview();
@@ -2279,6 +2286,7 @@ static void list_menu_update(void)
                     setlist[setlist_n++] = k;
             }
             setlist_at = 0;
+            memset(&gig, 0, sizeof(gig));
             sel = setlist[0];
             list_menu = false;
             stop_preview();
@@ -3064,6 +3072,19 @@ static void finish_song(int how)
 {
     result = game_result();
     section_title(result.worst);
+    if (setlist_at >= 0 && !tour_on) {
+        gig.songs++;
+        gig.score += result.failed ? 0 : result.score;
+        gig.stars += result.failed ? 0 : result.stars;
+        gig.hit += result.notes_hit;
+        gig.total += result.notes_total;
+        gig.fcs += result.fc;
+        Song * gs = songs_get(sel);
+        if (gs && result.score > gig.best_score) {
+            gig.best_score = result.score;
+            snprintf(gig.best, sizeof(gig.best), "%s", gs->name);
+        }
+    }
     if (tour_on && !result.failed && result.battle != 2)     // a boss battle lost isn't a gig played
         tour_played();
     plat_log("result: %s, score %d, %d stars, %d/%d notes, best streak %d, %d/%d phrases, %d overhits%s; hits %+d ms "
@@ -3149,7 +3170,8 @@ static void play_screen(void)
         gfx_2d();
         gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(0, 0, 0, (int)(200 * k * k)));
         float sz = 64 + 20 * (1 - (k < 0.2f ? k / 0.2f : 1));
-        font_draw_shadow(res.title, "SONG COMPLETE!", SCREEN_W / 2, 200, sz,
+        int bs = game_battle_state();
+        font_draw_shadow(res.title, bs == 1 ? "YOU WIN!" : bs ? "TIME'S UP!" : "SONG COMPLETE!", SCREEN_W / 2, 200, sz,
                          fade_alpha(RGBA(255, 220, 120, 255), k < 0.15f ? k / 0.15f : 1), ALIGN_CENTER);
         gfx_end();
     }
@@ -3220,6 +3242,11 @@ static void pause_screen(void)
         } else {
             game_stop();
             setlist_at = -1;
+            if (faceoff) {
+                // a face-off called off mid-song: back to whoever started it
+                player_switch(faceoff_p[0]);
+                faceoff = 0;
+            }
             go(practicing ? S_PRACTICE : from_list());
             practicing = false;
             sel_t = now_s;
@@ -3347,8 +3374,9 @@ static void results_screen(void)
                 go(from_list());
             return;
         }
+        bool was_gig = setlist_at >= 0 && setlist_n > 1 && !tour_on && gig.songs > 1;
         setlist_at = -1;
-        go(from_list());
+        go(was_gig ? S_GIGDONE : from_list());
         sel_t = now_s;
         if (tour_on)
             tour_next();
@@ -3356,6 +3384,10 @@ static void results_screen(void)
     }
     if ((pressed & BTN_SQUARE) && s && results_can_practice()) {
         ui_sound(SND_UI_SELECT);
+        if (faceoff) {
+            player_switch(faceoff_p[0]);
+            faceoff = 0;
+        }
         sel_part = result.part;
         sel_diff = result.diff;
         read_sections(s);
@@ -4928,6 +4960,47 @@ static void player_edit_screen(void)
     gfx_end();
 }
 
+// a setlist's end: how the whole gig went
+static void gigdone_screen(void)
+{
+    if (pressed & (BTN_CROSS | BTN_CIRCLE)) {
+        ui_sound(SND_UI_SELECT);
+        memset(&gig, 0, sizeof(gig));
+        go(from_list());
+        return;
+    }
+    gfx_begin(0, 0, 0);
+    gfx_2d();
+    draw_background(res.bg_results, WHITE);
+    gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(0, 0, 0, 90));
+    panel(140, 40, 680, 440);
+    font_draw_shadow(res.title, "GIG COMPLETE!", SCREEN_W / 2, 58, 52, RGBA(255, 220, 140, 255), ALIGN_CENTER);
+    char t[128];
+    float a = (float)((now_s - screen_t) / 1.2);
+    a = a > 1 ? 1 : a;
+    snprintf(t, sizeof(t), "%d", (int)(gig.score * (1 - (1 - a) * (1 - a))));
+    font_draw_shadow(res.title, t, SCREEN_W / 2, 124, 60, WHITE, ALIGN_CENTER);
+    struct { const char * k; char v[96]; } rows[5];
+    rows[0].k = "Songs played";
+    snprintf(rows[0].v, 96, "%d", gig.songs);
+    rows[1].k = "Stars";
+    snprintf(rows[1].v, 96, "%d", gig.stars);
+    rows[2].k = "Notes hit";
+    snprintf(rows[2].v, 96, "%d%%  (%d / %d)", gig.total ? gig.hit * 100 / gig.total : 0, gig.hit, gig.total);
+    rows[3].k = "Full combos";
+    snprintf(rows[3].v, 96, "%d", gig.fcs);
+    rows[4].k = "Best song";
+    snprintf(rows[4].v, 96, "%s", gig.best[0] ? gig.best : "-");
+    for (int i = 0; i < 5; i++) {
+        float y = 214 + i * 40;
+        font_draw_shadow(res.ui, rows[i].k, 190, y, 28, RGBA(220, 210, 200, 255), ALIGN_LEFT);
+        font_draw_fit(res.ui, rows[i].v, 770, y, 28, 380, RGBA(255, 236, 190, 255), ALIGN_RIGHT);
+    }
+    static const char * help[] = {"btn_cross", "Continue"};
+    help_bar(help, 2);
+    gfx_end();
+}
+
 // FACE-OFF: the hand-over (who plays next) and the verdict
 static void faceoff_screen(void)
 {
@@ -5130,14 +5203,12 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
-        "FACE-OFF: Select on GET READY. Play, PASS THE VITA to a friend, they play the same chart, then the verdict.",
-        "Every hit flashes and rings out across the neck; misses flash red; sustains burn; streaks sweep the neck.",
-        "Star Power: the neck glows blue on the beat and comets run up the rails. The camera punches in.",
-        "The band is backlit, cameras flash in the crowd, choruses strobe the stage. SONG COMPLETE! before results.",
-        "Results count up with the stars landing one by one. Menus fade in and their highlights breathe.",
-        "Song intro card slides in with the cover. Loading screens show tips. Main menu lights drift.",
-        "Titles: show an unlocked achievement on your player card. Song list menu: Random gig of 5 songs.",
-        "The ghost race has bars. The song list shows the cover big behind it.",
+        "GIG COMPLETE!: a setlist or random gig ends on a summary of the whole gig.",
+        "Held frets light their lane. The screen edges pulse red when you're about to fail.",
+        "The multiplier bursts with light as it goes up. Confetti on results for a full combo or a new best.",
+        "Fixed: winning a battle early said SONG COMPLETE!; quitting a face-off left the second player chosen.",
+        "Earlier: FACE-OFF, titles, tips while loading, the song intro card, camera kicks, chorus strobes,",
+        "  hit flashes and rings, the blue Star Power neck, SONG COMPLETE!, the ghost race bars.",
     };
     int n = (int)(sizeof(lines) / sizeof(lines[0]));
     gfx_begin(0, 0, 0);
@@ -5383,6 +5454,7 @@ int main(void)
         case S_PLAYERS: players_screen(); break;
         case S_PLAYER_EDIT: player_edit_screen(); break;
         case S_FACEOFF: faceoff_screen(); break;
+        case S_GIGDONE: gigdone_screen(); break;
         case S_NEWS: news_screen(); break;
         case S_PLAY: play_screen(); break;
         case S_PAUSE: pause_screen(); break;
