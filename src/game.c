@@ -3202,8 +3202,7 @@ static void draw_flames(void)
         if (G.spark[i].life > 0)
             board(G.spark[i].x, G.spark[i].y, G.spark[i].z, 0.24f, 0.24f, dot, 0, 0, 1, 1,
                   with_alpha(G.spark[i].col, G.spark[i].life));
-    // Star Power: the rails burn, and the game's own jagged bolts leap off them out over the stage, a new set a dozen
-    // times a second, each with a wider faint one behind it for the glow
+    // Star Power: the neck glows blue, energy runs up the rails and embers lift off them
     if (G.sp_active) {
         // the whole neck washes blue, swelling on each beat
         double q = chart_quarters(G.chart, G.t);
@@ -3213,27 +3212,27 @@ static void draw_flames(void)
         for (int side = -1; side <= 1; side += 2)
             flat(side * HALF_W - side * 0.25f, side * HALF_W + side * 0.9f, Z_NEAR, Z_FAR * 0.75f, 0.018f, dot, 0, 1,
                  RGBA(90, 170, 255, 55), RGBA(90, 170, 255, 0));
-        const Sprite * bolt = atlas_get(res.game, "bolt");
-        gfx_2d();
-        gfx_blend(BLEND_ADD);
+        // energy running up both rails: bright pulses travelling away from the player, and blue embers lifting off
         for (int side = -1; side <= 1; side += 2) {
-            uint32_t seed = (uint32_t)(G.t * 12) * 2654435761u + (uint32_t)(side + 2) * 40503u;
-            for (int k = 0; k < 7; k++) {
-                uint32_t h = (seed + (uint32_t)k * 97u) * 2654435761u;
-                float z = 0.6f + k * 1.0f + (h >> 8 & 255) / 255.0f * 0.8f, sx, sy;
-                project(side * HALF_W, 0, z, &sx, &sy);
-                float near = 5.5f / (z + 5.5f), len = (70 + (h >> 16 & 255) / 255.0f * 70) * near;
-                float tilt = ((h >> 24 & 255) / 127.5f - 1) * 0.7f;
-                // on the screen +x is -side: out from the rail either way
-                float rot = (side < 0 ? 0 : 3.14159265f) + tilt - 0.2f * (side < 0 ? 1 : -1);
-                float px = bolt->w * 0.02f, py = bolt->h / 2.0f, fa = fade(z);
-                sprite_rot(bolt, sx, sy, len * 1.1f, 34 * near, px, py, rot, with_alpha(RGBA(60, 170, 255, 255), 0.55f * fa));
-                sprite_rot(bolt, sx, sy, len, 18 * near, px, py, rot, with_alpha(RGBA(215, 245, 255, 255), fa));
+            float x = side * HALF_W;
+            for (int k = 0; k < 6; k++) {
+                float z = fmodf((float)G.t * 9 + k * 2.2f, Z_FAR * 0.8f);
+                float a = fade(z) * (0.55f + 0.45f * beat);
+                // a comet: a wide soft glow, a bright core, a tail fading behind it
+                for (int g = 0; g < 2; g++)
+                    flat(x - 0.6f, x + 0.6f, z - 1.2f, z + 1.2f, 0.03f, dot, 0, 1, with_alpha(RGBA(70, 160, 255, 255), a),
+                         with_alpha(RGBA(70, 160, 255, 255), a));
+                flat(x - 0.09f, x + 0.09f, z - 1.6f, z + 0.25f, 0.034f, NULL, 0, 1, with_alpha(RGBA(150, 220, 255, 255), 0),
+                     with_alpha(WHITE, a));
+            }
+            for (int k = 0; k < 8; k++) {
+                uint32_t h = (uint32_t)(k * 2654435761u + (side + 2) * 97u);
+                float life = fmodf((float)G.t * 0.9f + (h >> 8 & 255) / 255.0f, 1.0f);
+                float z = 0.5f + (h >> 16 & 255) / 255.0f * Z_FAR * 0.6f;
+                float y = 0.05f + life * 0.9f, xo = side * (0.1f + life * 0.35f);
+                board(x + xo, y, z, 0.16f, 0.16f, dot, 0, 0, 1, 1, with_alpha(RGBA(140, 210, 255, 255), (1 - life) * fade(z)));
             }
         }
-        gfx_blend(BLEND_ALPHA);
-        gfx_3d(G.proj, G.view);
-        gfx_blend(BLEND_ADD);
     }
     gfx_blend(BLEND_ALPHA);
 }
