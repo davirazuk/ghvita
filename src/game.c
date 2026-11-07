@@ -2620,6 +2620,8 @@ int game_update(const Pad * pad, uint32_t pressed)
                 snprintf(t, sizeof(t), "%d%%  SPEED UP %d%%", pct, speed);
             } else if (practice.notes)
                 snprintf(t, sizeof(t), "%d%%  (%d / %d)", pct, G.hits, practice.notes);
+            plat_log("practice: run %d, %d%% of %d notes, next at %d%%, %.1f s of song", practice.runs, pct, practice.notes,
+                     speed, practice.to - practice.from);
             reset_play();
             // the result of a run is the point of practice: it shows even with popups off
             popup_always(t);
