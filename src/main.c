@@ -5242,6 +5242,7 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "Fixed: a held fret's lane light tinted the notes over it; it now sits under them. The picker shows stars.",
         "Streak achievements (100, 500, 1000) are announced the moment you earn them.",
         "Star Power notes glitter as they come. The band leaps when a chorus hits.",
         "Practice: each section shows how dense it is, so the hard parts stand out. Smoke rolls after the chorus jets.",
