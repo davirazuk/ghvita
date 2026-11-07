@@ -4498,7 +4498,7 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
-        "Players: WHO'S PLAYING? when the game starts. Each player keeps their own scores, settings, career and streak.",
+        "Players: WHO'S PLAYING? at the start. Square edits a card: name, colour, a picture (song covers, downloads or your own), delete.",
         "Battle: Triangle on GET READY. Star Power phrases become attacks against a computer rival.",
         "DAILY SONG on the main menu, with a streak. Medals (bronze, silver, gold) on every chart.",
         "28 achievements on CAREER (press R). Race your best: GHOST +/- shows how you're doing against your best run.",
