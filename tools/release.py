@@ -76,5 +76,5 @@ for p in up:
 if a.dry:
     sys.exit(print('dry run: nothing uploaded', tag))
 notes = a.notes or run('git', 'log', '-1', '--format=%s')
-subprocess.run(['gh', 'release', 'create', tag, '--title', f'GH Vita build {n}', '--notes', notes, '--latest', *up], check=True)
+subprocess.run(['gh', 'release', 'create', tag, '--target', run('git', 'rev-parse', 'HEAD'), '--title', f'GH Vita build {n}', '--notes', notes, '--latest', *up], check=True)
 print('released', tag)

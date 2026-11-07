@@ -87,6 +87,7 @@ static struct {
     int streak, best_streak, hits, misses, overhits, sp_hit;
     double off_sum, off_sq;             // how early or late the hits came, seconds
     int off_n;
+    int early, on_time, late;           // hits more than 30 ms early, within 30 ms, more than 30 ms late
     float sp, rock;
     bool sp_active, sp_ready_told;
     double sp_last_q;           // where Star Power's drain has got to, in quarter notes
@@ -1393,6 +1394,7 @@ static void reset_play(void)
     G.streak = G.best_streak = G.hits = G.misses = G.overhits = G.sp_hit = 0;
     G.off_sum = G.off_sq = 0;
     G.off_n = 0;
+    G.early = G.on_time = G.late = 0;
     G.hit_log_n = 0;
     for (int i = 0; i < 6; i++)
         G.press_t[i] = -100;
@@ -1741,6 +1743,9 @@ Result game_result(void)
         r.off_ms = (int)floor(mean * 1000 + 0.5);
         r.spread_ms = (int)(sqrt(var > 0 ? var : 0) * 1000 + 0.5);
     }
+    r.early = G.early;
+    r.on_time = G.on_time;
+    r.late = G.late;
     r.sp_hit = G.sp_hit;
     r.sp_total = G.part ? G.part->sp_count : 0;
     r.failed = G.failed;
@@ -2098,6 +2103,7 @@ static bool press_note(int lane)
             G.hit_log[G.hit_log_n++ % HIT_LOG] = (float)off;
             G.off_sum += off;
             G.off_sq += off * off;
+            if (off < -0.03) G.early++; else if (off > 0.03) G.late++; else G.on_time++;
             G.off_n++;
         }
         return true;
@@ -2190,6 +2196,7 @@ static void pull_off(void)
         G.hit_log[G.hit_log_n++ % HIT_LOG] = (float)off;
         G.off_sum += off;
         G.off_sq += off * off;
+        if (off < -0.03) G.early++; else if (off > 0.03) G.late++; else G.on_time++;
         G.off_n++;
         return;
     }

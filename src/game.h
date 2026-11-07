@@ -15,6 +15,7 @@ typedef struct {
     bool failed, fc;
     bool timed;                 // enough hits to tell: on average off_ms late (early if negative), spread_ms either way
     int off_ms, spread_ms;
+    int early, on_time, late;   // hits more than 30 ms early, within 30 ms, more than 30 ms late
     uint8_t strip[RESULT_STRIP];    // start to end, the percent hit in each slice (255: nothing played there)
     char worst[44];                 // the named section that went worst, and how it went
     int worst_pct;

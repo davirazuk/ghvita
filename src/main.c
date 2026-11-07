@@ -2853,7 +2853,7 @@ static void finish_song(int how)
     if (s && !result.failed) {
         Score sc = {result.score, (uint8_t)result.stars,
                     (uint8_t)(result.notes_total ? result.notes_hit * 100 / result.notes_total : 0), result.fc};
-        result_best = result.score > s->best[result.part][result.diff].score;
+        result_best = !autoplay && result.score > s->best[result.part][result.diff].score;
         int had = medal_of(&s->best[result.part][result.diff]), got = medal_of(&sc);
         result_medal = got > had && !autoplay ? got : 0;
         if (!autoplay)
@@ -3124,11 +3124,15 @@ static void results_screen(void)
     rows[5].label = "Your timing";
     if (!result.timed)
         strcpy(rows[5].value, "-");
-    else if (abs(result.off_ms) < 5)
-        strcpy(rows[5].value, "Right on it");
-    else
-        snprintf(rows[5].value, sizeof(rows[5].value), "%d ms %s", abs(result.off_ms),
-                 result.off_ms > 0 ? "late" : "early");
+    else {
+        // how many hits were within 30 ms, and which way the rest leaned
+        int all = result.early + result.on_time + result.late, on = all ? result.on_time * 100 / all : 0;
+        if (abs(result.off_ms) < 5)
+            snprintf(rows[5].value, sizeof(rows[5].value), "%d%% on time, right on it", on);
+        else
+            snprintf(rows[5].value, sizeof(rows[5].value), "%d%% on time, %d ms %s", on, abs(result.off_ms),
+                     result.off_ms > 0 ? "late" : "early");
+    }
     for (int i = 0; i < 6; i++) {
         float y = 200 + i * 31;
         font_draw_shadow(res.ui, rows[i].label, 330, y, 28, RGBA(220, 210, 200, 255), ALIGN_LEFT);
@@ -3137,6 +3141,17 @@ static void results_screen(void)
     bool strip = false;
     for (int i = 0; i < RESULT_STRIP; i++)
         strip |= result.strip[i] != 255;
+    if (result.timed && !results_history) {
+        // early, on time, late: a thin bar under the timing row
+        int all = result.early + result.on_time + result.late;
+        if (all) {
+            const float x = 330, w = 540, y = 386;
+            float e = w * result.early / all, o = w * result.on_time / all;
+            gfx_rect(x, y, e, 5, RGBA(110, 170, 255, 255));
+            gfx_rect(x + e, y, o, 5, RGBA(110, 220, 120, 255));
+            gfx_rect(x + e + o, y, w - e - o, 5, RGBA(255, 150, 90, 255));
+        }
+    }
     if (results_history) {
         // the last plays as bars, this one lit; the best and the average beside
         const float x = 84, w = 792, top = 396, h = 34;
