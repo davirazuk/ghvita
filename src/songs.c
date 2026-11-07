@@ -778,7 +778,7 @@ void config_defaults(void)
     cfg.music_vol = 10;
     cfg.sfx_vol = 8;
     cfg.crowd_vol = 5;
-    cfg.flat_notes = true;
+    cfg.flat_notes = false;     // notes facing you: they read better than lying on the neck
     cfg.note_size = 1;
     cfg.last_diff = DIFF_MEDIUM;
     cfg.sing_diff = DIFF_MEDIUM;    // singing along judges the voice at Medium, not at the instrument's own
@@ -787,7 +787,8 @@ void config_defaults(void)
 void config_load(void)
 {
     config_defaults();
-    int look = 0;
+    int look = 0, notes_look = 0;
+    bool flat = false;   // notes_look: settings saved since notes face you by default
     char path[400];
     snprintf(path, sizeof(path), "%ssettings.txt", player_dir());
     FILE * f = fopen(path, "r");
@@ -807,6 +808,8 @@ void config_load(void)
             cfg.speed = n < 1 ? 1 : n > 10 ? 10 : n;
         else if (strcmp(k, "board_look") == 0)
             look = n;
+        else if (strcmp(k, "notes_look") == 0)
+            notes_look = n;
         else if (strcmp(k, "highway") == 0)
             snprintf(cfg.highway, sizeof(cfg.highway), "%s", v);
         else if (strcmp(k, "venue") == 0)
@@ -846,7 +849,7 @@ void config_load(void)
         else if (strcmp(k, "auto_repress") == 0)
             cfg.auto_repress = n != 0;
         else if (strcmp(k, "flat_notes") == 0)
-            cfg.flat_notes = n != 0;
+            flat = n != 0;
         else if (strcmp(k, "no_wobble") == 0)
             cfg.no_wobble = n != 0;
         else if (strcmp(k, "fire") == 0)
@@ -909,6 +912,9 @@ void config_load(void)
             snprintf(cfg.last_song, sizeof(cfg.last_song), "%s", v);
     }
     fclose(f);
+    // notes lying on the neck were the default before: a file from then gets them facing you, once; after that it's
+    // whatever the player picked
+    cfg.flat_notes = notes_look ? flat : false;
     // a settings file from before the board matched World Tour still names the old default: move it on, once
     if (!look && strcmp(cfg.highway, "classic") == 0)
         snprintf(cfg.highway, sizeof(cfg.highway), "judy");
@@ -938,7 +944,7 @@ void config_save(void)
             cfg.no_popups, cfg.timing_bar, cfg.live_stats, cfg.vanish, cfg.no_miss_sound, cfg.no_rear_whammy, cfg.no_bend, cfg.no_countdown);
     fprintf(f, "double_kick = %d\nfive_pads = %d\neasy_sustains = %d\nno_count_in = %d\nstage_screens = %d\nno_progress = %d\ncup_skin = %d\n", cfg.double_kick, cfg.five_pads, cfg.easy_sustains,
             cfg.no_count_in, cfg.stage_screens, cfg.no_progress, cfg.cup_skin);
-    fprintf(f, "no_ghost = %d\n", cfg.no_ghost);
+    fprintf(f, "no_ghost = %d\nnotes_look = 1\n", cfg.no_ghost);
     fclose(f);
     remove(path);
     rename(tmp, path);
