@@ -4799,6 +4799,7 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "Calibrate shows the beat and where each of your taps landed. Song list: sort by Recently played.",
         "World Tour: each leg ends on a BOSS BATTLE encore against a rival who gets tougher leg by leg.",
         "Battles show a tug-of-war bar across the top. The song list shows every song's cover.",
         "Fixed: the SOLO! percent could go past 100%.",
