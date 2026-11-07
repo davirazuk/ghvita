@@ -461,6 +461,7 @@ static void medal_totals(int out[4])
 
 static void open_select(const Song * s);
 static void draw_player_face(int i, float x, float top, float w, bool lit);
+static const char * player_title_text(void);
 
 // days since 1970 by the local calendar, so the song changes at the player's midnight
 static long local_day(void)
@@ -662,10 +663,8 @@ static void main_menu(void)
         int me = player_current();
         draw_player_face(me, x + 48, y + 8, 80, true);
         font_draw_fit(res.title, player_name(me), x + 100, y + 10, 30, 300, RGBA(255, 225, 150, 255), ALIGN_LEFT);
-        int next;
-        const char * rank = career_rank(&next);
         char line[96];
-        snprintf(line, sizeof(line), "%s   %d stars", rank, career.stars);
+        snprintf(line, sizeof(line), "%s   %d stars", player_title_text(), career.stars);
         font_draw_fit(res.ui, line, x + 100, y + 46, 18, 300, RGBA(215, 210, 200, 255), ALIGN_LEFT);
         int medals[4];
         medal_totals(medals);
@@ -4195,6 +4194,45 @@ static void player_reload(void)
     art_for = preview_for = -1;
 }
 
+// a player's title: an achievement of theirs they show on their card, by its id in title.txt ("" for their rank)
+static void player_title_get(int i, char * out, int size)
+{
+    char d[400], p[460];
+    player_dir_of(i, d, sizeof(d));
+    snprintf(p, sizeof(p), "%stitle.txt", d);
+    out[0] = 0;
+    FILE * f = fopen(p, "r");
+    if (f) {
+        if (fgets(out, size, f))
+            out[strcspn(out, "\r\n")] = 0;
+        fclose(f);
+    }
+}
+
+static void player_title_set(int i, const char * id)
+{
+    char d[400], p[460];
+    player_dir_of(i, d, sizeof(d));
+    snprintf(p, sizeof(p), "%stitle.txt", d);
+    FILE * f = fopen(p, "w");
+    if (f) {
+        fprintf(f, "%s\n", id);
+        fclose(f);
+    }
+}
+
+// the title's words: the achievement's name, or the career rank when none is chosen (or it isn't theirs any more)
+static const char * player_title_text(void)
+{
+    static char id[40];
+    player_title_get(player_current(), id, sizeof(id));
+    for (int k = 0; id[0] && k < achieve_count(); k++)
+        if (!strcmp(achieve_get(k)->id, id) && achieve_has(k))
+            return achieve_get(k)->name;
+    int next;
+    return career_rank(&next);
+}
+
 // after a delete: the current player may be someone else now
 static void player_switch_force(void)
 {
@@ -4381,7 +4419,7 @@ static void players_screen(void)
 // Square on a card: the name, the colour, a picture (one of your songs' covers, one downloaded, or one of yours from
 // the card's avatars folder), or the player gone.
 
-enum { PE_NAME, PE_COLOR, PE_GH, PE_SONGS, PE_WEB, PE_CARD, PE_CLEAR, PE_DELETE, PE_ROWS };
+enum { PE_NAME, PE_COLOR, PE_TITLE, PE_GH, PE_SONGS, PE_WEB, PE_CARD, PE_CLEAR, PE_DELETE, PE_ROWS };
 static int pe_cover = -1, pe_card, pe_gh;
 static char pe_ghs[48][64];                // the game's own Guitar Hero pictures (assets/avatars)
 static int pe_gh_n = -1;
@@ -4579,6 +4617,25 @@ static void player_edit_screen(void)
         ui_sound(SND_UI_MOVE);
         if (pe_row == PE_COLOR)
             player_set_color(me, player_color(me) + d);
+        else if (pe_row == PE_TITLE) {
+            // through the achievements this player has, and back to their rank
+            char cur[40];
+            player_title_get(me, cur, sizeof(cur));
+            int n = achieve_count(), at = -1;
+            for (int k = 0; k < n; k++)
+                if (!strcmp(achieve_get(k)->id, cur))
+                    at = k;
+            for (int step = 0; step <= n; step++) {
+                at += d;
+                if (at < -1)
+                    at = n - 1;
+                if (at >= n)
+                    at = -1;
+                if (at == -1 || achieve_has(at))
+                    break;
+            }
+            player_title_set(me, at < 0 ? "" : achieve_get(at)->id);
+        }
         else if (pe_row == PE_GH && pe_gh_n > 0)
             pe_gh = (pe_gh + d + pe_gh_n) % pe_gh_n;
         else if (pe_row == PE_SONGS)
@@ -4693,11 +4750,20 @@ static void player_edit_screen(void)
     banner("EDIT PLAYER");
     panel(30, 84, 560, 400);
     char vals[PE_ROWS][96];
-    static const char * const labels[PE_ROWS] = {"Name", "Colour", "Guitar Hero picture", "Picture from your songs",
+    static const char * const labels[PE_ROWS] = {"Name", "Colour", "Title", "Guitar Hero picture", "Picture from your songs",
                                                  "Download an album cover",
                                                  "Picture from the card", "No picture", "Delete player"};
     snprintf(vals[PE_NAME], 96, "%s", player_name(me));
     snprintf(vals[PE_COLOR], 96, "< %d >", player_color(me) + 1);
+    {
+        char cur[40];
+        player_title_get(me, cur, sizeof(cur));
+        const char * tn = "Career rank";
+        for (int k = 0; cur[0] && k < achieve_count(); k++)
+            if (!strcmp(achieve_get(k)->id, cur))
+                tn = achieve_get(k)->name;
+        snprintf(vals[PE_TITLE], 96, "< %s >", tn);
+    }
     if (pe_gh_n > 0)
         snprintf(vals[PE_GH], 96, "< %d of %d >", pe_gh % pe_gh_n + 1, pe_gh_n);
     else
@@ -4713,10 +4779,10 @@ static void player_edit_screen(void)
     snprintf(vals[PE_CLEAR], 96, "%s", "");
     snprintf(vals[PE_DELETE], 96, "%s", pe_delete_armed ? "X again to delete" : "");
     for (int i = 0; i < PE_ROWS; i++) {
-        float y = 98 + i * 47;
+        float y = 96 + i * 43;
         bool cur = i == pe_row;
         if (cur)
-            select_bar(44, y - 4, 532, 46, WHITE);
+            select_bar(44, y - 4, 532, 40, WHITE);
         uint32_t col = i == PE_DELETE ? RGBA(255, 140, 120, 255) : cur ? RGBA(255, 230, 150, 255) : RGBA(215, 205, 195, 255);
         font_draw_shadow(res.ui, labels[i], 60, y + 6, 24, col, ALIGN_LEFT);
         font_draw_fit(res.ui, vals[i], 562, y + 9, 20, 230, cur ? RGBA(255, 236, 190, 255) : RGBA(180, 180, 185, 255),
