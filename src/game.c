@@ -3097,6 +3097,15 @@ static void draw_rail_meter(void)
         char name[16];
         snprintf(name, sizeof(name), "mult_x%d", m);
         float pop = 1 + G.mult_pop * 0.45f;
+        if (G.mult_pop > 0.05f) {
+            // a burst of light behind the plate as it goes up, in the multiplier's colour
+            uint32_t bc = G.sp_active ? RGBA(95, 225, 255, 255) : m >= 3 ? RGBA(255, 130, 225, 255)
+                        : RGBA(90, 245, 110, 255);
+            gfx_blend(BLEND_ADD);
+            board(-HALF_W - 0.30f, 0.0f, z1 + 0.05f - 0.4f * G.mult_pop, 2.6f * G.mult_pop, 2.0f * G.mult_pop,
+                  atlas_get(res.game, "glow"), 0, 0, 1, 1, with_alpha(bc, G.mult_pop));
+            gfx_blend(BLEND_ALPHA);
+        }
         board(-HALF_W - 0.30f, 0.02f, z1 + 0.05f, 0.8f * pop, 0.4f * pop, atlas_get(res.game, name), 0, 0, 1, 1,
               G.sp_active ? RGBA(170, 225, 255, 255) : WHITE);
     }

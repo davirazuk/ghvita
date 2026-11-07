@@ -5203,14 +5203,12 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
-        "FACE-OFF: Select on GET READY. Play, PASS THE VITA to a friend, they play the same chart, then the verdict.",
-        "Every hit flashes and rings out across the neck; misses flash red; sustains burn; streaks sweep the neck.",
-        "Star Power: the neck glows blue on the beat and comets run up the rails. The camera punches in.",
-        "The band is backlit, cameras flash in the crowd, choruses strobe the stage. SONG COMPLETE! before results.",
-        "Results count up with the stars landing one by one. Menus fade in and their highlights breathe.",
-        "Song intro card slides in with the cover. Loading screens show tips. Main menu lights drift.",
-        "Titles: show an unlocked achievement on your player card. Song list menu: Random gig of 5 songs.",
-        "The ghost race has bars. The song list shows the cover big behind it.",
+        "GIG COMPLETE!: a setlist or random gig ends on a summary of the whole gig.",
+        "Held frets light their lane. The screen edges pulse red when you're about to fail.",
+        "The multiplier bursts with light as it goes up. Confetti on results for a full combo or a new best.",
+        "Fixed: winning a battle early said SONG COMPLETE!; quitting a face-off left the second player chosen.",
+        "Earlier: FACE-OFF, titles, tips while loading, the song intro card, camera kicks, chorus strobes,",
+        "  hit flashes and rings, the blue Star Power neck, SONG COMPLETE!, the ghost race bars.",
     };
     int n = (int)(sizeof(lines) / sizeof(lines[0]));
     gfx_begin(0, 0, 0);
