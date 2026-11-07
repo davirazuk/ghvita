@@ -4856,6 +4856,10 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "Every hit flashes and sends a ring of light out; a miss flashes red; held sustains burn; every 50 streak sweeps the neck.",
+        "Star Power: the neck glows blue on the beat and comets run up the rails (no more spiky lightning).",
+        "The band is backlit in the stage's colours; cameras flash in the crowd when you're rocking.",
+        "Results: the score counts up and the stars land one by one. Menus fade in. The song list shows the cover big.",
         "Calibrate shows the beat and where each of your taps landed. Song list: sort by Recently played.",
         "World Tour: each leg ends on a BOSS BATTLE encore against a rival who gets tougher leg by leg.",
         "Battles show a tug-of-war bar across the top. The song list shows every song's cover.",

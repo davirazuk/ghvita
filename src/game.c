@@ -213,6 +213,7 @@ static void ghost_start(const Song * song, int part, int diff);
 static void ghost_track(void);
 static void ghost_finish(bool failed);
 static void draw_ghost(void);
+static void draw_flashes(void);
 
 // -------------------------------------------------------------------------------------------------------- helpers
 
@@ -622,6 +623,34 @@ static void draw_crowd(double beat)
     }
 }
 
+static void draw_flashes(void)
+{
+    // phones and cameras going off in the crowd: more the better it's going, a storm under Star Power
+    {
+        const Sprite * dot = atlas_get(res.stage, "dot");
+        float rate = G.sp_active ? 1 : G.cheer > 0.25f ? 0.8f : G.rock > 0.66f ? 0.35f : G.rock > 0.33f ? 0.12f : 0;
+        rate *= 0.4f + 0.6f * G.band_loud;
+        int slot = (int)(G.t * 20);
+        gfx_blend(BLEND_ADD);
+        for (int k = 0; k < 4; k++) {
+            int sl = slot - k;          // a flash lasts four twentieths of a second, fading
+            for (int j = 0; j < 6; j++) {
+                uint32_t h = (uint32_t)sl * 2654435761u + (uint32_t)j * 40503u;
+                if ((h >> 8 & 1023) / 1023.0f > rate * 0.8f)
+                    continue;
+                // either side of the highway, where the crowd shows
+                float x = (h >> 12 & 1023) / 1023.0f * 300, y = 400 + (h >> 22 & 127) * 1.05f, a = 1 - k / 4.0f;
+                if (h & 1)
+                    x = SCREEN_W - x;
+                float sz = 10 + (h >> 4 & 15);
+                gfx_sprite(dot, x - sz, y - sz, sz * 2, sz * 2, RGBA(255, 255, 255, (int)(230 * a)));
+                gfx_sprite(dot, x - sz * 3, y - sz * 3, sz * 6, sz * 6, RGBA(200, 220, 255, (int)(60 * a)));
+            }
+        }
+        gfx_blend(BLEND_ALPHA);
+    }
+}
+
 static void draw_party(void)
 {
     double since = G.t - G.party_t;
@@ -782,6 +811,8 @@ static void draw_stage(void)
     draw_party();
     if (!cfg.no_vignette)
         vignette();
+    if (!cfg.no_crowd)
+        draw_flashes();
 }
 
 // The band on its marks: 48 frames over 4 beats (tools/band.py), locked to the song's beat; a tempo outside the 70-150
@@ -1034,6 +1065,11 @@ static void draw_band(double beat)
             gfx_sprite(pool, m[0] - pw / 2, bottom - ph / 2, pw, ph, col3(G.key_col, G.focus == r ? 0.75f : 0.3f + 0.2f * G.band_loud));
             gfx_blend(BLEND_ALPHA);
             band_frame(t, f, cw, ch, m[0], bottom, w, -h * 0.18f, -lean * 0.18f, 0, RGBA(6, 3, 12, 120));
+            // backlit: their own shape a little larger, added in the stage's key colour, swelling on the beat
+            gfx_blend(BLEND_ADD);
+            band_frame(t, f, cw, ch, m[0], bottom + h * 0.01f, w * 1.07f, h * 1.035f, lean, dip,
+                       col3(G.key_col, (0.3f + 0.45f * on_beat * G.band_loud) * (G.focus == r ? 1.4f : 1)));
+            gfx_blend(BLEND_ALPHA);
             band_frame(t, f, cw, ch, m[0], bottom, w, h, lean, dip, tint);
         }
         // Star Power: they burn with it
