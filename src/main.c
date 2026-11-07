@@ -3562,6 +3562,22 @@ static void results_screen(void)
     }
     if (result_best)
         font_draw_shadow(res.title, "NEW BEST!", 870, 148, 36, RGBA(120, 220, 255, 255), ALIGN_RIGHT);
+    if (result.fc || result_best || result.battle == 1) {
+        // a celebration: confetti falling over the results for the first few seconds
+        static const uint32_t cols[5] = {RGBA(255, 214, 90, 255), RGBA(255, 96, 190, 255), RGBA(100, 225, 255, 255),
+                                         RGBA(176, 120, 255, 255), RGBA(255, 255, 255, 255)};
+        float since = (float)(now_s - screen_t);
+        float fade = since > 4 ? (5 - since) : 1;
+        for (int i = 0; fade > 0 && i < 70; i++) {
+            uint32_t h = (uint32_t)i * 2654435761u;
+            float tau = since - (h >> 8 & 127) / 100.0f;
+            if (tau < 0)
+                continue;
+            float x = (h >> 14 & 1023) * 0.94f + sinf(tau * 3 + i) * 20, y = -20 + tau * (140 + (h >> 24 & 127));
+            float w = 6 + (i % 3) * 3, ht = 10 - (i % 3) * 2 + 4 * fabsf(sinf(tau * 6 + i));
+            gfx_rect(x, y, w, ht, fade_alpha(cols[i % 5], fade));
+        }
+    }
     if (result.vox_graded) {
         // two playing: the singer's share, apart from the instrument's
         char d[96];
