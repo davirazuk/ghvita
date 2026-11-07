@@ -3871,7 +3871,7 @@ static void tour_screen(void)
 
 enum { O_SPEED, O_HIGHWAY, O_VENUE, O_BAND, O_SING, O_SINGDIFF, O_OFFSET, O_LAYOUT, O_DRUMKEYS, O_DRUMHITS, O_TILT, O_NOFAIL, O_LEFTY, O_MUSIC, O_SFX, O_CROWD, O_FPS,
        O_CAMERA, O_HWALPHA, O_VLIGHT, O_FLASH, O_POPUPS, O_TIMING, O_LIVE, O_VANISH, O_MISSSND, O_REAR, O_BEND, O_COUNTDOWN,
-       O_RESET, O_FIVEPADS, O_DOUBLEKICK, O_EASYSUS, O_COUNTIN, O_SCREENS, O_PROGRESS, O_CUPS, O_AUTOREPRESS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, O_CROWDHANDS, O_VIGNETTE, O_LYRICS, O_MENUMUSIC, O_SINGSP, O_SHRINKCHECK, O_GHOST, O_RIVAL, O_WINDOW, O_COUNT };
+       O_RESET, O_FIVEPADS, O_DOUBLEKICK, O_EASYSUS, O_COUNTIN, O_SCREENS, O_PROGRESS, O_CUPS, O_AUTOREPRESS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, O_CROWDHANDS, O_VIGNETTE, O_LYRICS, O_MENUMUSIC, O_SINGSP, O_SHRINKCHECK, O_GHOST, O_RIVAL, O_WINDOW, O_LIGHTFX, O_COUNT };
 
 // the options by subject, L and R between them
 enum { OPT_TABS = 7, OPT_TAB_MAX = 14 };
@@ -3881,7 +3881,7 @@ static const int opt_tabs[OPT_TABS][OPT_TAB_MAX + 1] = {
     {O_LAYOUT, O_DRUMKEYS, O_FIVEPADS, O_DOUBLEKICK, O_LEFTY, O_TILT, O_REAR, O_SINGSP, -1},
     {O_HIGHWAY, O_HWALPHA, O_CAMERA, O_CUPS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, -1},
     {O_VENUE, O_VLIGHT, O_BAND, O_CROWDHANDS, O_VIGNETTE, O_SCREENS, O_FLASH, -1},
-    {O_LYRICS, O_POPUPS, O_PROGRESS, O_TIMING, O_LIVE, O_GHOST, O_FPS, -1},
+    {O_LYRICS, O_POPUPS, O_PROGRESS, O_TIMING, O_LIVE, O_GHOST, O_LIGHTFX, O_FPS, -1},
     {O_MUSIC, O_SFX, O_CROWD, O_MENUMUSIC, O_COUNTIN, O_DRUMHITS, O_MISSSND, O_BEND, -1},
     {O_SHRINKCHECK, -1},
 };
@@ -4003,6 +4003,7 @@ static void option_text(int i, char * name, char * value, size_t n)
     case O_POPUPS: strcpy(name, "Streak messages"); snprintf(value, n, "%s", cfg.no_popups ? "Off" : "On"); break;
     case O_TIMING: strcpy(name, "Timing bar"); snprintf(value, n, "%s", cfg.timing_bar ? "On" : "Off"); break;
     case O_LIVE: strcpy(name, "Live percent"); snprintf(value, n, "%s", cfg.live_stats ? "On" : "Off"); break;
+    case O_LIGHTFX: strcpy(name, "Effects"); snprintf(value, n, "%s", cfg.light_fx ? "Light" : "Full"); break;
     case O_WINDOW: {
         static const char * const wn[3] = {"Normal", "Strict", "Lenient"};
         strcpy(name, "Timing window");
@@ -4114,6 +4115,7 @@ static void change_option(int i, int d)
     case O_GHOST: cfg.no_ghost = !cfg.no_ghost; break;
     case O_RIVAL: cfg.rival = (cfg.rival + d + 4) % 4; break;
     case O_WINDOW: cfg.hit_window = (cfg.hit_window + d + 3) % 3; break;
+    case O_LIGHTFX: cfg.light_fx = !cfg.light_fx; break;
     case O_VANISH: cfg.vanish = !cfg.vanish; break;
     case O_MISSSND: cfg.no_miss_sound = !cfg.no_miss_sound; break;
     case O_REAR: cfg.no_rear_whammy = !cfg.no_rear_whammy; break;
@@ -4305,6 +4307,7 @@ static void options_screen(void)
         "GHOST +1200: how far ahead (or behind) your best run on the chart you were at this point.",
         "How good the computer rival is in a battle (Triangle on GET READY).",
         "How early or late a note can be hit: Strict 75 ms, Normal 95 ms, Lenient 115 ms either way.",
+        "Light drops the hit rings, Star Power glitter, smoke, band backlight and camera flashes, for a steadier frame rate.",
     };
     char line[160];
     const char * text = about[opt];
@@ -5258,17 +5261,12 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
-        "Options > Game > Timing window: Strict, Normal or Lenient. The score counter rolls up; the crowd surges on big moments.",
-        "Fixed: a held fret's lane light tinted the notes over it; it now sits under them. The picker shows stars.",
-        "Streak achievements (100, 500, 1000) are announced the moment you earn them.",
-        "Star Power notes glitter as they come. The band leaps when a chorus hits.",
-        "Practice: each section shows how dense it is, so the hard parts stand out. Smoke rolls after the chorus jets.",
-        "GIG COMPLETE!: a setlist or random gig ends on a summary of the whole gig.",
-        "Held frets light their lane. The screen edges pulse red when you're about to fail.",
-        "The multiplier bursts with light as it goes up. Confetti on results for a full combo or a new best.",
-        "Fixed: winning a battle early said SONG COMPLETE!; quitting a face-off left the second player chosen.",
-        "Earlier: FACE-OFF, titles, tips while loading, the song intro card, camera kicks, chorus strobes,",
-        "  hit flashes and rings, the blue Star Power neck, SONG COMPLETE!, the ghost race bars.",
+        "A hit gem swells and fades at the strikeline. In slow songs the crowd holds up lighters.",
+        "The rock meter glows red and its needle trembles when you're about to fail; full, it glows green.",
+        "Options > Screen > Effects: Light turns off the heavier effects for a steadier frame rate.",
+        "Options > Game > Timing window: Strict, Normal or Lenient. The score counter rolls up.",
+        "Fixed: a held fret's lane light tinted the notes over it. Streak achievements pop up as you earn them.",
+        "Earlier: GIG COMPLETE!, FACE-OFF, titles, practice section density, smoke after the chorus jets.",
     };
     int n = (int)(sizeof(lines) / sizeof(lines[0]));
     gfx_begin(0, 0, 0);

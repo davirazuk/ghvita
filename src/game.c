@@ -457,7 +457,7 @@ static void draw_pyro(void)
 {
     const float length = 0.55f;
     double since = G.t - G.pyro_t;
-    if (since >= 0 && since < 3.5 && G.marks) {
+    if (since >= 0 && since < 3.5 && G.marks && !cfg.light_fx) {
         // after the jets, smoke rolls out across the front of the stage and thins away
         const Sprite * haze = atlas_get(res.stage, "haze");
         float k = (float)since / 3.5f;
@@ -646,6 +646,25 @@ static void draw_crowd(double beat)
 
 static void draw_flashes(void)
 {
+    // a slow song going well: lighters up in the crowd, swaying with the beat
+    double bpm = G.t > 0 ? (chart_quarters(G.chart, G.t + 0.5) - chart_quarters(G.chart, G.t)) * 120 : 120;
+    if (bpm > 1 && bpm < 96 && G.rock > 0.5f && G.t > 2) {
+        const Sprite * dot = atlas_get(res.stage, "dot");
+        double q = chart_quarters(G.chart, G.t);
+        float sway = sinf((float)q * 3.14159265f / 2);
+        gfx_blend(BLEND_ADD);
+        for (int j = 0; j < 22; j++) {
+            uint32_t h = (uint32_t)j * 2654435761u;
+            float x = (h >> 12 & 1023) / 1023.0f * 280, y = 440 + (h >> 22 & 63) * 1.4f;
+            if (h & 1)
+                x = SCREEN_W - x;
+            x += sway * (8 + (h >> 4 & 7));
+            float fl = 0.75f + 0.25f * sinf((float)G.t * (9 + (h >> 8 & 7)) + j);
+            gfx_sprite(dot, x - 9, y - 12, 18, 22, RGBA(255, 190, 90, (int)(200 * fl)));
+            gfx_sprite(dot, x - 3, y - 6, 6, 9, RGBA(255, 250, 220, (int)(230 * fl)));
+        }
+        gfx_blend(BLEND_ALPHA);
+    }
     // phones and cameras going off in the crowd: more the better it's going, a storm under Star Power
     {
         const Sprite * dot = atlas_get(res.stage, "dot");
@@ -835,7 +854,7 @@ static void draw_stage(void)
     draw_party();
     if (!cfg.no_vignette)
         vignette();
-    if (!cfg.no_crowd)
+    if (!cfg.no_crowd && !cfg.light_fx)
         draw_flashes();
 }
 
@@ -1091,7 +1110,7 @@ static void draw_band(double beat)
             band_frame(t, f, cw, ch, m[0], bottom, w, -h * 0.18f, -lean * 0.18f, 0, RGBA(6, 3, 12, 120));
             // backlit: their own shape a little larger, added in the stage's key colour, swelling on the beat (whoever the
             // camera's on, or everyone under Star Power: a second draw of a member costs the Vita's fill rate)
-            if (G.focus == r || G.sp_active) {
+            if ((G.focus == r || G.sp_active) && !cfg.light_fx) {
             gfx_blend(BLEND_ADD);
             band_frame(t, f, cw, ch, m[0], bottom + h * 0.01f, w * 1.07f, h * 1.035f, lean, dip,
                        col3(G.key_col, (0.3f + 0.45f * on_beat * G.band_loud) * (G.focus == r ? 1.4f : 1)));
@@ -3236,7 +3255,7 @@ static void draw_gems(void)
                 board(lane_x(l), 0, z, gw * 1.3f, gh * 1.5f, atlas_get(res.game, "glow"), 0, 0, 1, 1, with_alpha(WHITE, a * 0.55f));
                 gfx_blend(BLEND_ALPHA);
             }
-            if (star && !G.drums && z < 7) {
+            if (star && !G.drums && z < 7 && !cfg.light_fx) {
                 // a Star Power note glitters: a halo and a few twinkles trailing behind it up the neck
                 const Sprite * dot = atlas_get(res.game, "glow");
                 gfx_blend(BLEND_ADD);
@@ -3305,9 +3324,16 @@ static void draw_flames(void)
             lay(x, 0.08f, 0, sz, sz * 0.8f, flare, with_alpha(WHITE, 0.85f * a));
             lay(x, 0.07f, 0, sz * 1.5f, sz * 1.2f, dot, with_alpha(lc, 0.9f * a));
         }
+        // the gem itself, caught at the strikeline: it swells and fades for a moment as it's taken
+        if (k < 0.1f) {
+            char gname[24];
+            snprintf(gname, sizeof(gname), "gem_normal_%d", G.sp_active ? 5 : lane_art(l));
+            float g = 1 + k * 5, ga = 1 - k / 0.1f;
+            lay(x, 0.09f, 0, 1.04f * g, 0.48f * 2.1f * g, atlas_get(res.game, gname), with_alpha(WHITE, 0.8f * ga));
+        }
         // and a ring of light running out across the neck
         float r = 0.35f + k * 3.2f, ra = 1 - k / 0.3f;
-        for (int j = 0; j < 10; j++) {
+        for (int j = 0; j < (cfg.light_fx ? 0 : 10); j++) {
             float ang = j * 6.2831853f / 10;
             float px = x + cosf(ang) * r * 0.9f, pz = sinf(ang) * r * 0.55f;
             board(px, 0.04f, pz, 0.2f, 0.2f, dot, 0, 0, 1, 1, with_alpha(lc, 0.7f * ra * ra));
@@ -3837,6 +3863,22 @@ static void draw_hud(void)
     // value instead of snapping with every note
     G.needle += (G.rock - G.needle) * 0.1f;
     float swing = (G.needle - 0.5f) * 2 * 0.85f;
+    if (h < 0.25f && !G.failed)
+        swing += sinf(t * 47) * 0.04f * (0.25f - h) / 0.25f;   // in the red, the needle trembles
+    if (h < 0.25f && !G.failed) {
+        // and a red glow swells around the dome
+        gfx_blend(BLEND_ADD);
+        float gw = 230 * k, ga = (0.25f - h) / 0.25f * (0.4f + 0.3f * fabsf(sinf(t * 6)));
+        gfx_sprite(atlas_get(res.game, "glow"), cx - gw / 2, cy - gw / 2, gw, gw, with_alpha(RGBA(255, 40, 20, 255), ga));
+        gfx_blend(BLEND_ALPHA);
+    } else if (G.rock > 0.95f) {
+        // full: a soft green glow
+        gfx_blend(BLEND_ADD);
+        float gw = 210 * k;
+        gfx_sprite(atlas_get(res.game, "glow"), cx - gw / 2, cy - gw / 2, gw, gw,
+                   with_alpha(RGBA(80, 255, 120, 255), 0.18f + 0.1f * fabsf(sinf(t * 3))));
+        gfx_blend(BLEND_ALPHA);
+    }
     sprite_rot(needle, dx + 128 * k, dy + 172 * k, 13 * k, 84 * k, needle->w / 2.0f, (float)needle->h, swing, WHITE);
     if (G.drums && G.t < 4.5) {
         // which thumb goes where
