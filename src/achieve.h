@@ -1,0 +1,22 @@
+// Achievements: badges for things done, each player's own (achievements.txt in the player's folder)
+#pragma once
+#include <stdbool.h>
+
+typedef struct {
+    const char * id, * name, * how;
+} Achievement;
+
+// what a finished (or failed) song gives the checks
+typedef struct {
+    int part, diff, stars, score, best_streak, overhits, sp_hit, sp_total, pct;
+    bool failed, fc, practice, autoplay;
+    int daily_streak, library;
+} AchPlay;
+
+int achieve_count(void);
+const Achievement * achieve_get(int i);
+bool achieve_has(int i);
+int achieve_unlocked(void);
+void achieve_load(void);
+// checks a play: how many came new; their indices into out (up to max)
+int achieve_check(const AchPlay * p, int * out, int max);

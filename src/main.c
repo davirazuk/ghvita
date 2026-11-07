@@ -16,6 +16,7 @@
 #include "shrink.h"
 #include "songs.h"
 #include "player.h"
+#include "achieve.h"
 #include "tour.h"
 #include "career.h"
 #include "chart.h"
@@ -55,6 +56,7 @@ static int want_diff;               // the difficulty last picked (a part withou
 static uint8_t sel_diffs[PART_COUNT];   // the difficulties each part of the chosen song has, a bit each
 static int menu_index;
 static Result result;
+static int result_ach[6], result_ach_n;   // achievements this song unlocked
 static bool result_best, result_daily;   // a new best; today's daily song done
 // the results screen's other page: this chart's last plays (this one last)
 #define HIST_MAX 10
@@ -2702,6 +2704,12 @@ static void finish_song(int how)
     if (!autoplay && !practicing)
         career_add(result.part, result.score, result.stars, result.notes_hit, result.notes_total, result.best_streak,
                    result.overhits, result.played_s, result.failed, result.fc);
+    AchPlay ap = {result.part, result.diff, result.stars, result.score, result.best_streak, result.overhits, result.sp_hit,
+                  result.sp_total, result.notes_total ? result.notes_hit * 100 / result.notes_total : 0, result.failed,
+                  result.fc, practicing, autoplay, daily_streak(), songs_count()};
+    result_ach_n = achieve_check(&ap, result_ach, 6);
+    for (int i = 0; i < result_ach_n && i < 6; i++)
+        plat_log("achievement: %s", achieve_get(result_ach[i])->name);
     game_stop();
     if (how == GAME_DONE) {
         sound_play(res.snd[SND_CHEER1 + rand() % 3], cfg.crowd_vol * 0.1f, false);
@@ -3024,6 +3032,13 @@ static void results_screen(void)
     }
     if (result_best)
         font_draw_shadow(res.title, "NEW BEST!", 870, 148, 36, RGBA(120, 220, 255, 255), ALIGN_RIGHT);
+    for (int i = 0; i < result_ach_n && i < 2; i++) {
+        // what this song unlocked, under the stars
+        char d[96];
+        snprintf(d, sizeof(d), "UNLOCKED: %s%s", achieve_get(result_ach[i])->name,
+                 i == 1 && result_ach_n > 2 ? " and more" : "");
+        font_draw_shadow(res.ui, d, SCREEN_W - 90, 76 + i * 22, 20, RGBA(255, 210, 90, 255), ALIGN_RIGHT);
+    }
     if (result_daily) {
         char d[48];
         snprintf(d, sizeof(d), "DAILY SONG DONE  %d day%s", daily_streak(), daily_streak() == 1 ? "" : "s");
@@ -3683,9 +3698,9 @@ static void player_switch(int i)
     if (i == player_current())
         return;
     player_select(i);
-    player_init();
     config_load();
     career_load();
+    achieve_load();
     tour_load();
     songs_reload_player();
     songs_sort(cfg.sort);
@@ -3814,12 +3829,63 @@ static void players_screen(void)
     gfx_end();
 }
 
+// the career's other pages: the achievements, fourteen to a page
+static int career_page;
+
+static void achievements_draw(int page)
+{
+    banner("ACHIEVEMENTS");
+    panel(40, 84, 880, 400);
+    char t[64];
+    snprintf(t, sizeof(t), "%d of %d", achieve_unlocked(), achieve_count());
+    font_draw_shadow(res.ui, t, SCREEN_W - 50, 40, 26, RGBA(255, 215, 110, 255), ALIGN_RIGHT);
+    for (int k = 0; k < 14; k++) {
+        int i = page * 14 + k;
+        const Achievement * a = achieve_get(i);
+        if (!a)
+            break;
+        bool got = achieve_has(i);
+        float x = 70 + (k / 7) * 430, y = 104 + (k % 7) * 52;
+        gfx_rect(x, y + 4, 34, 34, got ? RGBA(255, 200, 70, 255) : RGBA(60, 60, 66, 255));
+        if (got) {
+            // a tick
+            gfx_rect(x + 7, y + 20, 8, 5, RGBA(80, 45, 0, 255));
+            gfx_rect(x + 12, y + 12, 5, 13, RGBA(80, 45, 0, 255));
+            gfx_rect(x + 15, y + 10, 13, 5, RGBA(80, 45, 0, 255));
+        }
+        font_draw_fit(res.ui, a->name, x + 46, y, 24, 360, got ? RGBA(255, 236, 190, 255) : RGBA(170, 170, 175, 255),
+                      ALIGN_LEFT);
+        font_draw_fit(res.ui, a->how, x + 46, y + 25, 17, 360, got ? RGBA(210, 205, 195, 255) : RGBA(130, 130, 135, 255),
+                      ALIGN_LEFT);
+    }
+}
+
 static void career_screen(void)
 {
+    int pages = 1 + (achieve_count() + 13) / 14;
+    if (pressed & BTN_R && career_page < pages - 1) {
+        career_page++;
+        ui_sound(SND_UI_MOVE);
+    }
+    if (pressed & BTN_L && career_page > 0) {
+        career_page--;
+        ui_sound(SND_UI_MOVE);
+    }
     if (pressed & (BTN_CIRCLE | BTN_CROSS)) {
         ui_sound(SND_UI_BACK);
         go(S_MAIN);
         menu_index = 6;             // back on CAREER
+        career_page = 0;
+        return;
+    }
+    if (career_page > 0) {
+        gfx_begin(0, 0, 0);
+        gfx_2d();
+        draw_background(res.bg_menu, RGBA(170, 170, 170, 255));
+        achievements_draw(career_page - 1);
+        static const char * help[] = {"btn_l", "Back a page", "btn_r", "Next page", "btn_circle", "Back"};
+        help_bar(help, 6);
+        gfx_end();
         return;
     }
     gfx_begin(0, 0, 0);
@@ -3865,8 +3931,8 @@ static void career_screen(void)
         font_draw(res.ui, rows[i].label, 170, y, 28, RGBA(220, 210, 200, 255), ALIGN_LEFT);
         font_draw(res.ui, rows[i].value, 790, y, 28, RGBA(255, 236, 190, 255), ALIGN_RIGHT);
     }
-    static const char * help[] = {"btn_circle", "Back"};
-    help_bar(help, 2);
+    static const char * help[] = {"btn_r", "Achievements", "btn_circle", "Back"};
+    help_bar(help, 4);
     gfx_end();
 }
 
@@ -4012,8 +4078,10 @@ int main(void)
     // QUICKPLAY's song and a random venue differ from boot to boot (test runs on the fixed clock stay repeatable)
     srand((unsigned)(getenv("GHV_FIXED") ? 1 : time(NULL)) ^ (unsigned)plat_now_us());
     gfx_init();
+    player_init();
     config_load();
     career_load();
+    achieve_load();
     audio_init();
     audio_set_volumes(cfg.music_vol / 10.0f, cfg.sfx_vol / 10.0f);
     res_load();
