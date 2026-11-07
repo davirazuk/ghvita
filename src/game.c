@@ -174,6 +174,7 @@ static struct {
     double sp_on_t;                     // when Star Power last went on: the band spins round with it
     double intro_end;                   // the camera's on the drummer for the count-in, and pulls back from here
     bool cam_snap;                      // the next frame puts the camera straight where it's going
+    float fountain;                     // the Star Power sparklers along the stage front: 0 off .. 1 full
     double start_t;                     // the song time the run began at (a practice run starts partway in)
     int metro_next;                     // practice's metronome: the chart's next beat line
 } G;
@@ -472,6 +473,46 @@ static void draw_pyro(void)
             uint32_t c = col3(G.stage_col, 1);
             gfx_sprite(haze, x - w / 2, y - h / 2, w, h, with_alpha(c, 0.5f * (1 - k) * (k < 0.1f ? k / 0.1f : 1)));
         }
+    }
+    // Star Power: fountains of sparks either side of the guitarists, as long as it lasts. Each spark is worked out from the
+    // time alone (when it left the fountain, how fast, which way), so nothing is kept between frames
+    G.fountain += ((G.sp_active ? 1 : 0) - G.fountain) * 0.08f;
+    if (G.fountain > 0.02f && G.marks && !cfg.light_fx) {
+        const Sprite * dot = atlas_get(res.stage, "dot");
+        enum { SPARKS_EACH = 40 };
+        const float life = 0.9f, g = 9.8f;
+        gfx_blend(BLEND_ADD);
+        for (int r = 2; r <= 3; r++)
+            for (int side = -1; side <= 1; side += 2) {
+                if (!G.band[r])
+                    continue;
+                float m[3];
+                member_spot(r, m);
+                float bx = m[0] + side * m[2] * 0.95f, by = m[1] + m[2] * 0.06f, ppm = m[2];
+                for (int i = 0; i < SPARKS_EACH; i++) {
+                    uint32_t h = (uint32_t)(i * 2 + 1) * 2654435761u ^ (uint32_t)(r * 4 + side + 7) * 40503u;
+                    float phase = (float)fmod(G.t / life + (h >> 8 & 1023) / 1023.0, 1.0), age = phase * life;
+                    // each time round it comes out another way
+                    uint32_t k = h ^ (uint32_t)floor(G.t / life + (h >> 8 & 1023) / 1023.0) * 2246822519u;
+                    float vy = 4.4f + (k >> 4 & 255) / 255.0f * 1.4f, vx = ((k >> 12 & 255) / 255.0f - 0.5f) * 0.7f;
+                    float x = bx + vx * age * ppm, y = by - (vy * age - 0.5f * g * age * age) * ppm;
+                    if (y > by)
+                        continue;           // back on the stage
+                    stage_point(&x, &y);
+                    // bright as they leave, dimming as they fall
+                    float a = (1 - phase * phase) * G.fountain, sz = (6 + (k >> 20 & 3)) * G.cam_z * ppm / 110;
+                    uint32_t c = k & 1 ? RGBA(255, 226, 160, 255) : RGBA(190, 220, 255, 255);
+                    gfx_sprite(dot, x - sz, y - sz, sz * 2, sz * 2, with_alpha(c, a));
+                    gfx_sprite(dot, x - sz * 0.5f, y - sz * 0.5f, sz, sz, with_alpha(WHITE, a));
+                }
+                // the mouth of the fountain burns white
+                float x = bx, y = by, w = 30 * G.cam_z * ppm / 110;
+                stage_point(&x, &y);
+                float fl = 0.85f + 0.15f * sinf((float)G.t * 37 + r + side);
+                gfx_sprite(dot, x - w, y - w * 0.9f, w * 2, w * 1.4f, with_alpha(RGBA(200, 225, 255, 255), fl * G.fountain));
+                gfx_sprite(dot, x - w * 0.4f, y - w * 0.5f, w * 0.8f, w * 0.6f, with_alpha(WHITE, fl * G.fountain));
+            }
+        gfx_blend(BLEND_ALPHA);
     }
     if (since < 0 || since >= length || !G.marks)
         return;
@@ -1555,6 +1596,7 @@ static void reset_play(void)
     G.focus = -1;
     G.sp_on_t = -100;
     G.cam_snap = true;
+    G.fountain = 0;
     for (int i = 0; i < 6; i++) {
         G.flame_t[i] = -100;
         G.miss_t[i] = -100;
