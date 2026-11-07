@@ -114,6 +114,7 @@ static struct {
     double wave_t;
     double strobe_t;                    // a chorus came in: the stage strobes
     float kick;
+    double shown_score;                 // what the counter shows, rolling up to the score
     char ach_text[48];                  // an achievement just earned, shown along the bottom
     double ach_t;                         // the camera's jolt: Star Power, a big moment (decays)                      // a streak milestone: a wave of light up the neck
     uint32_t held;              // lanes held (bit per lane, LANE_OPEN = bit 5)
@@ -621,6 +622,7 @@ static void draw_crowd(double beat)
     float mood = G.rock < 0.33f ? 0.2f : 0.5f + G.rock * 0.5f;
     if (G.sp_active)
         mood = 1;
+    mood += G.cheer * 0.35f;            // a streak, a chorus: the crowd surges up
     gfx_tex(t);
     gfx_blend(BLEND_ALPHA);
     for (int row = 0; row < 3; row++) {
@@ -1501,6 +1503,7 @@ static void reset_play(void)
     }
     G.wave_t = -100;
     G.kick = 0;
+    G.shown_score = 0;
     G.ach_t = -100;
     G.strobe_t = -100;
     G.held = 0;
@@ -3794,7 +3797,10 @@ static void draw_hud(void)
     const float sk = 0.62f, sx = cx - 129 * sk, sy = dy + 172 * k - 66 * sk;
     gfx_rect(sx + 22 * sk, sy + 78 * sk, 212 * sk, 44 * sk, RGBA(2, 12, 4, 255));
     hud_at("hud_rm_solo_bottom", sx, sy, sk, sk, 0, 0, 256, 128, WHITE);
-    lcd("lcd_green", (long)G.score, 7, sx + 226 * sk, sy + 100 * sk - 13, 26);
+    // the counter rolls up to the score rather than jumping
+    double gap = G.score - G.shown_score;
+    G.shown_score = gap < 1 ? G.score : G.shown_score + gap * 0.25 + 1;
+    lcd("lcd_green", (long)G.shown_score, 7, sx + 226 * sk, sy + 100 * sk - 13, 26);
     const float kx = 0.54f, ky = 0.42f, px = cx - 128 * kx, py = sy + 122 * sk - 24 * ky;
     gfx_rect(px + 40 * kx, py + 38 * ky, 176 * kx, 50 * ky, RGBA(3, 3, 3, 255));
     hud_at("hud_counter_body", px, py, kx, ky, 0, 0, 256, 128, WHITE);
