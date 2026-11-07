@@ -2701,6 +2701,18 @@ static void draw_select(const Song * s, bool loading)
                       ALIGN_CENTER);
     } else
         font_draw(res.ui, "Not played yet", 770, 404, 22, RGBA(180, 178, 172, 255), ALIGN_CENTER);
+    {
+        // the song's speed, changed right here with L and R
+        snprintf(t, sizeof(t), "Speed %d%%", cfg.song_speed);
+        float tw = font_width(res.ui, t, 18), bx = 770 - tw / 2;
+        const Sprite * l = atlas_get(res.hud, "btn_l"), * r = atlas_get(res.hud, "btn_r");
+        float lw = l->w * 20.0f / l->h, rw = r->w * 20.0f / r->h;
+        uint32_t c = cfg.song_speed < 100 ? RGBA(255, 160, 90, 255) : cfg.song_speed > 100 ? RGBA(255, 225, 150, 255)
+                                                                                        : RGBA(170, 168, 162, 255);
+        gfx_sprite(l, bx - lw - 8, 455, lw, 20, WHITE);
+        font_draw(res.ui, t, bx, 454, 18, c, ALIGN_LEFT);
+        gfx_sprite(r, bx + tw + 8, 455, rw, 20, WHITE);
+    }
     if (setlist_at >= 0 && setlist_n > 1 && !tour_on) {
         char t2[48];
         snprintf(t2, sizeof(t2), "Setlist: song %d of %d", setlist_at + 1, setlist_n);
@@ -2820,6 +2832,8 @@ static void read_sections(const Song * s)
     snprintf(pr_song, sizeof(pr_song), "%s", s->folder);
     pr_song_part = sel_part, pr_song_diff = sel_diff, pr_song_count = pr_count;
 }
+
+static int clampi(int v, int lo, int hi);
 
 // the settings rows of practice's last step, as what each is: Up to only while it speeds up
 enum { PR_START, PR_SPEED, PR_RAMP, PR_TARGET, PR_METRO };
@@ -3089,6 +3103,13 @@ static void select_screen(void)
         }
         sel_diff = nearest_diff(sel_part, want_diff);
         if (sel_part != was)
+            ui_sound(SND_UI_MOVE);
+    }
+    if (repeat & (BTN_L | BTN_R)) {
+        // the song's speed, 5% a press (saved with the rest when the song starts)
+        int was = cfg.song_speed;
+        cfg.song_speed = clampi(cfg.song_speed + (repeat & BTN_L ? -5 : 5), 50, 150);
+        if (cfg.song_speed != was)
             ui_sound(SND_UI_MOVE);
     }
     if (repeat & (BTN_UP | BTN_DOWN)) {
