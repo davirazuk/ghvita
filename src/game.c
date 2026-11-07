@@ -111,6 +111,7 @@ static struct {
     double flame_t[6];
     double miss_t[6];                   // a lane's last miss: its cup flashes red
     double wave_t;
+    double strobe_t;                    // a chorus came in: the stage strobes
     float kick;                         // the camera's jolt: Star Power, a big moment (decays)                      // a streak milestone: a wave of light up the neck
     uint32_t held;              // lanes held (bit per lane, LANE_OPEN = bit 5)
     float miss_flash, sp_flash;
@@ -423,6 +424,7 @@ static bool update_section(void)
         G.section_pal = (big ? warm : cool)[h % 3];
         if (strstr(low, "chorus") && G.rock >= 0.5f) {
             G.pyro_t = G.t;
+            G.strobe_t = G.t;
             party();
         }
     }
@@ -1484,6 +1486,7 @@ static void reset_play(void)
     }
     G.wave_t = -100;
     G.kick = 0;
+    G.strobe_t = -100;
     G.held = 0;
     G.touch_count = 0;
     double first = p->note_count ? p->notes[0].time / 1e6 : 0;
@@ -3884,6 +3887,12 @@ void game_draw(void)
     draw_stage();
     if (cfg.venue_light < 10)
         gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(0, 0, 0, (10 - cfg.venue_light) * 24));
+    {
+        // the chorus comes in: three white strobes over the stage (behind the highway, so the notes stay clear)
+        double since = G.t - G.strobe_t;
+        if (since >= 0 && since < 0.36 && fmod(since, 0.12) < 0.05 && cfg.flashes == 0)
+            gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(255, 250, 240, 90));
+    }
     if (G.sp_flash > 0.02f && cfg.flashes < 2)
         gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(80, 160, 255, (int)(G.sp_flash * (cfg.flashes ? 25 : 70))));
     if (!G.vocal) {
