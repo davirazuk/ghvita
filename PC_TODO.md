@@ -5,13 +5,13 @@ plugged in. Do both jobs, in order, then **delete this file** (last section). As
 
 ## 1. Put the newest GH Vita on the Vita
 
-Builds 62 to 72 were linked with an OpenSSL curl that can't connect on the Vita: no song downloads and no update checks.
+Builds 62 to 71 were linked with an OpenSSL curl that can't connect on the Vita: no song downloads and no update checks.
 The Vita is on build 68, so it can't fetch the fix itself. Install it by hand, once.
 
 1. Download `GHVita.vpk` from the newest release of the private repo `davirazuk/ghvita`:
    `gh release download --repo davirazuk/ghvita --pattern GHVita.vpk --dir .`
-   Make sure the release is **73 or newer** and its notes say *Downloads and updates work on the Vita again*. If the
-   newest is still 72 or older, the fixed build isn't out yet: look at the repo's Actions tab, wait, and don't install
+   Make sure the release is **newer than 71** and its notes say *Downloads and updates work on the Vita again*. If the
+   newest is still 71, the fixed build isn't out yet: look at the repo's Actions tab, wait, and don't install
    an older one.
 2. Davi opens VitaShell on the Vita and presses SELECT for USB mode. The memory card (`ux0:`) shows up as a drive.
 3. Copy `GHVita.vpk` to the root of that drive (`ux0:/GHVita.vpk`), then eject the drive.
