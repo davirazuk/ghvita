@@ -3205,6 +3205,11 @@ static void draw_flames(void)
     // Star Power: the rails burn, and the game's own jagged bolts leap off them out over the stage, a new set a dozen
     // times a second, each with a wider faint one behind it for the glow
     if (G.sp_active) {
+        // the whole neck washes blue, swelling on each beat
+        double q = chart_quarters(G.chart, G.t);
+        float beat = expf(-(float)(q - floor(q)) * 4);
+        int wa = (int)(28 + 40 * beat);
+        flat(-HALF_W, HALF_W, Z_NEAR, Z_FAR * 0.85f, 0.017f, NULL, 0, 1, RGBA(60, 140, 255, wa), RGBA(60, 140, 255, 0));
         for (int side = -1; side <= 1; side += 2)
             flat(side * HALF_W - side * 0.25f, side * HALF_W + side * 0.9f, Z_NEAR, Z_FAR * 0.75f, 0.018f, dot, 0, 1,
                  RGBA(90, 170, 255, 55), RGBA(90, 170, 255, 0));
