@@ -2437,30 +2437,57 @@ static void draw_select(const Song * s, bool loading)
     gfx_2d();
     draw_background(res.bg_menu, RGBA(150, 150, 150, 255));
     banner("GET READY");
-    panel(180, 110, 600, 360);
-    font_draw_fit(res.title, s->name, SCREEN_W / 2, 126, 44, 560, RGBA(255, 220, 140, 255), ALIGN_CENTER);
-    font_draw_fit(res.ui, s->artist, SCREEN_W / 2, 176, 26, 560, RGBA(230, 230, 230, 255), ALIGN_CENTER);
-    char t[64];
+    // left: the song, the part and its difficulties
+    panel(30, 100, 560, 380);
+    font_draw_fit(res.title, s->name, 310, 116, 42, 510, RGBA(255, 220, 140, 255), ALIGN_CENTER);
+    font_draw_fit(res.ui, s->artist, 310, 164, 24, 510, RGBA(230, 230, 230, 255), ALIGN_CENTER);
+    char t[96];
     snprintf(t, sizeof(t), "<  %s  >", part_name(sel_part));
-    font_draw_shadow(res.title, t, SCREEN_W / 2, 214, 44, RGBA(255, 255, 255, 255), ALIGN_CENTER);
+    font_draw_shadow(res.title, t, 310, 198, 40, RGBA(255, 255, 255, 255), ALIGN_CENTER);
     for (int d = 0; d < DIFF_COUNT; d++) {
-        float y = 274 + d * 46;
+        float y = 254 + d * 46;
         bool on = d == sel_diff, has = sel_diffs[sel_part] & (1 << d);
         if (on)
-            gfx_sprite(atlas_get(res.hud, "wor_select"), 290, y - 4, 380, 44, WHITE);
-        font_draw_shadow(res.ui, diff_name(d), 330, y, 32,
+            gfx_sprite(atlas_get(res.hud, "wor_select"), 60, y - 4, 500, 44, WHITE);
+        font_draw_shadow(res.ui, diff_name(d), 90, y, 30,
                          on ? RGBA(255, 230, 150, 255) : has ? RGBA(190, 190, 190, 255) : RGBA(85, 80, 75, 255),
                          ALIGN_LEFT);
         if (!has)
-            font_draw(res.ui, "not charted", 520, y + 6, 22, RGBA(85, 80, 75, 255), ALIGN_LEFT);
+            font_draw(res.ui, "not charted", 330, y + 6, 22, RGBA(85, 80, 75, 255), ALIGN_LEFT);
         const Score * b = &s->best[sel_part][d];
         if (b->stars)
-            draw_stars(b->stars, 520, y + 4, 24);
-        draw_medal(medal_of(b), 668, y + 16, 13);
+            draw_stars(b->stars, 330, y + 4, 24);
+        draw_medal(medal_of(b), 532, y + 16, 13);
     }
-    // what the medals ask for, under the rows
-    font_draw(res.ui, "Medals:  Bronze 4 stars   Silver 95% of notes   Gold full combo", SCREEN_W / 2, 446, 18,
-              RGBA(190, 185, 175, 255), ALIGN_CENTER);
+    font_draw(res.ui, "Medals:  Bronze 4 stars   Silver 95%   Gold full combo", 310, 444, 17, RGBA(190, 185, 175, 255),
+              ALIGN_CENTER);
+    // right: the cover, the song's details and the chosen chart's best
+    panel(610, 100, 320, 380);
+    draw_cover(art_for == sel ? art : NULL, 680, 116, 180);
+    float y = 306;
+    if (s->album[0] || s->year[0]) {
+        snprintf(t, sizeof(t), "%s%s%s", s->album, s->album[0] && s->year[0] ? ", " : "", s->year);
+        font_draw_fit(res.ui, t, 770, y, 18, 290, RGBA(210, 205, 195, 255), ALIGN_CENTER);
+        y += 22;
+    }
+    int secs = s->length_ms / 1000;
+    if (s->charter[0])
+        snprintf(t, sizeof(t), "%d:%02d   charted by %s", secs / 60, secs % 60, s->charter);
+    else
+        snprintf(t, sizeof(t), "%d:%02d", secs / 60, secs % 60);
+    font_draw_fit(res.ui, t, 770, y, 18, 290, RGBA(180, 178, 172, 255), ALIGN_CENTER);
+    const Score * b = &s->best[sel_part][sel_diff];
+    gfx_rect(632, 360, 276, 1, RGBA(255, 215, 110, 120));
+    snprintf(t, sizeof(t), "%s %s", part_name(sel_part), diff_name(sel_diff));
+    font_draw_fit(res.ui, t, 770, 368, 20, 280, RGBA(255, 220, 140, 255), ALIGN_CENTER);
+    if (b->score) {
+        snprintf(t, sizeof(t), "Best %d", b->score);
+        font_draw_shadow(res.title, t, 770, 394, 30, WHITE, ALIGN_CENTER);
+        snprintf(t, sizeof(t), "%d%% of notes%s", b->percent, b->fc ? ", full combo" : "");
+        font_draw_fit(res.ui, t, 770, 432, 18, 280, b->fc ? RGBA(255, 210, 60, 255) : RGBA(210, 205, 195, 255),
+                      ALIGN_CENTER);
+    } else
+        font_draw(res.ui, "Not played yet", 770, 404, 22, RGBA(180, 178, 172, 255), ALIGN_CENTER);
     if (tour_on) {
         char t2[80];
         snprintf(t2, sizeof(t2), "%s%s", tour_slot == TOUR_ENCORE ? "Encore at " : "Live at ",
@@ -2773,6 +2800,8 @@ static void select_screen(void)
         go(S_SONGS);
         return;
     }
+    if (art_for != sel)
+        load_art(s);            // straight here from the Daily Song or a setlist: the cover isn't loaded yet
     if (select_starting) {
         // the chart, the highway picture and the stems take the Vita a second or so: the screen says so meanwhile
         select_starting = false;
