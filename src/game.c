@@ -92,6 +92,8 @@ static struct {
     double sp_last_q;           // where Star Power's drain has got to, in quarter notes
     double base_score;
     int beat_best;                  // the best score to beat on this chart, 0 when none or already beaten
+    double vox_points;              // singing along: what the voice has added
+    int vox_good, vox_graded;       // its phrases, strong ones and all
     double t, lead_in;
     double speed;               // highway units per second
     bool paused, failed, done;
@@ -1386,6 +1388,8 @@ static void reset_play(void)
         G.sus[i].note = -1;
     G.first = 0;
     G.score = 0;
+    G.vox_points = 0;
+    G.vox_good = G.vox_graded = 0;
     G.streak = G.best_streak = G.hits = G.misses = G.overhits = G.sp_hit = 0;
     G.off_sum = G.off_sq = 0;
     G.off_n = 0;
@@ -1691,6 +1695,11 @@ Result game_result(void)
     Result r;
     memset(&r, 0, sizeof(r));
     ghost_finish(G.failed);
+    if (G.sing && !G.vocal) {
+        r.vox_points = (int)G.vox_points;
+        r.vox_good = G.vox_good;
+        r.vox_graded = G.vox_graded;
+    }
     if (battle.on) {
         if (!battle.result)
             battle.result = (long)G.score >= battle.score ? 1 : 2;
@@ -2477,12 +2486,16 @@ static void update_vocals(void)
     int w = grade >= 1 ? 4 : grade >= 0.8f ? 3 : grade >= 0.6f ? 2 : grade >= 0.1f ? 1 : 0;
     int mult = (1 + G.vox_run / 2 > 4 ? 4 : 1 + G.vox_run / 2) * (G.vocal && G.sp_active ? 2 : 1);
     G.score += points * mult;
+    G.vox_points += points * mult;
+    G.vox_graded++;
+    G.vox_good += grade >= 0.8f;
     G.vox_run = grade >= 0.8f ? G.vox_run + 1 : 0;
     if (!G.vocal) {
         // singing along: the instrument keeps the meter and the streak, the voice only adds its points
+        // the singer's word shows even with popups off: with two playing, it's the singer's only feedback
         char t[32];
         snprintf(t, sizeof(t), "VOCALS %s", words[w]);
-        popup(t);
+        popup_always(t);
         return;
     }
     if (grade >= 0.6f)
@@ -3545,6 +3558,12 @@ static void draw_hud(void)
     }
     draw_ghost();
     draw_battle();
+    if (G.sing && !G.vocal && G.vox_graded) {
+        // the singer's own tally, over the lyrics' side
+        char t[48];
+        snprintf(t, sizeof(t), "VOCALS %d   %d/%d", (int)G.vox_points, G.vox_good, G.vox_graded);
+        font_draw_shadow(res.ui, t, 16, 186, 20, RGBA(150, 210, 255, 255), ALIGN_LEFT);
+    }
     if (!G.vocal) {
         draw_live_stats();
         draw_timing_bar();

@@ -3090,6 +3090,13 @@ static void results_screen(void)
     }
     if (result_best)
         font_draw_shadow(res.title, "NEW BEST!", 870, 148, 36, RGBA(120, 220, 255, 255), ALIGN_RIGHT);
+    if (result.vox_graded) {
+        // two playing: the singer's share, apart from the instrument's
+        char d[96];
+        snprintf(d, sizeof(d), "Vocals: %d points, %d of %d phrases strong   %s: %d", result.vox_points, result.vox_good,
+                 result.vox_graded, part_name(result.part), result.score - result.vox_points);
+        font_draw_fit(res.ui, d, SCREEN_W / 2, 470, 20, 800, RGBA(150, 210, 255, 255), ALIGN_CENTER);
+    }
     if (result_medal) {
         char d[48];
         snprintf(d, sizeof(d), "%s MEDAL!", medal_names[result_medal]);

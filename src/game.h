@@ -22,6 +22,8 @@ typedef struct {
     int misses;
     const char * weak_pad;      // drums: the pad hit least, NULL if none
     int weak_pct;
+    int vox_points;             // singing along: the voice's share of the score
+    int vox_good, vox_graded;   // phrases sung strong (80%+) of those graded, 0 when not singing along
     int battle;                 // 0 not a battle, 1 won, 2 lost
     int rival_score;
 } Result;
