@@ -3219,7 +3219,7 @@ static void draw_gems(void)
                 board(lane_x(l), 0, z, gw * 1.3f, gh * 1.5f, atlas_get(res.game, "glow"), 0, 0, 1, 1, with_alpha(WHITE, a * 0.55f));
                 gfx_blend(BLEND_ALPHA);
             }
-            if (star && !G.drums) {
+            if (star && !G.drums && z < 7) {
                 // a Star Power note glitters: a halo and a few twinkles trailing behind it up the neck
                 const Sprite * dot = atlas_get(res.game, "glow");
                 gfx_blend(BLEND_ADD);
@@ -3277,8 +3277,8 @@ static void draw_flames(void)
         }
         // and a ring of light running out across the neck
         float r = 0.35f + k * 3.2f, ra = 1 - k / 0.3f;
-        for (int j = 0; j < 14; j++) {
-            float ang = j * 6.2831853f / 14;
+        for (int j = 0; j < 10; j++) {
+            float ang = j * 6.2831853f / 10;
             float px = x + cosf(ang) * r * 0.9f, pz = sinf(ang) * r * 0.55f;
             board(px, 0.04f, pz, 0.2f, 0.2f, dot, 0, 0, 1, 1, with_alpha(lc, 0.7f * ra * ra));
         }
