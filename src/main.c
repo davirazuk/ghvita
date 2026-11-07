@@ -592,7 +592,7 @@ static void main_menu(void)
         font_draw_fit(res.ui, d, 500, 380, 22, 440, RGBA(255, 230, 160, 255), ALIGN_LEFT);
     }
     char t[200], now[160];
-    snprintf(t, sizeof(t), "%d songs", songs_count());
+    snprintf(t, sizeof(t), "%d %s", songs_count(), songs_count() == 1 ? "song" : "songs");
     font_draw_shadow(res.ui, t, 60, 456, 24, RGBA(220, 220, 220, 255), ALIGN_LEFT);
     // which build this is: a card can quietly keep an old one
     font_draw(res.ui, "build " __DATE__ " " __TIME__, SCREEN_W - 20, 490, 16, RGBA(200, 200, 210, 200), ALIGN_RIGHT);
@@ -1694,8 +1694,104 @@ static void download_screen(void)
 
 // songs the downloader has finished join the library while no song list or song is on screen (their indexes
 // mustn't move meanwhile)
+// chart updates under way: the new chart's id and the folder it takes the place of
+#define SWAP_MAX 64
+static struct {
+    char id[80];
+    char old[256];
+} swaps[SWAP_MAX];
+static int swaps_n;
+static bool upd_was_running;
+
+// a new download that's an update: the old folder goes and the new one takes its name, so its scores still count
+static void swap_in_update(char * folder, size_t size)
+{
+    char ini[460], line[200], src[100] = "";
+    snprintf(ini, sizeof(ini), "%s/ghvita.ini", folder);
+    FILE * f = fopen(ini, "r");
+    if (!f)
+        return;
+    while (fgets(line, sizeof(line), f))
+        if (!strncmp(line, "source = ", 9)) {
+            snprintf(src, sizeof(src), "%s", line + 9);
+            src[strcspn(src, "\r\n ")] = 0;
+        }
+    fclose(f);
+    for (int i = 0; i < swaps_n; i++) {
+        if (strcmp(swaps[i].id, src))
+            continue;
+        int k = songs_find(swaps[i].old);
+        if (k >= 0)
+            songs_delete(k);
+        else
+            dl_remove_tree(swaps[i].old);
+        if (rename(folder, swaps[i].old) == 0)
+            snprintf(folder, size, "%s", swaps[i].old);
+        plat_log("update: %s replaced", swaps[i].old);
+        swaps[i] = swaps[--swaps_n];
+        return;
+    }
+}
+
+// the update check: when its worker's done, what it found goes in the download queue
+static void updates_poll(void)
+{
+    int done, total, found;
+    bool running = dl_updates_progress(&done, &total, &found);
+    if (running || !upd_was_running)
+        return;
+    upd_was_running = false;
+    static DlHit hits[64];
+    static char old[64][256];
+    int n = dl_updates_take(hits, old, 64), queued = 0;
+    for (int i = 0; i < n; i++) {
+        if (swaps_n < SWAP_MAX && dl_queue(&hits[i])) {
+            snprintf(swaps[swaps_n].id, sizeof(swaps[0].id), "%s", hits[i].id);
+            snprintf(swaps[swaps_n].old, sizeof(swaps[0].old), "%s", old[i]);
+            swaps_n++;
+            queued++;
+        }
+    }
+    char t[96];
+    if (!total)
+        snprintf(t, sizeof(t), "No songs from Chorus to check");
+    else if (!n)
+        snprintf(t, sizeof(t), "All %d Chorus songs are up to date", total);
+    else
+        snprintf(t, sizeof(t), "%d updated %s downloading", queued, queued == 1 ? "chart" : "charts");
+    say(t);
+}
+
+static void updates_check(void)
+{
+    static DlUpdateAsk ask[2000];
+    int n = 0;
+    for (int i = 0; i < songs_count() && n < 2000; i++) {
+        const Song * s = songs_get(i);
+        if (strncmp(s->source, "chorus:", 7))
+            continue;
+        DlUpdateAsk * a = &ask[n++];
+        snprintf(a->source, sizeof(a->source), "%s", s->source);
+        snprintf(a->name, sizeof(a->name), "%s", s->name);
+        snprintf(a->artist, sizeof(a->artist), "%s", s->artist);
+        snprintf(a->charter, sizeof(a->charter), "%s", s->charter);
+        snprintf(a->folder, sizeof(a->folder), "%s", s->folder);
+    }
+    if (!n) {
+        say("No songs from Chorus to check");
+        return;
+    }
+    if (dl_updates_start(ask, n)) {
+        upd_was_running = true;
+        char t[64];
+        snprintf(t, sizeof(t), "Checking %d songs for newer charts", n);
+        say(t);
+    }
+}
+
 static void take_downloads(void)
 {
+    updates_poll();
     if (screen == S_SONGS || screen == S_SELECT || screen == S_PRACTICE || screen == S_PLAY || screen == S_PAUSE ||
         screen == S_RESUME || screen == S_RESULTS)
         return;
@@ -1707,6 +1803,7 @@ static void take_downloads(void)
     snprintf(keep, sizeof(keep), "%s", cur ? cur->folder : "");
     int added = 0;
     do {
+        swap_in_update(folder, sizeof(folder));
         int i = songs_add(folder);
         if (i >= 0) {
             added++;
@@ -1989,7 +2086,7 @@ static int setlist_find(int song)
 
 static void list_menu_update(void)
 {
-    enum { ROWS = 8 };
+    enum { ROWS = 9 };
     Song * s = songs_get(sel);
     if (repeat & BTN_UP)
         list_row = (list_row + ROWS - 1) % ROWS;
@@ -2046,6 +2143,10 @@ static void list_menu_update(void)
             return;
         } else if (list_row == 7)
             setlist_n = 0;
+        else if (list_row == 8) {
+            updates_check();
+            list_menu = false;
+        }
     }
     if (pressed & (BTN_CIRCLE | BTN_SELECT)) {
         ui_sound(SND_UI_BACK);
@@ -2057,8 +2158,8 @@ static void list_menu_update(void)
 static void list_menu_draw(const Song * s)
 {
     gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(0, 0, 0, 170));
-    panel(200, 84, 560, 384);
-    char rows[8][64];
+    panel(200, 70, 560, 426);
+    char rows[9][64];
     snprintf(rows[0], sizeof(rows[0]), "Sort by   %s", sort_name(cfg.sort));
     snprintf(rows[1], sizeof(rows[1]), "Show   %s", show_name());
     snprintf(rows[2], sizeof(rows[2]), "%s", s && s->fav ? "Take out of favourites" : "Add to favourites");
@@ -2067,8 +2168,13 @@ static void list_menu_draw(const Song * s)
     snprintf(rows[5], sizeof(rows[5]), "%s", setlist_find(sel) >= 0 ? "Take out of the setlist" : "Add to the setlist");
     snprintf(rows[6], sizeof(rows[6]), "Play the setlist (%d %s)", setlist_n, setlist_n == 1 ? "song" : "songs");
     snprintf(rows[7], sizeof(rows[7]), "Clear the setlist");
-    for (int i = 0; i < 8; i++) {
-        float y = 102 + i * 44;
+    int done, total, found;
+    if (dl_updates_progress(&done, &total, &found))
+        snprintf(rows[8], sizeof(rows[8]), "Checking for newer charts %d/%d", done, total);
+    else
+        snprintf(rows[8], sizeof(rows[8]), "Check for newer charts");
+    for (int i = 0; i < 9; i++) {
+        float y = 86 + i * 44;
         if (i == list_row)
             gfx_sprite(atlas_get(res.hud, "wor_select"), 224, y - 4, 512, 42, WHITE);
         font_draw_fit(res.ui, rows[i], SCREEN_W / 2, y + 2, 28, 460, i == list_row ? RGBA(255, 230, 150, 255)

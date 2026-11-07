@@ -2066,3 +2066,116 @@ static int job_thread(void * arg)
     }
     return 0;
 }
+
+// ------------------------------------------------------------------------------------------------- chart updates
+// Songs from Chorus remember the chart's md5 ("chorus:<md5>"). A chart its charter has updated has a new md5 under the
+// same name, artist and charter: a search for each finds them, on a worker, one request at a time.
+
+#define UPD_MAX 64
+static struct {
+    DlUpdateAsk * ask;
+    int n;
+    volatile int done, found;
+    volatile bool running;
+    DlHit hits[UPD_MAX];
+    char old[UPD_MAX][256];
+} upd;
+static pthread_mutex_t upd_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static void json_escape(char * out, size_t size, const char * in)
+{
+    size_t k = 0;
+    for (; *in && k + 2 < size; in++) {
+        if (*in == '"' || *in == '\\')
+            out[k++] = '\\';
+        out[k++] = (unsigned char)*in < 32 ? ' ' : *in;
+    }
+    out[k] = 0;
+}
+
+static void * upd_thread(void * arg)
+{
+    (void)arg;
+    for (int i = 0; i < upd.n; i++) {
+        const DlUpdateAsk * a = &upd.ask[i];
+        char q[200], post[600], err[160];
+        char both[200];
+        snprintf(both, sizeof(both), "%s %s", a->name, a->artist);
+        json_escape(q, sizeof(q), both);
+        snprintf(post, sizeof(post), "{\"search\":\"%s\",\"page\":1,\"per_page\":25}", q);
+        const char * headers[] = {"Content-Type: application/json", NULL};
+        HttpReq r = {.url = "https://api.enchor.us/search", .post = post, .headers = headers, .stall_s = 20};
+        char * body = NULL;
+        size_t len = 0;
+        int status = http_fetch(&r, &body, &len, err, sizeof(err));
+        DlHit * hits = NULL;
+        int total = 0, n = status >= 200 && status < 300 ? parse_chorus(body, len, &hits, &total) : 0;
+        free(body);
+        for (int k = 0; k < n; k++) {
+            const DlHit * h = &hits[k];
+            // the same chart: name, artist and charter alike; a newer one when its md5 isn't the one on the card
+            if (strcasecmp(h->name, a->name) || strcasecmp(h->artist, a->artist) || strcasecmp(h->charter, a->charter))
+                continue;
+            if (!strcmp(h->id, a->source))
+                break;                          // the one on the card is still the newest
+            pthread_mutex_lock(&upd_lock);
+            if (upd.found < UPD_MAX) {
+                upd.hits[upd.found] = *h;
+                snprintf(upd.old[upd.found], sizeof(upd.old[0]), "%s", a->folder);
+                upd.found++;
+            }
+            pthread_mutex_unlock(&upd_lock);
+            plat_log("update: %s - %s has a newer chart (%s)", a->artist, a->name, h->id);
+            break;
+        }
+        free(hits);
+        upd.done = i + 1;
+    }
+    free(upd.ask);
+    upd.ask = NULL;
+    upd.running = false;
+    return NULL;
+}
+
+bool dl_updates_start(const DlUpdateAsk * ask, int n)
+{
+    if (upd.running || n <= 0)
+        return false;
+    upd.ask = malloc(n * sizeof(DlUpdateAsk));
+    if (!upd.ask)
+        return false;
+    memcpy(upd.ask, ask, n * sizeof(DlUpdateAsk));
+    upd.n = n;
+    upd.done = upd.found = 0;
+    upd.running = true;
+    pthread_t t;
+    if (pthread_create(&t, NULL, upd_thread, NULL) != 0) {
+        free(upd.ask);
+        upd.ask = NULL;
+        upd.running = false;
+        return false;
+    }
+    pthread_detach(t);
+    return true;
+}
+
+bool dl_updates_progress(int * done, int * total, int * found)
+{
+    *done = upd.done;
+    *total = upd.n;
+    *found = upd.found;
+    return upd.running;
+}
+
+int dl_updates_take(DlHit * out, char (*old)[256], int max)
+{
+    if (upd.running)
+        return 0;
+    pthread_mutex_lock(&upd_lock);
+    int n = upd.found < max ? upd.found : max;
+    memcpy(out, upd.hits, n * sizeof(DlHit));
+    memcpy(old, upd.old, n * sizeof(old[0]));
+    upd.found = 0;
+    pthread_mutex_unlock(&upd_lock);
+    return n;
+}
