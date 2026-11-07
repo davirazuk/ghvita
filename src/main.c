@@ -2148,6 +2148,11 @@ static struct {
     int notes;
 } pr[PR_MAX + 1];
 static int pr_count, pr_from, pr_to, pr_top, pr_focus, pr_speed = 100;
+// the menu goes a step at a time: where to start, where to end, then how fast
+enum { PR_STEP_FROM, PR_STEP_TO, PR_STEP_SET };
+static int pr_step, pr_set_row, pr_ramp, pr_target = 100;
+static char pr_song[sizeof(((Song *)0)->folder)];
+static int pr_song_part = -1, pr_song_diff = -1, pr_song_count;
 static bool practicing, practice_starting;
 
 // "verse_1" reads "Verse 1"
@@ -2179,6 +2184,7 @@ static void read_sections(const Song * s)
 {
     char path[600];
     snprintf(path, sizeof(path), "%s/notes.vhc", s->folder);
+    int saved_from = pr_from, saved_to = pr_to;
     pr_count = pr_from = pr_to = pr_top = pr_focus = 0;
     Chart * c = chart_load(path);
     if (!c)
@@ -2210,6 +2216,16 @@ static void read_sections(const Song * s)
     }
     pr_to = pr_count - 1;
     chart_free(c);
+    // the same song, part and difficulty as last time: the same stretch, picked already
+    if (!strcmp(pr_song, s->folder) && pr_song_part == sel_part && pr_song_diff == sel_diff && pr_song_count == pr_count) {
+        pr_from = saved_from, pr_to = saved_to;
+        pr_step = PR_STEP_SET;
+    } else
+        pr_step = PR_STEP_FROM;
+    pr_focus = pr_step == PR_STEP_SET ? pr_from : 0;
+    pr_set_row = 0;
+    snprintf(pr_song, sizeof(pr_song), "%s", s->folder);
+    pr_song_part = sel_part, pr_song_diff = sel_diff, pr_song_count = pr_count;
 }
 
 static void practice_screen(void)
@@ -2222,6 +2238,7 @@ static void practice_screen(void)
     if (practice_starting) {
         practice_starting = false;
         game_practice(pr[pr_from].t, pr[pr_to + 1].t, pr_speed / 100.0f);
+        game_practice_ramp(pr_ramp, pr_target);
         if (game_start(s, sel_part, sel_diff)) {
             practicing = true;
             game_set_autoplay(autoplay);
@@ -2231,37 +2248,87 @@ static void practice_screen(void)
         game_stop();
         plat_log("can't practice %s", s->folder);
     }
-    int from = pr_from, to = pr_to, speed = pr_speed;
-    if (repeat & BTN_UP)
-        pr_from--;
-    if (repeat & BTN_DOWN)
-        pr_from++;
-    pr_from = pr_from < 0 ? 0 : pr_from >= pr_count ? pr_count - 1 : pr_from;
-    if (pr_from != from) {
-        pr_focus = pr_from;
-        if (pr_to < pr_from)
-            pr_to = pr_from;
+    bool moved = false, start = false;
+    if (pr_step != PR_STEP_SET) {
+        // a cursor over the sections; the end can't come before the start
+        int lo = pr_step == PR_STEP_TO ? pr_from : 0, was = pr_focus;
+        if (repeat & BTN_UP)
+            pr_focus--;
+        if (repeat & BTN_DOWN)
+            pr_focus++;
+        if (repeat & BTN_L)
+            pr_focus -= PR_ROWS;
+        if (repeat & BTN_R)
+            pr_focus += PR_ROWS;
+        pr_focus = pr_focus < lo ? lo : pr_focus >= pr_count ? pr_count - 1 : pr_focus;
+        moved = pr_focus != was;
+        if (pr_step == PR_STEP_FROM)
+            pr_from = pr_focus, pr_to = pr_to < pr_from ? pr_from : pr_to;
+        else
+            pr_to = pr_focus;
+        if (pressed & BTN_CROSS) {
+            ui_sound(SND_UI_SELECT);
+            if (pr_step == PR_STEP_FROM) {
+                pr_step = PR_STEP_TO;
+                pr_focus = pr_to = pr_from;
+            } else {
+                pr_step = PR_STEP_SET;
+                pr_set_row = 0;
+            }
+        } else if (pressed & BTN_TRIANGLE) {
+            // the whole song in one press
+            ui_sound(SND_UI_SELECT);
+            pr_from = 0, pr_to = pr_count - 1, pr_focus = 0;
+            pr_step = PR_STEP_SET;
+            pr_set_row = 0;
+        } else if (pressed & BTN_CIRCLE) {
+            ui_sound(SND_UI_BACK);
+            if (pr_step == PR_STEP_TO) {
+                pr_step = PR_STEP_FROM;
+                pr_focus = pr_from;
+            } else {
+                go(S_SELECT);
+                return;
+            }
+        }
+    } else {
+        // Start, Speed, Speed up, Up to (only while speeding up)
+        int rows = pr_ramp ? 4 : 3, was_row = pr_set_row, sp = pr_speed, ra = pr_ramp, ta = pr_target;
+        if (repeat & BTN_UP)
+            pr_set_row = (pr_set_row + rows - 1) % rows;
+        if (repeat & BTN_DOWN)
+            pr_set_row = (pr_set_row + 1) % rows;
+        int dir = (repeat & BTN_LEFT) ? -1 : (repeat & BTN_RIGHT) ? 1 : 0;
+        if (pr_set_row == 1)
+            pr_speed += 5 * dir;
+        else if (pr_set_row == 2)
+            pr_ramp = (pr_ramp / 5 + dir + 3) % 3 * 5;     // off, +5%, +10%
+        else if (pr_set_row == 3)
+            pr_target += 5 * dir;
+        pr_speed = pr_speed < 50 ? 50 : pr_speed > 150 ? 150 : pr_speed;
+        pr_target = pr_target < 55 ? 55 : pr_target > 150 ? 150 : pr_target;
+        if (pr_ramp && pr_target <= pr_speed)
+            pr_target = pr_speed + 5 > 150 ? 150 : pr_speed + 5;
+        if (!pr_ramp && pr_set_row > 2)
+            pr_set_row = 2;
+        moved = pr_set_row != was_row || sp != pr_speed || ra != pr_ramp || ta != pr_target;
+        if (pressed & BTN_CROSS) {
+            if (pr_set_row == 0) {
+                start = true;
+            } else {
+                pr_set_row = 0;
+                ui_sound(SND_UI_MOVE);
+            }
+        } else if (pressed & BTN_START)
+            start = true;
+        else if (pressed & BTN_CIRCLE) {
+            ui_sound(SND_UI_BACK);
+            pr_step = PR_STEP_TO;
+            pr_focus = pr_to;
+        }
     }
-    if (repeat & BTN_L)
-        pr_to--;
-    if (repeat & BTN_R)
-        pr_to++;
-    pr_to = pr_to < pr_from ? pr_from : pr_to >= pr_count ? pr_count - 1 : pr_to;
-    if (pr_to != to)
-        pr_focus = pr_to;
-    if (repeat & BTN_LEFT)
-        pr_speed -= 5;
-    if (repeat & BTN_RIGHT)
-        pr_speed += 5;
-    pr_speed = pr_speed < 50 ? 50 : pr_speed > 150 ? 150 : pr_speed;
-    if (pr_from != from || pr_to != to || pr_speed != speed)
+    if (moved)
         ui_sound(SND_UI_MOVE);
-    if (pressed & BTN_CIRCLE) {
-        ui_sound(SND_UI_BACK);
-        go(S_SELECT);
-        return;
-    }
-    bool start = pressed & BTN_CROSS;
     if (start) {
         stop_preview();
         ui_sound(SND_UI_SELECT);
@@ -2276,13 +2343,21 @@ static void practice_screen(void)
     draw_background(res.bg_menu, RGBA(150, 150, 150, 255));
     banner("PRACTICE");
     char t[120];
+    static const char * step_name[] = {"Pick where to start", "Pick where to end", "Set the speed"};
+    font_draw(res.ui, step_name[pr_step], 40, 76, 22, RGBA(255, 225, 150, 255), ALIGN_LEFT);
+    font_draw(res.ui, "Starts", 490, 80, 18, RGBA(170, 170, 175, 255), ALIGN_RIGHT);
+    if (sel_part != PART_VOCALS)
+        font_draw(res.ui, "Notes", 572, 80, 18, RGBA(170, 170, 175, 255), ALIGN_RIGHT);
     for (int r = 0; r < PR_ROWS && pr_top + r < pr_count; r++) {
         int i = pr_top + r;
         float y = 104 + r * 56;
-        bool on = i >= pr_from && i <= pr_to, cur = i == pr_focus;
-        gfx_sprite(atlas_get(res.hud, on ? "wor_select" : "wor_row"), 14, y, 580, 54, WHITE);
-        font_draw_fit(res.ui, pr[i].name, 40, y + 11, 28, 380, cur ? RGBA(255, 236, 170, 255) : on ? RGBA(240, 225, 190, 255)
-                                                                                                : RGBA(190, 190, 195, 255),
+        bool on = i >= pr_from && i <= pr_to, cur = pr_step != PR_STEP_SET && i == pr_focus;
+        bool dim = pr_step == PR_STEP_TO && i < pr_from;
+        gfx_sprite(atlas_get(res.hud, on ? "wor_select" : "wor_row"), 14, y, 580, 54, dim ? RGBA(255, 255, 255, 110) : WHITE);
+        if (cur)
+            font_draw_shadow(res.title, ">", 24, y + 9, 30, RGBA(255, 236, 170, 255), ALIGN_LEFT);
+        font_draw_fit(res.ui, pr[i].name, 44, y + 11, 28, 376, cur ? RGBA(255, 236, 170, 255) : on ? RGBA(240, 225, 190, 255)
+                                                                                         : RGBA(190, 190, 195, dim ? 120 : 255),
                       ALIGN_LEFT);
         int secs = (int)pr[i].t;
         snprintf(t, sizeof(t), "%d:%02d", secs / 60, secs % 60);
@@ -2292,26 +2367,60 @@ static void practice_screen(void)
             font_draw(res.ui, t, 572, y + 15, 22, RGBA(255, 200, 110, 255), ALIGN_RIGHT);
         }
     }
+    if (pr_top > 0)
+        font_draw(res.ui, "more above", 304, 92, 16, RGBA(170, 170, 175, 255), ALIGN_CENTER);
+    if (pr_top + PR_ROWS < pr_count)
+        font_draw(res.ui, "more below", 304, 104 + PR_ROWS * 56 - 4, 16, RGBA(170, 170, 175, 255), ALIGN_CENTER);
     panel(608, 96, 340, 396);
-    font_draw_fit(res.title, s->name, 778, 116, 34, 300, RGBA(255, 220, 140, 255), ALIGN_CENTER);
+    font_draw_fit(res.title, s->name, 778, 112, 34, 300, RGBA(255, 220, 140, 255), ALIGN_CENTER);
     snprintf(t, sizeof(t), "%s  %s", part_name(sel_part), diff_name(sel_diff));
-    font_draw_fit(res.ui, t, 778, 160, 24, 300, RGBA(230, 230, 230, 255), ALIGN_CENTER);
-    font_draw(res.ui, "From", 636, 214, 22, RGBA(180, 180, 180, 255), ALIGN_LEFT);
-    font_draw_fit(res.ui, pr[pr_from].name, 636, 240, 28, 290, RGBA(255, 236, 190, 255), ALIGN_LEFT);
-    font_draw(res.ui, "To the end of", 636, 284, 22, RGBA(180, 180, 180, 255), ALIGN_LEFT);
-    font_draw_fit(res.ui, pr[pr_to].name, 636, 310, 28, 290, RGBA(255, 236, 190, 255), ALIGN_LEFT);
+    font_draw_fit(res.ui, t, 778, 152, 22, 300, RGBA(230, 230, 230, 255), ALIGN_CENTER);
+    // the stretch: from, to, how long, how many notes
+    int notes = 0;
+    for (int i = pr_from; i <= pr_to; i++)
+        notes += pr[i].notes;
     int len = (int)(pr[pr_to + 1].t - pr[pr_from].t + 0.5);
-    snprintf(t, sizeof(t), "%d:%02d", len / 60, len % 60);
-    font_draw(res.ui, t, 926, 214, 22, RGBA(200, 200, 200, 255), ALIGN_RIGHT);
-    font_draw(res.ui, "Speed", 636, 362, 22, RGBA(180, 180, 180, 255), ALIGN_LEFT);
-    snprintf(t, sizeof(t), "< %d%% >", pr_speed);
-    font_draw_shadow(res.title, t, 778, 390, 40, WHITE, ALIGN_CENTER);
+    snprintf(t, sizeof(t), "%s", pr[pr_from].name);
+    font_draw(res.ui, "From", 636, 188, 18, RGBA(180, 180, 180, 255), ALIGN_LEFT);
+    font_draw_fit(res.ui, t, 636, 206, 24, 290, RGBA(255, 236, 190, 255), ALIGN_LEFT);
+    font_draw(res.ui, "To the end of", 636, 238, 18, RGBA(180, 180, 180, 255), ALIGN_LEFT);
+    font_draw_fit(res.ui, pr[pr_to].name, 636, 256, 24, 290, RGBA(255, 236, 190, 255), ALIGN_LEFT);
+    if (sel_part != PART_VOCALS)
+        snprintf(t, sizeof(t), "%d:%02d long, %d notes", len / 60, len % 60, notes);
+    else
+        snprintf(t, sizeof(t), "%d:%02d long", len / 60, len % 60);
+    font_draw(res.ui, t, 636, 288, 18, RGBA(200, 200, 200, 255), ALIGN_LEFT);
+    // the settings: live in the last step, a summary before it
+    const char * labels[] = {"START", "Speed", "Speed up", "Up to"};
+    char vals[4][24] = {""};
+    snprintf(vals[1], sizeof(vals[1]), "< %d%% >", pr_speed);
+    snprintf(vals[2], sizeof(vals[2]), pr_ramp ? "< +%d%% a clear >" : "< Off >", pr_ramp);
+    snprintf(vals[3], sizeof(vals[3]), "< %d%% >", pr_target);
+    int rows = pr_ramp ? 4 : 3;
+    for (int r = 0; r < rows; r++) {
+        float y = 318 + r * 40;
+        bool cur = pr_step == PR_STEP_SET && r == pr_set_row;
+        if (cur)
+            gfx_sprite(atlas_get(res.hud, "wor_select"), 622, y - 4, 312, 38, WHITE);
+        uint32_t col = pr_step != PR_STEP_SET ? RGBA(150, 150, 150, 255) : cur ? RGBA(255, 236, 170, 255) : RGBA(220, 220, 220, 255);
+        if (r == 0)
+            font_draw_shadow(res.title, labels[0], 778, y - 2, 32, col, ALIGN_CENTER);
+        else {
+            font_draw(res.ui, labels[r], 636, y + 4, 20, col, ALIGN_LEFT);
+            font_draw(res.ui, vals[r], 924, y + 4, 20, col, ALIGN_RIGHT);
+        }
+    }
     if (start)
         font_draw_shadow(res.title, "LOADING", SCREEN_W / 2, 488, 36, RGBA(255, 220, 120, 255), ALIGN_CENTER);
-    else {
-        static const char * help[] = {"btn_cross", "Start", "btn_up", "From", "btn_r", "To", "btn_left", "Speed", "btn_circle",
-                                      "Back"};
-        help_bar(help, 10);
+    else if (pr_step == PR_STEP_FROM) {
+        static const char * help[] = {"btn_cross", "Start here", "btn_triangle", "Whole song", "btn_up", "Move", "btn_circle", "Back"};
+        help_bar(help, 8);
+    } else if (pr_step == PR_STEP_TO) {
+        static const char * help[] = {"btn_cross", "End here", "btn_up", "Move", "btn_circle", "Change start"};
+        help_bar(help, 6);
+    } else {
+        static const char * help[] = {"btn_cross", "Choose", "btn_left", "Change", "btn_start", "Start", "btn_circle", "Change end"};
+        help_bar(help, 8);
     }
     gfx_end();
 }
@@ -2451,7 +2560,7 @@ static void play_screen(void)
 
 static void pause_screen(void)
 {
-    static const char * items[] = {"RESUME", "RESTART", "OPTIONS", "QUIT"};
+    const char * items[] = {"RESUME", "RESTART", "OPTIONS", practicing ? "PRACTICE MENU" : "QUIT"};
     const int n = 4;
     if (repeat & BTN_UP) {
         menu_index = (menu_index + n - 1) % n;
@@ -2513,6 +2622,13 @@ static void pause_screen(void)
         snprintf(line, sizeof(line), "%d%% through   %d%% of notes", song_pct, notes_pct);
     else
         snprintf(line, sizeof(line), "%d%% through", song_pct);
+    int pspeed, pruns, pbest;
+    if (practicing && game_practice_info(&pspeed, &pruns, &pbest) && pruns) {
+        // practice: the stretch, and how the runs through it have gone
+        char more[64];
+        snprintf(more, sizeof(more), "   %d %s, best %d%%", pruns, pruns == 1 ? "run" : "runs", pbest);
+        strncat(line, more, sizeof(line) - strlen(line) - 1);
+    }
     font_draw_shadow(res.ui, line, SCREEN_W / 2, 418, 22, RGBA(225, 215, 200, 255), ALIGN_CENTER);
     gfx_end();
 }

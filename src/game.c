@@ -164,6 +164,8 @@ static struct {
     double from, to;
     float speed;
     int notes;                          // in the stretch
+    int ramp, target;                   // speed up by ramp % (0 off) after each clear, up to target %
+    int runs, best;                     // times through, best % of notes
 } practice;
 
 // -------------------------------------------------------------------------------------------------------- helpers
@@ -1003,6 +1005,12 @@ static float clamp01(float v)
     return v < 0 ? 0 : v > 1 ? 1 : v;
 }
 
+static void popup_always(const char * text)
+{
+    snprintf(G.popup, sizeof(G.popup), "%s", text);
+    G.popup_t = G.t;
+}
+
 static void popup(const char * text)
 {
     if (cfg.no_popups)
@@ -1548,6 +1556,26 @@ void game_practice(double from, double to, float speed)
     practice.from = from;
     practice.to = to;
     practice.speed = speed;
+    practice.ramp = 0;
+    practice.target = 100;
+    practice.runs = practice.best = 0;
+}
+
+void game_practice_ramp(int step_pct, int target_pct)
+{
+    practice.ramp = step_pct;
+    practice.target = target_pct;
+}
+
+bool game_practice_info(int * speed_pct, int * runs, int * best_pct)
+{
+    if (speed_pct)
+        *speed_pct = (int)(practice.speed * 100 + 0.5f);
+    if (runs)
+        *runs = practice.runs;
+    if (best_pct)
+        *best_pct = practice.best;
+    return practice.on;
 }
 
 void game_restart(void)
@@ -1572,8 +1600,11 @@ void game_stop(void)
 
 void game_status(int * song_pct, int * notes_pct)
 {
-    double end = G.last_note_end > 0 ? G.last_note_end : 1;
-    *song_pct = G.t <= 0 ? 0 : G.t >= end ? 100 : (int)(G.t * 100 / end);
+    double start = 0, end = G.last_note_end > 0 ? G.last_note_end : 1;
+    if (practice.on)
+        start = practice.from, end = practice.to;   // how far through the stretch, not the song
+    double t = G.t - start, len = end - start > 0.01 ? end - start : 0.01;
+    *song_pct = t <= 0 ? 0 : t >= len ? 100 : (int)(t * 100 / len);
     int judged = G.hits + G.misses;
     *notes_pct = judged ? G.hits * 100 / judged : -1;
 }
@@ -2576,11 +2607,22 @@ int game_update(const Pad * pad, uint32_t pressed)
     if (practice.on) {
         // the end of the stretch: how it went, and again
         if (G.t > practice.to + 0.6 || audio_song_finished()) {
-            char t[48] = "";
-            if (practice.notes)
-                snprintf(t, sizeof(t), "%d%%  (%d / %d)", G.hits * 100 / practice.notes, G.hits, practice.notes);
+            // a clear (90% of the notes) speeds the next time through up, when that's asked for
+            char t[64] = "";
+            int pct = practice.notes ? G.hits * 100 / practice.notes : 100;
+            practice.runs++;
+            if (pct > practice.best)
+                practice.best = pct;
+            int speed = (int)(practice.speed * 100 + 0.5f);
+            if (practice.ramp && pct >= 90 && speed < practice.target) {
+                speed = speed + practice.ramp > practice.target ? practice.target : speed + practice.ramp;
+                practice.speed = speed / 100.0f;
+                snprintf(t, sizeof(t), "%d%%  SPEED UP %d%%", pct, speed);
+            } else if (practice.notes)
+                snprintf(t, sizeof(t), "%d%%  (%d / %d)", pct, G.hits, practice.notes);
             reset_play();
-            popup(t);
+            // the result of a run is the point of practice: it shows even with popups off
+            popup_always(t);
         }
         return GAME_PLAYING;
     }
@@ -3245,7 +3287,10 @@ static void draw_hud(void)
         font_draw_shadow(res.ui, "BOT", SCREEN_W - 70, 12, 24, RGBA(255, 255, 255, 200), ALIGN_LEFT);
     if (practice.on) {
         char t[32];
-        snprintf(t, sizeof(t), "PRACTICE  %d%%", (int)(practice.speed * 100 + 0.5f));
+        if (practice.ramp && (int)(practice.speed * 100 + 0.5f) < practice.target)
+            snprintf(t, sizeof(t), "PRACTICE  %d%% > %d%%", (int)(practice.speed * 100 + 0.5f), practice.target);
+        else
+            snprintf(t, sizeof(t), "PRACTICE  %d%%", (int)(practice.speed * 100 + 0.5f));
         font_draw_shadow(res.ui, t, SCREEN_W - 16, 44, 22, RGBA(255, 225, 150, 255), ALIGN_RIGHT);
     }
     if (!G.vocal) {
