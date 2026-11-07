@@ -5420,6 +5420,7 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "GET READY: L and R change the song speed right there.",
         "The stage lights flash white on the drummer's crash cymbals, from the song's drum chart.",
         "Main menu: the time and the Vita's battery, top right.",
         "Fixed: the daily song changed at midnight UTC instead of the Vita's own midnight.",
@@ -5427,7 +5428,7 @@ static void news_screen(void)
         "Options > Game > Song speed, 50% to 150%: shown on the HUD. A run below 100% isn't saved.",
         "Achievements: Speed Demon (finish a song at 125% speed) and Ludicrous (4 stars at 150%).",
         "Fixed: a practice run was saved as a score, so a slowed whole-song practice could earn the gold medal.",
-        "Earlier: Star Power spin and spark fountains, lasers, camera reveal, practice metronome and section name.",
+        "Earlier: Star Power spin and sparks, lasers, camera reveal, practice metronome.",
     };
     int n = (int)(sizeof(lines) / sizeof(lines[0]));
     gfx_begin(0, 0, 0);
