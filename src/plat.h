@@ -58,6 +58,9 @@ void plat_thread(const char * name, int (*fn)(void * arg), void * arg, int core)
 void plat_sleep_us(int us);
 // 0: light (menus), 1: full speed (a song)
 void plat_set_perf(int level);
+struct tm;
+void plat_local_time(struct tm * out);  // the date and time as the console's clock is set (its own time zone)
+int plat_battery(bool * charging);      // % of charge left, -1 where there's no battery to tell
 void plat_log(const char * fmt, ...) __attribute__((format(printf, 1, 2)));
 // the network, started on first use: false (and why) when there's no connection
 bool plat_net_up(char * err, int err_size);

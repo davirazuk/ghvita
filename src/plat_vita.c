@@ -9,6 +9,8 @@
 #include <psp2/motion.h>
 #include <psp2/audioout.h>
 #include <psp2/power.h>
+#include <psp2/rtc.h>
+#include <time.h>
 #include <psp2/apputil.h>
 #include <psp2/appmgr.h>
 #include <psp2/io/stat.h>
@@ -487,4 +489,35 @@ int plat_text_poll(char * text, int size)
     }
     text[k] = 0;
     return 1;
+}
+
+// the Vita's own clock and time zone: the C library's localtime() has no time zone here and gives UTC
+void plat_local_time(struct tm * out)
+{
+    SceDateTime t;
+    memset(out, 0, sizeof(*out));
+    if (sceRtcGetCurrentClockLocalTime(&t) < 0) {
+        time_t now = time(NULL);
+        struct tm * g = gmtime(&now);
+        if (g)
+            *out = *g;
+        return;
+    }
+    static const int before[12] = {0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334};
+    out->tm_year = t.year - 1900;
+    out->tm_mon = t.month - 1;
+    out->tm_mday = t.day;
+    out->tm_hour = t.hour;
+    out->tm_min = t.minute;
+    out->tm_sec = t.second;
+    out->tm_wday = sceRtcGetDayOfWeek(t.year, t.month, t.day);
+    out->tm_yday = before[(t.month + 11) % 12] + t.day - 1 + (t.month > 2 && sceRtcIsLeapYear(t.year));
+}
+
+int plat_battery(bool * charging)
+{
+    int pct = scePowerGetBatteryLifePercent();
+    if (charging)
+        *charging = scePowerIsBatteryCharging();
+    return pct >= 0 && pct <= 100 ? pct : -1;
 }

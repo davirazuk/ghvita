@@ -481,13 +481,44 @@ static void gigdone_screen(void);
 static void player_switch(int i);
 static const char * player_title_text(void);
 
+// the time and the battery, top right: a long session on the Vita shouldn't end in a flat battery mid-song
+static void status_corner(void)
+{
+    struct tm now;
+    plat_local_time(&now);
+    char t[16];
+    float x = SCREEN_W - 16;
+    bool charging = false;
+    int pct = plat_battery(&charging);
+    if (pct >= 0) {
+        // a battery: its outline, its nub, and how full it is in green, amber or red
+        const float bw = 28, bh = 13, by = 13;
+        uint32_t fill = charging ? RGBA(120, 200, 255, 255) : pct > 50 ? RGBA(110, 220, 110, 255)
+                        : pct > 20 ? RGBA(240, 190, 60, 255) : RGBA(235, 70, 50, 255);
+        x -= 3;
+        gfx_rect(x, by + 4, 3, bh - 8, RGBA(220, 215, 205, 230));
+        x -= bw;
+        gfx_rect(x, by, bw, bh, RGBA(220, 215, 205, 230));
+        gfx_rect(x + 2, by + 2, bw - 4, bh - 4, RGBA(10, 8, 14, 255));
+        gfx_rect(x + 3, by + 3, (bw - 6) * (pct > 100 ? 100 : pct) / 100.0f, bh - 6, fill);
+        snprintf(t, sizeof(t), charging ? "%d%%+" : "%d%%", pct);
+        x -= 6;
+        font_draw_shadow(res.ui, t, x, 8, 18, pct > 20 || charging ? RGBA(225, 220, 210, 255) : RGBA(255, 120, 100, 255),
+                         ALIGN_RIGHT);
+        x -= font_width(res.ui, t, 18) + 16;
+    }
+    snprintf(t, sizeof(t), "%d:%02d", now.tm_hour, now.tm_min);
+    font_draw_shadow(res.ui, t, x, 8, 18, RGBA(225, 220, 210, 255), ALIGN_RIGHT);
+}
+
 // days since 1970 by the local calendar, so the song changes at the player's midnight
 static long local_day(void)
 {
-    time_t now = time(NULL);
-    struct tm * tm = localtime(&now);
-    if (!tm)
-        return (long)(now / 86400);
+    struct tm local;
+    plat_local_time(&local);
+    if (local.tm_year < 70)
+        return (long)(time(NULL) / 86400);
+    const struct tm * tm = &local;
     int y = tm->tm_year + 1900, m = tm->tm_mon + 1, d = tm->tm_mday;
     y -= m <= 2;
     long era = (y >= 0 ? y : y - 399) / 400;
@@ -719,6 +750,7 @@ static void main_menu(void)
     font_draw_shadow(res.ui, t, 60, 456, 24, RGBA(220, 220, 220, 255), ALIGN_LEFT);
     // which build this is: a card can quietly keep an old one
     font_draw(res.ui, "build " __DATE__ " " __TIME__, SCREEN_W - 20, 490, 16, RGBA(200, 200, 210, 200), ALIGN_RIGHT);
+    status_corner();
     dl_now(now, sizeof(now));
     if (now[0]) {
         snprintf(t, sizeof(t), "Downloading %s", now);
@@ -3338,9 +3370,12 @@ static void pause_screen(void)
         else
             font_draw_shadow(res.title, items[i], SCREEN_W / 2, y, size, col, ALIGN_CENTER);
     }
-    // where in the song: the section, and a bar
+    // where in the song: the section, and a bar, on a plate of their own so they read over the highway's cups
+    gfx_rect_grad(SCREEN_W / 2 - 200, 402, 400, 72, RGBA(12, 8, 18, 230), RGBA(4, 2, 8, 240));
+    gfx_rect(SCREEN_W / 2 - 200, 402, 400, 2, RGBA(210, 170, 90, 210));
+    gfx_rect(SCREEN_W / 2 - 200, 472, 400, 2, RGBA(210, 170, 90, 120));
     if (part[0])
-        font_draw_fit(res.ui, part, SCREEN_W / 2, 412, 18, 300, RGBA(255, 215, 110, 255), ALIGN_CENTER);
+        font_draw_fit(res.ui, part, SCREEN_W / 2, 408, 18, 360, RGBA(255, 215, 110, 255), ALIGN_CENTER);
     int song_pct, notes_pct;
     game_status(&song_pct, &notes_pct);
     char line[64];
@@ -3355,9 +3390,10 @@ static void pause_screen(void)
         snprintf(more, sizeof(more), "   %d %s, best %d%%", pruns, pruns == 1 ? "run" : "runs", pbest);
         strncat(line, more, sizeof(line) - strlen(line) - 1);
     }
-    font_draw_shadow(res.ui, line, SCREEN_W / 2, 432, 20, RGBA(225, 215, 200, 255), ALIGN_CENTER);
-    gfx_rect(SCREEN_W / 2 - 130, 458, 260, 5, RGBA(0, 0, 0, 180));
-    gfx_rect(SCREEN_W / 2 - 130, 458, 260 * song_pct / 100.0f, 5, RGBA(255, 200, 90, 255));
+    font_draw_fit(res.ui, line, SCREEN_W / 2, 429, 20, 380, RGBA(225, 215, 200, 255), ALIGN_CENTER);
+    gfx_rect(SCREEN_W / 2 - 171, 454, 342, 10, RGBA(70, 60, 50, 255));
+    gfx_rect(SCREEN_W / 2 - 170, 455, 340, 8, RGBA(0, 0, 0, 255));
+    gfx_rect_grad(SCREEN_W / 2 - 170, 455, 340 * song_pct / 100.0f, 8, RGBA(255, 220, 120, 255), RGBA(220, 140, 40, 255));
     gfx_end();
 }
 
@@ -4402,7 +4438,8 @@ static void options_screen(void)
         "GHOST +1200: how far ahead (or behind) your best run on the chart you were at this point.",
         "How good the computer rival is in a battle (Triangle on GET READY).",
         "How early or late a note can be hit: Strict 75 ms, Normal 95 ms, Lenient 115 ms either way.",
-        "Light drops the hit rings, Star Power glitter, smoke, band backlight and camera flashes, for a steadier frame rate.",
+        "Light drops the hit rings, Star Power glitter, smoke, band backlight, lasers and sparks, for a steadier frame rate.",
+        "The song's speed. Below 100% the run isn't saved (scores, medals, the tour); practice has its own speed.",
     };
     char line[160];
     const char * text = about[opt];
@@ -5356,14 +5393,14 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "The stage lights flash white on the drummer's crash cymbals, from the song's drum chart.",
+        "Main menu: the time and the Vita's battery, top right.",
+        "Fixed: the daily song changed at midnight UTC instead of the Vita's own midnight.",
+        "Pause: the section and how far through the song you are sit on their own plate, readable over the highway.",
         "Options > Game > Song speed, 50% to 150%: shown on the HUD. A run below 100% isn't saved.",
         "Achievements: Speed Demon (finish a song at 125% speed) and Ludicrous (4 stars at 150%).",
         "Fixed: a practice run was saved as a score, so a slowed whole-song practice could earn the gold medal.",
-        "Practice: the section you're in shows under the PRACTICE label, and a Metronome setting ticks the beat.",
-        "Fixed: the results' DAILY SONG DONE covered the stars; it's under the cover now.",
-        "Star Power: the band spins round as it goes on, and sparks fountain up either side of the guitarists.",
-        "Lasers sweep over the band in a good chorus and under Star Power; the lights leave pools on the stage.",
-        "The camera pulls back from the band through the count-in. A song played well ends with the jets.",
+        "Earlier: Star Power spin and spark fountains, lasers, camera reveal, practice metronome and section name.",
     };
     int n = (int)(sizeof(lines) / sizeof(lines[0]));
     gfx_begin(0, 0, 0);

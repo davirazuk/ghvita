@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <sys/statvfs.h>
 #include <stdarg.h>
 #include "plat.h"
@@ -454,4 +455,29 @@ long long plat_free_bytes(void)
 {
     struct statvfs v;
     return statvfs(".", &v) ? -1 : (long long)v.f_bavail * (long long)v.f_frsize;
+}
+
+void plat_local_time(struct tm * out)
+{
+    time_t now = time(NULL);
+    struct tm * tm = localtime(&now);
+    if (tm)
+        *out = *tm;
+    else
+        memset(out, 0, sizeof(*out));
+}
+
+// a laptop's battery; GHV_BATTERY=<percent> stands one in for the tests
+int plat_battery(bool * charging)
+{
+    const char * e = getenv("GHV_BATTERY");
+    if (charging)
+        *charging = false;
+    if (e)
+        return atoi(e);
+    int secs, pct;
+    SDL_PowerState st = SDL_GetPowerInfo(&secs, &pct);
+    if (charging)
+        *charging = st == SDL_POWERSTATE_CHARGING;
+    return (st == SDL_POWERSTATE_ON_BATTERY || st == SDL_POWERSTATE_CHARGING) && pct >= 0 ? pct : -1;
 }
