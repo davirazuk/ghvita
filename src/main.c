@@ -481,13 +481,44 @@ static void gigdone_screen(void);
 static void player_switch(int i);
 static const char * player_title_text(void);
 
+// the time and the battery, top right: a long session on the Vita shouldn't end in a flat battery mid-song
+static void status_corner(void)
+{
+    struct tm now;
+    plat_local_time(&now);
+    char t[16];
+    float x = SCREEN_W - 16;
+    bool charging = false;
+    int pct = plat_battery(&charging);
+    if (pct >= 0) {
+        // a battery: its outline, its nub, and how full it is in green, amber or red
+        const float bw = 28, bh = 13, by = 13;
+        uint32_t fill = charging ? RGBA(120, 200, 255, 255) : pct > 50 ? RGBA(110, 220, 110, 255)
+                        : pct > 20 ? RGBA(240, 190, 60, 255) : RGBA(235, 70, 50, 255);
+        x -= 3;
+        gfx_rect(x, by + 4, 3, bh - 8, RGBA(220, 215, 205, 230));
+        x -= bw;
+        gfx_rect(x, by, bw, bh, RGBA(220, 215, 205, 230));
+        gfx_rect(x + 2, by + 2, bw - 4, bh - 4, RGBA(10, 8, 14, 255));
+        gfx_rect(x + 3, by + 3, (bw - 6) * (pct > 100 ? 100 : pct) / 100.0f, bh - 6, fill);
+        snprintf(t, sizeof(t), charging ? "%d%%+" : "%d%%", pct);
+        x -= 6;
+        font_draw_shadow(res.ui, t, x, 8, 18, pct > 20 || charging ? RGBA(225, 220, 210, 255) : RGBA(255, 120, 100, 255),
+                         ALIGN_RIGHT);
+        x -= font_width(res.ui, t, 18) + 16;
+    }
+    snprintf(t, sizeof(t), "%d:%02d", now.tm_hour, now.tm_min);
+    font_draw_shadow(res.ui, t, x, 8, 18, RGBA(225, 220, 210, 255), ALIGN_RIGHT);
+}
+
 // days since 1970 by the local calendar, so the song changes at the player's midnight
 static long local_day(void)
 {
-    time_t now = time(NULL);
-    struct tm * tm = localtime(&now);
-    if (!tm)
-        return (long)(now / 86400);
+    struct tm local;
+    plat_local_time(&local);
+    if (local.tm_year < 70)
+        return (long)(time(NULL) / 86400);
+    const struct tm * tm = &local;
     int y = tm->tm_year + 1900, m = tm->tm_mon + 1, d = tm->tm_mday;
     y -= m <= 2;
     long era = (y >= 0 ? y : y - 399) / 400;
@@ -719,6 +750,7 @@ static void main_menu(void)
     font_draw_shadow(res.ui, t, 60, 456, 24, RGBA(220, 220, 220, 255), ALIGN_LEFT);
     // which build this is: a card can quietly keep an old one
     font_draw(res.ui, "build " __DATE__ " " __TIME__, SCREEN_W - 20, 490, 16, RGBA(200, 200, 210, 200), ALIGN_RIGHT);
+    status_corner();
     dl_now(now, sizeof(now));
     if (now[0]) {
         snprintf(t, sizeof(t), "Downloading %s", now);
