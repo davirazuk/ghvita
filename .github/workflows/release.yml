@@ -15,13 +15,13 @@ on:
 permissions:
   contents: write
 
-concurrency:
-  group: release
-  cancel-in-progress: false
-
 jobs:
   release:
     if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release]')
+    # one release at a time; on the job, not the workflow, so a push without [release] can't push a waiting one out
+    concurrency:
+      group: release
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
