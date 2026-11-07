@@ -15,6 +15,7 @@
 #include "audio.h"
 #include "shrink.h"
 #include "songs.h"
+#include "player.h"
 #include "tour.h"
 #include "career.h"
 #include "chart.h"
@@ -24,7 +25,7 @@
 #include "update.h"
 
 enum { S_TITLE, S_MAIN, S_TOUR, S_SONGS, S_SELECT, S_PRACTICE, S_PLAY, S_PAUSE, S_RESUME, S_RESULTS, S_OPTIONS, S_CALIBRATE, S_EMPTY,
-       S_DOWNLOAD, S_UPDATE, S_CAREER, S_NEWS };
+       S_DOWNLOAD, S_UPDATE, S_CAREER, S_NEWS, S_PLAYERS };
 
 static int screen = S_TITLE;
 static double now_s, screen_t;
@@ -276,11 +277,20 @@ static void draw_toast(void)
 
 // ------------------------------------------------------------------------------------------------------ the title
 
+static int players_row;
+static bool players_from_title;    // the picker came up at start: back goes to the title
+
 static void title_screen(void)
 {
     if (pressed & (BTN_CROSS | BTN_START)) {
         ui_sound(SND_UI_SELECT);
-        go(S_MAIN);
+        // more than one player: who's playing, first
+        if (player_count() > 1) {
+            players_row = player_current();
+            players_from_title = true;
+            go(S_PLAYERS);
+        } else
+            go(S_MAIN);
     }
     gfx_begin(0, 0, 0);
     gfx_2d();
@@ -412,7 +422,7 @@ static void daily_load(void)
         return;
     daily.loaded = true;
     char path[400];
-    snprintf(path, sizeof(path), "%sdaily.txt", plat_data_dir());
+    snprintf(path, sizeof(path), "%sdaily.txt", player_dir());
     FILE * f = fopen(path, "r");
     if (f) {
         if (fscanf(f, "%ld %d %d", &daily.done_day, &daily.streak, &daily.best) != 3)
@@ -472,7 +482,7 @@ static bool daily_finished(const Song * s)
     daily.best = daily.streak > daily.best ? daily.streak : daily.best;
     daily.done_day = day;
     char path[400];
-    snprintf(path, sizeof(path), "%sdaily.txt", plat_data_dir());
+    snprintf(path, sizeof(path), "%sdaily.txt", player_dir());
     FILE * f = fopen(path, "w");
     if (f) {
         fprintf(f, "%ld %d %d\n", daily.done_day, daily.streak, daily.best);
@@ -505,6 +515,12 @@ static void main_menu(void)
     if (repeat & BTN_DOWN) {
         menu_index = (menu_index + 1) % n;
         ui_sound(SND_UI_MOVE);
+    }
+    if (pressed & BTN_SELECT) {
+        ui_sound(SND_UI_SELECT);
+        players_row = player_current();
+        go(S_PLAYERS);
+        return;
     }
     if (pressed & BTN_CIRCLE) {
         ui_sound(SND_UI_BACK);
@@ -583,8 +599,10 @@ static void main_menu(void)
         font_draw_fit(res.ui, t, 190, 458, 20, 740, RGBA(140, 220, 255, 255), ALIGN_LEFT);
     }
     draw_toast();
-    static const char * help[] = {"btn_cross", "Select", "btn_circle", "Back"};
-    help_bar(help, 4);
+    char who[64];
+    snprintf(who, sizeof(who), "Player: %s", player_name(player_current()));
+    const char * help[] = {"btn_cross", "Select", "btn_circle", "Back", "btn_select", who};
+    help_bar(help, 6);
     gfx_end();
 }
 
@@ -3656,6 +3674,146 @@ static void options_screen(void)
 
 // -------------------------------------------------------------------------------------------------------- career
 
+// --------------------------------------------------------------------------------------------------------- players
+// who's playing: Select on the main menu. Each has their own scores, favourites, settings, career, tour and streak.
+
+
+static void player_switch(int i)
+{
+    if (i == player_current())
+        return;
+    player_select(i);
+    player_init();
+    config_load();
+    career_load();
+    tour_load();
+    songs_reload_player();
+    songs_sort(cfg.sort);
+    daily.loaded = false;
+    view_stale = true;
+    art_for = preview_for = -1;
+    plat_log("player: %s", player_name(i));
+}
+
+static void player_named(const char * name)
+{
+    int i = player_add(name);
+    if (i >= 0) {
+        player_switch(i);
+        players_row = i;
+        char hi[64];
+        snprintf(hi, sizeof(hi), "Hi, %s!", player_name(i));
+        say(hi);
+    } else
+        say(player_count() >= PLAYER_MAX ? "That's as many players as there's room for" : "That name's taken");
+}
+
+// the cards' colours: two tones each, top and bottom
+static const uint32_t player_tones[PLAYER_COLORS][2] = {
+    {RGBA(230, 70, 60, 255), RGBA(140, 25, 30, 255)},   {RGBA(60, 140, 235, 255), RGBA(25, 60, 140, 255)},
+    {RGBA(70, 200, 110, 255), RGBA(25, 110, 55, 255)},  {RGBA(250, 190, 50, 255), RGBA(170, 100, 20, 255)},
+    {RGBA(170, 90, 230, 255), RGBA(85, 35, 140, 255)},  {RGBA(240, 120, 190, 255), RGBA(150, 45, 105, 255)},
+    {RGBA(60, 205, 210, 255), RGBA(20, 110, 120, 255)}, {RGBA(150, 150, 160, 255), RGBA(70, 70, 80, 255)},
+};
+
+static void players_screen(void)
+{
+    static float scroll;                // eases toward the chosen card
+    int n = player_count(), cards = n < PLAYER_MAX ? n + 1 : n;   // the last card adds a player
+    if (dl_typing) {
+        kb_update();
+        pressed = repeat = 0;
+    }
+    if (players_row >= cards)
+        players_row = cards - 1;
+    if ((repeat & BTN_LEFT) && players_row > 0) {
+        players_row--;
+        ui_sound(SND_UI_MOVE);
+    }
+    if ((repeat & BTN_RIGHT) && players_row < cards - 1) {
+        players_row++;
+        ui_sound(SND_UI_MOVE);
+    }
+    if ((pressed & BTN_TRIANGLE) && players_row < n) {
+        // another colour for this player's card
+        player_set_color(players_row, player_color(players_row) + 1);
+        ui_sound(SND_UI_MOVE);
+    }
+    if (pressed & BTN_CROSS) {
+        ui_sound(SND_UI_SELECT);
+        if (players_row < n) {
+            player_switch(players_row);
+            players_from_title = false;
+            go(S_MAIN);
+            pressed = 0;
+            return;
+        }
+        dl_typed[0] = 0;
+        kb_apply = player_named;
+        kb_library = false;
+        dl_typing = true;
+    } else if (pressed & (BTN_CIRCLE | BTN_SELECT)) {
+        ui_sound(SND_UI_BACK);
+        go(players_from_title ? S_TITLE : S_MAIN);
+        players_from_title = false;
+        return;
+    }
+    scroll += (players_row - scroll) * 0.25f;
+    gfx_begin(0, 0, 0);
+    gfx_2d();
+    draw_background(res.bg_menu, RGBA(110, 110, 110, 255));
+    gfx_rect_grad(0, 0, SCREEN_W, 160, RGBA(0, 0, 0, 200), RGBA(0, 0, 0, 0));
+    font_draw_shadow(res.title, "WHO'S PLAYING?", SCREEN_W / 2, 50, 52, RGBA(255, 225, 150, 255), ALIGN_CENTER);
+    // the cards in a row, the chosen one in the middle and bigger
+    const float size = 170, gap = 210, cy = 270;
+    for (int i = 0; i < cards; i++) {
+        float x = SCREEN_W / 2 + (i - scroll) * gap;
+        if (x < -size || x > SCREEN_W + size)
+            continue;
+        float d = fabsf(i - scroll), grow = d < 1 ? 1 + 0.18f * (1 - d) : 1;
+        float w = size * grow, top = cy - w / 2;
+        bool cur = i == players_row;
+        uint32_t dim = cur ? WHITE : RGBA(170, 170, 170, 255);
+        if (cur) {
+            // a gold frame around the chosen one
+            float b = 5;
+            gfx_rect(x - w / 2 - b, top - b, w + 2 * b, w + 2 * b, RGBA(255, 210, 90, 255));
+        }
+        if (i < n) {
+            const uint32_t * c = player_tones[player_color(i)];
+            gfx_rect_grad(x - w / 2, top, w, w, c[0], c[1]);
+            if (!cur)
+                gfx_rect(x - w / 2, top, w, w, RGBA(0, 0, 0, 90));
+            char initial[2] = {player_name(i)[0], 0};
+            if (initial[0] >= 'a' && initial[0] <= 'z')
+                initial[0] -= 32;
+            font_draw_shadow(res.title, initial, x, top + w * 0.16f, w * 0.68f, dim, ALIGN_CENTER);
+            font_draw_fit(res.ui, player_name(i), x, top + w + 14, cur ? 30 : 24, gap - 16,
+                          cur ? RGBA(255, 236, 190, 255) : RGBA(200, 200, 200, 255), ALIGN_CENTER);
+            if (i == player_current())
+                font_draw(res.ui, "last played", x, top + w + 50, 18, RGBA(130, 230, 130, 255), ALIGN_CENTER);
+        } else {
+            gfx_rect(x - w / 2, top, w, w, RGBA(40, 40, 48, 230));
+            gfx_rect(x - 4, top + w * 0.25f, 8, w * 0.5f, dim);
+            gfx_rect(x - w * 0.25f, top + w / 2 - 4, w * 0.5f, 8, dim);
+            font_draw_fit(res.ui, "Add player", x, top + w + 14, cur ? 30 : 24, gap - 16,
+                          cur ? RGBA(255, 236, 190, 255) : RGBA(200, 200, 200, 255), ALIGN_CENTER);
+        }
+    }
+    draw_toast();
+    if (dl_typing) {
+        kb_draw();
+        font_draw(res.ui, "Type a name, then Start", SCREEN_W / 2, 470, 22, RGBA(255, 220, 140, 255), ALIGN_CENTER);
+    } else if (players_row < n) {
+        static const char * help[] = {"btn_cross", "Play", "btn_left", "Choose", "btn_triangle", "Colour", "btn_circle", "Back"};
+        help_bar(help, 8);
+    } else {
+        static const char * help[] = {"btn_cross", "Add", "btn_left", "Choose", "btn_circle", "Back"};
+        help_bar(help, 6);
+    }
+    gfx_end();
+}
+
 static void career_screen(void)
 {
     if (pressed & (BTN_CIRCLE | BTN_CROSS)) {
@@ -3922,6 +4080,7 @@ int main(void)
         case S_SELECT: select_screen(); break;
         case S_PRACTICE: practice_screen(); break;
         case S_CAREER: career_screen(); break;
+        case S_PLAYERS: players_screen(); break;
         case S_NEWS: news_screen(); break;
         case S_PLAY: play_screen(); break;
         case S_PAUSE: pause_screen(); break;

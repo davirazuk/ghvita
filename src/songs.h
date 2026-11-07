@@ -60,6 +60,8 @@ typedef struct {
     Score score;
     long when;
 } Played;
+// another player: their scores, plays and favourites in place of the last one's
+void songs_reload_player(void);
 int songs_history(const Song * s, int part, int diff, Played * out, int max);
 const char * part_name(int part);
 const char * diff_name(int diff);

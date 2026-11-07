@@ -7,6 +7,7 @@
 #include <sys/stat.h>
 #include <time.h>
 #include "songs.h"
+#include "player.h"
 #include "dl.h"
 #include "songconv.h"
 #include "plat.h"
@@ -392,7 +393,7 @@ static const char * base_name(const char * folder)
 static void load_scores(void)
 {
     char path[400];
-    snprintf(path, sizeof(path), "%sscores.txt", plat_data_dir());
+    snprintf(path, sizeof(path), "%sscores.txt", player_dir());
     FILE * f = fopen(path, "r");
     if (!f)
         return;
@@ -427,11 +428,25 @@ static void load_scores(void)
     fclose(f);
 }
 
+static void load_favs(void);
+
+void songs_reload_player(void)
+{
+    for (int i = 0; i < count; i++) {
+        memset(songs[i].best, 0, sizeof(songs[i].best));
+        songs[i].plays = 0;
+        songs[i].last_played = 0;
+        songs[i].fav = false;
+    }
+    load_scores();
+    load_favs();
+}
+
 // favourites: a line for each song's folder
 static void load_favs(void)
 {
     char path[400], line[300];
-    snprintf(path, sizeof(path), "%sfavourites.txt", plat_data_dir());
+    snprintf(path, sizeof(path), "%sfavourites.txt", player_dir());
     FILE * f = fopen(path, "r");
     if (!f)
         return;
@@ -448,7 +463,7 @@ void songs_set_fav(Song * s, bool fav)
 {
     s->fav = fav;
     char path[400];
-    snprintf(path, sizeof(path), "%sfavourites.txt", plat_data_dir());
+    snprintf(path, sizeof(path), "%sfavourites.txt", player_dir());
     FILE * f = fopen(path, "w");
     if (!f)
         return;
@@ -692,7 +707,7 @@ void songs_save_score(Song * s, int part, int diff, Score score)
     }
     b->fc |= score.fc;
     char path[400];
-    snprintf(path, sizeof(path), "%sscores.txt", plat_data_dir());
+    snprintf(path, sizeof(path), "%sscores.txt", player_dir());
     FILE * f = fopen(path, "a");
     if (!f)
         return;
@@ -706,7 +721,7 @@ void songs_save_score(Song * s, int part, int diff, Score score)
 int songs_history(const Song * s, int part, int diff, Played * out, int max)
 {
     char path[400];
-    snprintf(path, sizeof(path), "%sscores.txt", plat_data_dir());
+    snprintf(path, sizeof(path), "%sscores.txt", player_dir());
     FILE * f = fopen(path, "r");
     if (!f || max <= 0) {
         if (f)
@@ -774,7 +789,7 @@ void config_load(void)
     config_defaults();
     int look = 0;
     char path[400];
-    snprintf(path, sizeof(path), "%ssettings.txt", plat_data_dir());
+    snprintf(path, sizeof(path), "%ssettings.txt", player_dir());
     FILE * f = fopen(path, "r");
     if (!f)
         return;
@@ -902,7 +917,7 @@ void config_load(void)
 void config_save(void)
 {
     char path[400], tmp[410];
-    snprintf(path, sizeof(path), "%ssettings.txt", plat_data_dir());
+    snprintf(path, sizeof(path), "%ssettings.txt", player_dir());
     snprintf(tmp, sizeof(tmp), "%s.tmp", path);
     FILE * f = fopen(tmp, "w");
     if (!f)
