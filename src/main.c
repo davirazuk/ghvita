@@ -3252,7 +3252,14 @@ static void results_screen(void)
             snprintf(rows[5].value, sizeof(rows[5].value), "%d%% on time, %d ms %s", on, abs(result.off_ms),
                      result.off_ms > 0 ? "late" : "early");
     }
-    for (int i = 0; i < 6; i++) {
+    int nrows = 6;
+    if (result.part == PART_VOCALS) {
+        // a singer's results: phrases, not notes; no frets, so no overhits, Star Power notes or timing
+        rows[1].label = "Phrases sung";
+        rows[2].label = "Best run of phrases";
+        nrows = 3;
+    }
+    for (int i = 0; i < nrows; i++) {
         float y = 200 + i * 31;
         font_draw_shadow(res.ui, rows[i].label, 330, y, 28, RGBA(220, 210, 200, 255), ALIGN_LEFT);
         font_draw_shadow(res.ui, rows[i].value, 870, y, 28, RGBA(255, 236, 190, 255), ALIGN_RIGHT);
@@ -3260,7 +3267,7 @@ static void results_screen(void)
     bool strip = false;
     for (int i = 0; i < RESULT_STRIP; i++)
         strip |= result.strip[i] != 255;
-    if (result.timed && !results_history) {
+    if (result.timed && !results_history && result.part != PART_VOCALS) {
         // early, on time, late: a thin bar under the timing row
         int all = result.early + result.on_time + result.late;
         if (all) {
@@ -4733,12 +4740,11 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
-        "The title shows World Tour's own logo. The main menu shows who's playing: picture, rank, stars, medals.",
-        "Battle: the rival plays like a person (chords and fast runs are harder for it), picks its moment to attack,",
-        "  and has a name. New attack: Speed Up. INCOMING warns you a second before one lands. Options > Game > Battle rival.",
-        "GET READY shows the cover, the song's details and your best. Options' tabs fit, with more rows.",
-        "The strikeline buttons lost the off-centre arch on top. Player pictures: Guitar Hero art or any album cover.",
-        "Pause: PRACTICE THIS PART takes you to practice on the section you were in. Medals in the song list.",
+        "Fixed: the SOLO! percent could go past 100%.",
+        "Career counts your battles won. New achievements: Rival Slayer, Duelist, Giant Killer (beat a Brutal rival).",
+        "A singer's results show phrases sung, not frets. Singing along: the vocals' score sits on a dark backing.",
+        "Pause: PRACTICE THIS PART. Battle: a smarter rival, Speed Up, INCOMING warnings, Options > Game > Battle rival.",
+        "The title shows World Tour's own logo; the main menu shows who's playing. New GET READY and Options screens.",
     };
     int n = (int)(sizeof(lines) / sizeof(lines[0]));
     gfx_begin(0, 0, 0);

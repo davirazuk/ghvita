@@ -3723,6 +3723,7 @@ static void draw_hud(void)
         // the singer's own tally, over the lyrics' side
         char t[48];
         snprintf(t, sizeof(t), "VOCALS %d   %d/%d", (int)G.vox_points, G.vox_good, G.vox_graded);
+        gfx_rect(8, 182, font_width(res.ui, t, 20) + 16, 28, RGBA(0, 0, 0, 150));
         font_draw_shadow(res.ui, t, 16, 186, 20, RGBA(150, 210, 255, 255), ALIGN_LEFT);
     }
     if (!G.vocal) {

@@ -9,7 +9,7 @@ root=..
 # the -dev packages' headers are where the system keeps them (CMakeLists' PCDEPS is for a PC without them)
 [ -f $root/build-pc/build.ninja ] || cmake -S $root -B $root/build-pc -G Ninja -DPCDEPS=/usr/include >/dev/null
 out=$(ninja -C $root/build-pc 2>&1) || { echo "$out" | grep -E "error|FAILED" | head -20; echo "smoke: desktop build failed"; exit 1; }
-[ -d songs ] && ls songs | grep -q "GH Vita Tests" || python3 $root/tools/mktestsong.py songs --count 2 >/dev/null
+[ -d songs ] && ls songs | grep -q "Test Song Vocals" || python3 $root/tools/mktestsong.py songs --count 2 >/dev/null
 mkdir -p data shots && ln -sfn ../songs data/songs
 if [ -z "${DISPLAY:-}" ]; then
     pgrep -f "Xvfb :77" >/dev/null || { Xvfb :77 -screen 0 1280x720x24 >/dev/null 2>&1 & sleep 1; }
@@ -34,4 +34,15 @@ for song in "Test Song 1" "Test Song 2"; do
         rm -f "$log"
     done
 done
+# the vocals: the bot sings the MIDI song's part through the pitch detector; finishing it is enough
+log=$(mktemp)
+SDL_AUDIODRIVER=dummy GHV_DATA=data/ GHV_ASSETS=$root/assets/ GHV_SHOTS=shots/ GHV_FIXED=1 GHV_AUTOPLAY=1 \
+    GHV_SONG="Test Song Vocals" GHV_PART=6 GHV_DIFF=1 timeout 240 $root/build-pc/ghvita >"$log" 2>&1 &
+pid=$!
+while kill -0 $pid 2>/dev/null && ! grep -q "^result:" "$log"; do sleep 1; done
+sleep 1; kill $pid 2>/dev/null; wait $pid 2>/dev/null
+res=$(grep "^result:" "$log" | head -1)
+if [[ "$res" =~ ^result:\ done ]]; then echo "ok   Test Song Vocals vocals: ${res#*, score }" | cut -c1-80
+else echo "FAIL Test Song Vocals vocals: ${res:-no result}"; tail -5 "$log" | sed 's/^/     /'; fail=1; fi
+rm -f "$log"
 exit $fail
