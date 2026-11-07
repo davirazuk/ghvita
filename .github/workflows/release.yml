@@ -1,0 +1,74 @@
+# Builds GH Vita on GitHub's machines and publishes it as a release, so the Vita's updater picks it up: no PC needed.
+# Runs when a pushed commit's message has [release] in it, or by hand (Actions > Release > Run workflow).
+# The art isn't in the repository: it comes out of the latest release's GHVita.vpk, so each release carries it on.
+name: Release
+
+on:
+  push:
+    branches: ['**']
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: What changed (defaults to the commit's first line)
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VITASDK: /usr/local/vitasdk
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # the build number is the commit count
+
+      - name: Desktop build tools (for the smoke test)
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq libsdl2-dev libopusfile-dev libopus-dev \
+            libmpg123-dev libvorbis-dev libogg-dev libcurl4-openssl-dev libarchive-dev libgl-dev zlib1g-dev \
+            cmake ninja-build xvfb ffmpeg python3-numpy
+
+      - name: VitaSDK
+        run: |
+          git clone -q --depth 1 https://github.com/vitasdk/vdpm /tmp/vdpm
+          sudo /tmp/vdpm/bootstrap-vitasdk.sh --install-dir $VITASDK
+          sudo chown -R "$USER" $VITASDK
+          echo "$VITASDK/bin" >> "$GITHUB_PATH"
+          export PATH=$VITASDK/bin:$PATH
+          yes | vdpm install curl mbedtls libarchive un7zip opusfile opus mpg123 bzip2 zstd zlib libvorbis libogg \
+            vitaGL vitaShaRK libmathneon SceShaccCgExt taihen
+
+      - name: The art, from the latest release
+        run: |
+          gh release download --pattern GHVita.vpk --dir /tmp/last
+          mkdir -p /tmp/last/x && cd /tmp/last/x && unzip -q ../GHVita.vpk
+          cp -r /tmp/last/x/assets/. "$GITHUB_WORKSPACE/assets/"
+          mkdir -p "$GITHUB_WORKSPACE/vita/sce_sys"
+          cd /tmp/last/x/sce_sys && find . -name '*.png' -exec cp --parents {} "$GITHUB_WORKSPACE/vita/sce_sys/" \;
+          echo "$(find "$GITHUB_WORKSPACE/assets" -type f | wc -l) asset files"
+
+      - name: Build, smoke test and publish
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          Xvfb :77 -screen 0 1280x720x24 >/dev/null 2>&1 &
+          export DISPLAY=:77
+          notes="${{ github.event.inputs.notes }}"
+          if [ -z "$notes" ]; then
+            # every change since the last release, a line each
+            last=$(gh release view --json tagName -q .tagName 2>/dev/null || true)
+            range=$([ -n "$last" ] && git rev-parse -q --verify "$last" >/dev/null && echo "$last..HEAD" || echo "-1")
+            notes="$(git log $range --no-merges --format='- %s' | sed 's/ *\[release\]//')"
+          fi
+          python3 tools/release.py --notes "$notes"

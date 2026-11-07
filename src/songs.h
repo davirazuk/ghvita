@@ -28,6 +28,7 @@ typedef struct {
     long added;                             // when it came onto the card
     long stamp;                             // its folder's time when read: the library file's test for a change
     int plays;
+    long last_played;                       // when it was last finished (0 never, or only before times were kept)
     bool fav;
 } Song;
 
@@ -54,6 +55,14 @@ const char * sort_name(int mode);
 void songs_group(const Song * s, int mode, char * out, size_t size);
 void songs_set_fav(Song * s, bool fav);
 void songs_save_score(Song * s, int part, int diff, Score score);
+// the song's finished plays on a part and difficulty, oldest first, the newest max of them; when: unix time, 0 unknown
+typedef struct {
+    Score score;
+    long when;
+} Played;
+// another player: their scores, plays and favourites in place of the last one's
+void songs_reload_player(void);
+int songs_history(const Song * s, int part, int diff, Played * out, int max);
 const char * part_name(int part);
 const char * diff_name(int diff);
 
@@ -82,6 +91,7 @@ typedef struct {
     bool no_popups;         // no "50 NOTE STREAK!" and the like
     bool timing_bar;        // where the last hits fell in the window
     bool live_stats;        // percent hit and a full-combo mark in the song
+    bool no_ghost;          // no racing the chart's best run
     bool vanish;            // notes vanish before they reach the strikeline
     bool no_miss_sound;
     bool no_rear_whammy;    // the rear touchpad isn't a whammy bar

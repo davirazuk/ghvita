@@ -7,6 +7,7 @@
 #include <sys/stat.h>
 #include <time.h>
 #include "songs.h"
+#include "player.h"
 #include "dl.h"
 #include "songconv.h"
 #include "plat.h"
@@ -392,7 +393,7 @@ static const char * base_name(const char * folder)
 static void load_scores(void)
 {
     char path[400];
-    snprintf(path, sizeof(path), "%sscores.txt", plat_data_dir());
+    snprintf(path, sizeof(path), "%sscores.txt", player_dir());
     FILE * f = fopen(path, "r");
     if (!f)
         return;
@@ -403,7 +404,8 @@ static void load_scores(void)
             continue;
         *tab = 0;
         int part, diff, score, stars, percent, fc;
-        if (sscanf(tab + 1, "%d %d %d %d %d %d", &part, &diff, &score, &stars, &percent, &fc) != 6)
+        long when = 0;      // lines from before build 52 have no time
+        if (sscanf(tab + 1, "%d %d %d %d %d %d %ld", &part, &diff, &score, &stars, &percent, &fc, &when) < 6)
             continue;
         if (part < 0 || part >= PART_COUNT || diff < 0 || diff >= DIFF_COUNT)
             continue;
@@ -411,6 +413,8 @@ static void load_scores(void)
             if (strcmp(base_name(songs[i].folder), line) == 0) {
                 Score * b = &songs[i].best[part][diff];
                 songs[i].plays++;
+                if (when > songs[i].last_played)
+                    songs[i].last_played = when;
                 if (score > b->score) {
                     b->score = score;
                     b->stars = stars;
@@ -424,11 +428,25 @@ static void load_scores(void)
     fclose(f);
 }
 
+static void load_favs(void);
+
+void songs_reload_player(void)
+{
+    for (int i = 0; i < count; i++) {
+        memset(songs[i].best, 0, sizeof(songs[i].best));
+        songs[i].plays = 0;
+        songs[i].last_played = 0;
+        songs[i].fav = false;
+    }
+    load_scores();
+    load_favs();
+}
+
 // favourites: a line for each song's folder
 static void load_favs(void)
 {
     char path[400], line[300];
-    snprintf(path, sizeof(path), "%sfavourites.txt", plat_data_dir());
+    snprintf(path, sizeof(path), "%sfavourites.txt", player_dir());
     FILE * f = fopen(path, "r");
     if (!f)
         return;
@@ -445,7 +463,7 @@ void songs_set_fav(Song * s, bool fav)
 {
     s->fav = fav;
     char path[400];
-    snprintf(path, sizeof(path), "%sfavourites.txt", plat_data_dir());
+    snprintf(path, sizeof(path), "%sfavourites.txt", player_dir());
     FILE * f = fopen(path, "w");
     if (!f)
         return;
@@ -469,6 +487,7 @@ int songs_scan(void (*progress)(int found, const char * converting))
     for (int i = 0; i < count; i++) {
         memset(songs[i].best, 0, sizeof(songs[i].best));
         songs[i].plays = 0;
+        songs[i].last_played = 0;
         songs[i].fav = false;
     }
     if (lib_changed || known != count)
@@ -688,13 +707,60 @@ void songs_save_score(Song * s, int part, int diff, Score score)
     }
     b->fc |= score.fc;
     char path[400];
-    snprintf(path, sizeof(path), "%sscores.txt", plat_data_dir());
+    snprintf(path, sizeof(path), "%sscores.txt", player_dir());
     FILE * f = fopen(path, "a");
     if (!f)
         return;
-    fprintf(f, "%s\t%d %d %d %d %d %d\n", base_name(s->folder), part, diff, score.score, score.stars, score.percent,
-            score.fc);
+    long now = (long)time(NULL);
+    fprintf(f, "%s\t%d %d %d %d %d %d %ld\n", base_name(s->folder), part, diff, score.score, score.stars, score.percent,
+            score.fc, now);
     fclose(f);
+    s->last_played = now;
+}
+
+int songs_history(const Song * s, int part, int diff, Played * out, int max)
+{
+    char path[400];
+    snprintf(path, sizeof(path), "%sscores.txt", player_dir());
+    FILE * f = fopen(path, "r");
+    if (!f || max <= 0) {
+        if (f)
+            fclose(f);
+        return 0;
+    }
+    const char * name = base_name(s->folder);
+    char line[600];
+    int n = 0;          // a ring of the newest max, unrolled at the end
+    while (fgets(line, sizeof(line), f)) {
+        char * tab = strchr(line, '\t');
+        if (!tab)
+            continue;
+        *tab = 0;
+        if (strcmp(line, name))
+            continue;
+        int p, d, score, stars, percent, fc;
+        long when = 0;
+        if (sscanf(tab + 1, "%d %d %d %d %d %d %ld", &p, &d, &score, &stars, &percent, &fc, &when) < 6 || p != part ||
+            d != diff)
+            continue;
+        Played * e = &out[n % max];
+        e->score.score = score;
+        e->score.stars = (uint8_t)stars;
+        e->score.percent = (uint8_t)percent;
+        e->score.fc = (uint8_t)fc;
+        e->when = when;
+        n++;
+    }
+    fclose(f);
+    if (n > max) {
+        Played tmp[64];
+        int k = max > 64 ? 64 : max;
+        for (int i = 0; i < k; i++)
+            tmp[i] = out[(n + i) % max];
+        memcpy(out, tmp, sizeof(Played) * k);
+        n = k;
+    }
+    return n;
 }
 
 // ------------------------------------------------------------------------------------------------------- settings
@@ -712,7 +778,7 @@ void config_defaults(void)
     cfg.music_vol = 10;
     cfg.sfx_vol = 8;
     cfg.crowd_vol = 5;
-    cfg.flat_notes = true;
+    cfg.flat_notes = false;     // notes facing you: they read better than lying on the neck
     cfg.note_size = 1;
     cfg.last_diff = DIFF_MEDIUM;
     cfg.sing_diff = DIFF_MEDIUM;    // singing along judges the voice at Medium, not at the instrument's own
@@ -721,9 +787,10 @@ void config_defaults(void)
 void config_load(void)
 {
     config_defaults();
-    int look = 0;
+    int look = 0, notes_look = 0;
+    bool flat = false;   // notes_look: settings saved since notes face you by default
     char path[400];
-    snprintf(path, sizeof(path), "%ssettings.txt", plat_data_dir());
+    snprintf(path, sizeof(path), "%ssettings.txt", player_dir());
     FILE * f = fopen(path, "r");
     if (!f)
         return;
@@ -741,6 +808,8 @@ void config_load(void)
             cfg.speed = n < 1 ? 1 : n > 10 ? 10 : n;
         else if (strcmp(k, "board_look") == 0)
             look = n;
+        else if (strcmp(k, "notes_look") == 0)
+            notes_look = n;
         else if (strcmp(k, "highway") == 0)
             snprintf(cfg.highway, sizeof(cfg.highway), "%s", v);
         else if (strcmp(k, "venue") == 0)
@@ -759,6 +828,8 @@ void config_load(void)
             cfg.timing_bar = n != 0;
         else if (strcmp(k, "live_stats") == 0)
             cfg.live_stats = n != 0;
+        else if (strcmp(k, "no_ghost") == 0)
+            cfg.no_ghost = n != 0;
         else if (strcmp(k, "vanish") == 0)
             cfg.vanish = n != 0;
         else if (strcmp(k, "no_miss_sound") == 0)
@@ -778,7 +849,7 @@ void config_load(void)
         else if (strcmp(k, "auto_repress") == 0)
             cfg.auto_repress = n != 0;
         else if (strcmp(k, "flat_notes") == 0)
-            cfg.flat_notes = n != 0;
+            flat = n != 0;
         else if (strcmp(k, "no_wobble") == 0)
             cfg.no_wobble = n != 0;
         else if (strcmp(k, "fire") == 0)
@@ -841,6 +912,9 @@ void config_load(void)
             snprintf(cfg.last_song, sizeof(cfg.last_song), "%s", v);
     }
     fclose(f);
+    // notes lying on the neck were the default before: a file from then gets them facing you, once; after that it's
+    // whatever the player picked
+    cfg.flat_notes = notes_look ? flat : false;
     // a settings file from before the board matched World Tour still names the old default: move it on, once
     if (!look && strcmp(cfg.highway, "classic") == 0)
         snprintf(cfg.highway, sizeof(cfg.highway), "judy");
@@ -851,7 +925,7 @@ void config_load(void)
 void config_save(void)
 {
     char path[400], tmp[410];
-    snprintf(path, sizeof(path), "%ssettings.txt", plat_data_dir());
+    snprintf(path, sizeof(path), "%ssettings.txt", player_dir());
     snprintf(tmp, sizeof(tmp), "%s.tmp", path);
     FILE * f = fopen(tmp, "w");
     if (!f)
@@ -870,6 +944,7 @@ void config_save(void)
             cfg.no_popups, cfg.timing_bar, cfg.live_stats, cfg.vanish, cfg.no_miss_sound, cfg.no_rear_whammy, cfg.no_bend, cfg.no_countdown);
     fprintf(f, "double_kick = %d\nfive_pads = %d\neasy_sustains = %d\nno_count_in = %d\nstage_screens = %d\nno_progress = %d\ncup_skin = %d\n", cfg.double_kick, cfg.five_pads, cfg.easy_sustains,
             cfg.no_count_in, cfg.stage_screens, cfg.no_progress, cfg.cup_skin);
+    fprintf(f, "no_ghost = %d\nnotes_look = 1\n", cfg.no_ghost);
     fclose(f);
     remove(path);
     rename(tmp, path);

@@ -15,7 +15,7 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -Wno-unused-parameter -Wno-mis
 set_source_files_properties(src/main.c src/shrink.c src/rbcon.c src/moggdec.c src/songconv.c src/dl.c src/net.c src/json.c src/songs.c src/career.c PROPERTIES COMPILE_OPTIONS -Os)
 # its memory is one block read as whatever's in it
 set_source_files_properties(src/ppmd7.c PROPERTIES COMPILE_FLAGS -fno-strict-aliasing)
-set(SRCS src/main.c src/game.c src/gfx.c src/font.c src/audio.c src/decoder.c src/chart.c src/songs.c src/career.c src/songconv.c
+set(SRCS src/main.c src/player.c src/achieve.c src/game.c src/gfx.c src/font.c src/audio.c src/decoder.c src/chart.c src/songs.c src/career.c src/songconv.c
          src/res.c src/json.c src/net.c src/dl.c src/mega.c src/aes128.c src/moggdec.c src/rar.c src/ppmd7.c src/tour.c src/vocals.c src/rbcon.c src/shrink.c
          src/update.c src/update_apply.c)
 
@@ -33,8 +33,15 @@ if (VITA)
     add_definitions(-D__vita__)
     add_executable(ghvita ${SRCS} src/plat_vita.c)
     target_include_directories(ghvita PRIVATE $ENV{VITASDK}/arm-vita-eabi/include/opus)
+    # newer VitaSDK curl packages are built on OpenSSL rather than mbedTLS: link it when it's there
+    find_library(VITA_OPENSSL_SSL ssl)
+    find_library(VITA_OPENSSL_CRYPTO crypto)
+    set(CURL_TLS mbedtls mbedx509 mbedcrypto)
+    if (VITA_OPENSSL_SSL AND VITA_OPENSSL_CRYPTO)
+        list(PREPEND CURL_TLS ssl crypto)
+    endif()
     target_link_libraries(ghvita
-        curl mbedtls mbedx509 mbedcrypto archive un7zip bz2 zstd z
+        curl ${CURL_TLS} archive un7zip bz2 zstd z
         opusfile opus mpg123 vorbisfile vorbis ogg
         SceNet_stub SceNetCtl_stub SceSysmem_stub SceKernelModulemgr_stub SceProcessmgr_stub
         vitaGL vitashark SceShaccCgExt mathneon taihen_stub SceShaccCg_stub

@@ -4,7 +4,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/stat.h>
 #include "game.h"
+#include "player.h"
 #include "vocals.h"
 #include "res.h"
 #include "audio.h"
@@ -90,6 +92,8 @@ static struct {
     double sp_last_q;           // where Star Power's drain has got to, in quarter notes
     double base_score;
     int beat_best;                  // the best score to beat on this chart, 0 when none or already beaten
+    double vox_points;              // singing along: what the voice has added
+    int vox_good, vox_graded;       // its phrases, strong ones and all
     double t, lead_in;
     double speed;               // highway units per second
     bool paused, failed, done;
@@ -164,7 +168,37 @@ static struct {
     double from, to;
     float speed;
     int notes;                          // in the stretch
+    int ramp, target;                   // speed up by ramp % (0 off) after each clear, up to target %
+    int runs, best;                     // times through, best % of notes
 } practice;
+
+// a battle: a computer rival plays the same chart, each side's own rock meter; Star Power phrases earn attacks
+enum { ATK_LEFTY, ATK_BLACKOUT, ATK_DRAIN, ATK_COUNT };
+static const char * const atk_names[ATK_COUNT] = {"LEFTY FLIP", "BLACKOUT", "AMP DRAIN"};
+static struct {
+    bool armed, on;
+    float skill;                        // the rival's chance of hitting a note
+    int next;                           // the rival's next note
+    float rock;
+    long score;
+    int streak;
+    int mine[3], mine_n;                // attacks ready to throw
+    int theirs[3], theirs_n;            // the rival's, thrown at theirs_t
+    double theirs_t;
+    double lefty_until, blackout_until, dazed_until;
+    int result;                         // 1 won, 2 lost
+    unsigned seed;
+} battle;
+static void battle_fire(void);
+static bool lefty_now(void);
+static void battle_reset(void);
+static void battle_update(void);
+static void draw_battle(void);
+static void popup_always(const char * text);
+static void ghost_start(const Song * song, int part, int diff);
+static void ghost_track(void);
+static void ghost_finish(bool failed);
+static void draw_ghost(void);
 
 // -------------------------------------------------------------------------------------------------------- helpers
 
@@ -185,7 +219,7 @@ static int lane_art(int l)
 
 static int display_lane(int lane)
 {
-    return cfg.lefty && lane < G.lanes ? G.lanes - 1 - lane : lane;
+    return lefty_now() && lane < G.lanes ? G.lanes - 1 - lane : lane;
 }
 
 // the camera looks down +z, so world +x is on the screen's left: green (lane 0) gets the largest x
@@ -1003,6 +1037,12 @@ static float clamp01(float v)
     return v < 0 ? 0 : v > 1 ? 1 : v;
 }
 
+static void popup_always(const char * text)
+{
+    snprintf(G.popup, sizeof(G.popup), "%s", text);
+    G.popup_t = G.t;
+}
+
 static void popup(const char * text)
 {
     if (cfg.no_popups)
@@ -1348,6 +1388,8 @@ static void reset_play(void)
         G.sus[i].note = -1;
     G.first = 0;
     G.score = 0;
+    G.vox_points = 0;
+    G.vox_good = G.vox_graded = 0;
     G.streak = G.best_streak = G.hits = G.misses = G.overhits = G.sp_hit = 0;
     G.off_sum = G.off_sq = 0;
     G.off_n = 0;
@@ -1416,6 +1458,7 @@ static void reset_play(void)
     set_my_stem(1);
     audio_song_fade(1, 0);
     audio_song_speed(practice.on ? practice.speed : 1);
+    battle_reset();
     audio_song_play(from, G.lead_in);
     if (G.sing) {
         // singing the part: the recorded singer stays as a guide. Over an instrument, they're heard as they are
@@ -1468,6 +1511,9 @@ bool game_start(Song * song, int part, int diff)
     G.part_id = part;
     G.diff = diff;
     G.beat_best = song->best[part][diff].score;
+    battle.on = battle.armed && !practice.on;
+    battle.armed = false;
+    ghost_start(song, part, diff);
     const Part * p = G.part;
     G.state = malloc(p->note_count + 1);
     G.got = malloc(p->note_count + 1);
@@ -1548,6 +1594,31 @@ void game_practice(double from, double to, float speed)
     practice.from = from;
     practice.to = to;
     practice.speed = speed;
+    practice.ramp = 0;
+    practice.target = 100;
+    practice.runs = practice.best = 0;
+}
+
+void game_battle(void)
+{
+    battle.armed = true;
+}
+
+void game_practice_ramp(int step_pct, int target_pct)
+{
+    practice.ramp = step_pct;
+    practice.target = target_pct;
+}
+
+bool game_practice_info(int * speed_pct, int * runs, int * best_pct)
+{
+    if (speed_pct)
+        *speed_pct = (int)(practice.speed * 100 + 0.5f);
+    if (runs)
+        *runs = practice.runs;
+    if (best_pct)
+        *best_pct = practice.best;
+    return practice.on;
 }
 
 void game_restart(void)
@@ -1557,6 +1628,7 @@ void game_restart(void)
 
 void game_stop(void)
 {
+    battle.on = false;
     if (G.drums)
         plat_log("drums: %d freestyle hits", G.freestyle);
     practice.on = false;
@@ -1572,8 +1644,11 @@ void game_stop(void)
 
 void game_status(int * song_pct, int * notes_pct)
 {
-    double end = G.last_note_end > 0 ? G.last_note_end : 1;
-    *song_pct = G.t <= 0 ? 0 : G.t >= end ? 100 : (int)(G.t * 100 / end);
+    double start = 0, end = G.last_note_end > 0 ? G.last_note_end : 1;
+    if (practice.on)
+        start = practice.from, end = practice.to;   // how far through the stretch, not the song
+    double t = G.t - start, len = end - start > 0.01 ? end - start : 0.01;
+    *song_pct = t <= 0 ? 0 : t >= len ? 100 : (int)(t * 100 / len);
     int judged = G.hits + G.misses;
     *notes_pct = judged ? G.hits * 100 / judged : -1;
 }
@@ -1619,6 +1694,18 @@ Result game_result(void)
 {
     Result r;
     memset(&r, 0, sizeof(r));
+    ghost_finish(G.failed);
+    if (G.sing && !G.vocal) {
+        r.vox_points = (int)G.vox_points;
+        r.vox_good = G.vox_good;
+        r.vox_graded = G.vox_graded;
+    }
+    if (battle.on) {
+        if (!battle.result)
+            battle.result = (long)G.score >= battle.score ? 1 : 2;
+        r.battle = battle.result;
+        r.rival_score = (int)battle.score;
+    }
     r.part = G.part_id;
     r.diff = G.diff;
     r.score = (int)G.score;
@@ -1714,8 +1801,11 @@ static void rock_change(float d)
         G.rock = 1;
     if (G.rock <= 0) {
         G.rock = 0;
-        if (!cfg.nofail && !G.autoplay && !practice.on)
+        if ((!cfg.nofail || battle.on) && !G.autoplay && !practice.on) {
             G.failed = true;
+            if (battle.on)
+                battle.result = 2;
+        }
     }
     set_crowd();
 }
@@ -1833,7 +1923,14 @@ static void hit_note(int i)
         G.solo_hit[G.solo[i]]++;
     // a whole Star Power phrase: a quarter of the meter
     int ph = G.phrase[i];
-    if (ph >= 0 && (n->flags & NOTE_SP_END) && G.phrase_ok[ph]) {
+    if (battle.on && ph >= 0 && (n->flags & NOTE_SP_END) && G.phrase_ok[ph]) {
+        // a battle: the phrase is an attack, not Star Power
+        if (battle.mine_n < 3)
+            battle.mine[battle.mine_n++] = (battle.seed = battle.seed * 1103515245u + 12345u) % ATK_COUNT;
+        G.sp_hit++;
+        popup("ATTACK READY!");
+        sound_play(res.snd[SND_SP_READY], 0.7f, false);
+    } else if (ph >= 0 && (n->flags & NOTE_SP_END) && G.phrase_ok[ph]) {
         bool was_ready = G.sp >= 0.5f;
         G.sp += 0.25f;
         if (G.sp > 1)
@@ -2123,6 +2220,10 @@ static bool run_going(int i)
 
 static void activate_sp(void)
 {
+    if (battle.on) {
+        battle_fire();
+        return;
+    }
     if (G.sp_active || G.sp < 0.5f)
         return;
     G.sp_active = true;
@@ -2385,12 +2486,16 @@ static void update_vocals(void)
     int w = grade >= 1 ? 4 : grade >= 0.8f ? 3 : grade >= 0.6f ? 2 : grade >= 0.1f ? 1 : 0;
     int mult = (1 + G.vox_run / 2 > 4 ? 4 : 1 + G.vox_run / 2) * (G.vocal && G.sp_active ? 2 : 1);
     G.score += points * mult;
+    G.vox_points += points * mult;
+    G.vox_graded++;
+    G.vox_good += grade >= 0.8f;
     G.vox_run = grade >= 0.8f ? G.vox_run + 1 : 0;
     if (!G.vocal) {
         // singing along: the instrument keeps the meter and the streak, the voice only adds its points
+        // the singer's word shows even with popups off: with two playing, it's the singer's only feedback
         char t[32];
         snprintf(t, sizeof(t), "VOCALS %s", words[w]);
-        popup(t);
+        popup_always(t);
         return;
     }
     if (grade >= 0.6f)
@@ -2438,6 +2543,17 @@ int game_update(const Pad * pad, uint32_t pressed)
     if (G.paused || !G.part)
         return GAME_PAUSE;
     G.t = audio_song_time() - cfg.offset_ms / 1000.0;
+    ghost_track();
+    if (battle.on && !G.failed && !battle.result) {
+        battle_update();
+        if (battle.rock <= 0) {
+            // the rival's out: the song's won
+            battle.result = 1;
+            popup_always("YOU WIN!");
+            G.done = true;
+            return GAME_DONE;
+        }
+    }
     // failed: the song winds down like a tape, the board goes red, then the results
     if (G.failed) {
         if (G.fail_frames == 0) {
@@ -2456,7 +2572,7 @@ int game_update(const Pad * pad, uint32_t pressed)
     // lanes held and newly pressed: buttons, then the touch screen
     uint32_t held = 0, lanes_pressed = 0;
     for (int lane = 0; lane < 6; lane++) {
-        int src = lane < G.lanes && cfg.lefty ? G.lanes - 1 - lane : lane;
+        int src = lane < G.lanes && lefty_now() ? G.lanes - 1 - lane : lane;
         uint32_t b = G.drums ? drum_buttons(src) : lane_buttons(src);
         if (pad->buttons & b)
             held |= 1 << lane;
@@ -2493,6 +2609,8 @@ int game_update(const Pad * pad, uint32_t pressed)
                 held |= (G.sus[k].frets & 0x1F) | (G.sus[k].frets & FRET_OPEN ? 1 << LANE_OPEN : 0);
         if (G.sp >= 0.5f && !G.sp_active)
             activate_sp();
+        if (battle.on && battle.mine_n)
+            battle_fire();
     }
     uint32_t let_go = G.held & ~held;
     G.held = held;
@@ -2576,11 +2694,24 @@ int game_update(const Pad * pad, uint32_t pressed)
     if (practice.on) {
         // the end of the stretch: how it went, and again
         if (G.t > practice.to + 0.6 || audio_song_finished()) {
-            char t[48] = "";
-            if (practice.notes)
-                snprintf(t, sizeof(t), "%d%%  (%d / %d)", G.hits * 100 / practice.notes, G.hits, practice.notes);
+            // a clear (90% of the notes) speeds the next time through up, when that's asked for
+            char t[64] = "";
+            int pct = practice.notes ? G.hits * 100 / practice.notes : 100;
+            practice.runs++;
+            if (pct > practice.best)
+                practice.best = pct;
+            int speed = (int)(practice.speed * 100 + 0.5f);
+            if (practice.ramp && pct >= 90 && speed < practice.target) {
+                speed = speed + practice.ramp > practice.target ? practice.target : speed + practice.ramp;
+                practice.speed = speed / 100.0f;
+                snprintf(t, sizeof(t), "%d%%  SPEED UP %d%%", pct, speed);
+            } else if (practice.notes)
+                snprintf(t, sizeof(t), "%d%%  (%d / %d)", pct, G.hits, practice.notes);
+            plat_log("practice: run %d, %d%% of %d notes, next at %d%%, %.1f s of song", practice.runs, pct, practice.notes,
+                     speed, practice.to - practice.from);
             reset_play();
-            popup(t);
+            // the result of a run is the point of practice: it shows even with popups off
+            popup_always(t);
         }
         return GAME_PLAYING;
     }
@@ -2898,7 +3029,7 @@ static void draw_gems(void)
         float a = fade(z);
         if (G.state[i] == MISSED)
             a *= 0.55f;
-        else if (cfg.vanish)
+        else if (cfg.vanish || (battle.on && G.t < battle.blackout_until))
             a *= clamp01((z - 2.2f) / 1.6f);    // gone before the strikeline: play it from memory
         int kind = G.drums ? 0 : n->flags & NOTE_TAP ? 2 : n->flags & NOTE_HOPO ? 1 : 0;
         bool star = G.phrase[i] >= 0 && G.phrase_ok[G.phrase[i]];
@@ -3062,7 +3193,7 @@ static void draw_keys(void)
                 {BTN_SQUARE, "btn_square"}, {BTN_CIRCLE, "btn_circle"}, {BTN_CROSS, "btn_cross"}};
     float a = G.t < 3.5 ? 1 : (float)(4.5 - G.t), size = 34;
     for (int lane = 0; lane < G.lanes; lane++) {
-        int src = cfg.lefty ? G.lanes - 1 - lane : lane;
+        int src = lefty_now() ? G.lanes - 1 - lane : lane;
         uint32_t b = G.drums ? drum_buttons(src) : lane_buttons(src);
         float x, y;
         project(lane_x(lane), 0, 0, &x, &y);
@@ -3075,6 +3206,180 @@ static void draw_keys(void)
 }
 
 // percent of the notes so far, and a mark while nothing's gone wrong
+
+// ------------------------------------------------------------------------------------------------------------ ghost
+// The best run on a chart, its score every half second: the HUD races it ("GHOST +1200"). A new best replaces it.
+// ghosts/<song folder>.<part>.<diff> in the player's folder.
+#define GHOST_MAX 2400                  // 20 minutes
+static struct {
+    int ref[GHOST_MAX], ref_n;          // the best run's
+    int rec[GHOST_MAX], rec_n;          // this run's
+    char path[600];
+} ghost;
+
+static void ghost_start(const Song * song, int part, int diff)
+{
+    ghost.ref_n = ghost.rec_n = 0;
+    ghost.path[0] = 0;
+    if (practice.on)
+        return;
+    const char * base = strrchr(song->folder, '/');
+    base = base ? base + 1 : song->folder;
+    char dir[420];
+    snprintf(dir, sizeof(dir), "%sghosts", player_dir());
+    mkdir(dir, 0777);
+    snprintf(ghost.path, sizeof(ghost.path), "%s/%s.%d.%d", dir, base, part, diff);
+    FILE * f = fopen(ghost.path, "r");
+    if (!f)
+        return;
+    while (ghost.ref_n < GHOST_MAX && fscanf(f, "%d", &ghost.ref[ghost.ref_n]) == 1)
+        ghost.ref_n++;
+    fclose(f);
+}
+
+static void ghost_track(void)
+{
+    if (!ghost.path[0] || G.t < 0)
+        return;
+    int k = (int)(G.t * 2);
+    while (ghost.rec_n <= k && ghost.rec_n < GHOST_MAX)
+        ghost.rec[ghost.rec_n++] = (int)G.score;
+}
+
+// the run's over: kept when it beat the one there was
+static void ghost_finish(bool failed)
+{
+    if (!ghost.path[0] || failed || G.autoplay || practice.on || !ghost.rec_n)
+        return;
+    int had = ghost.ref_n ? ghost.ref[ghost.ref_n - 1] : 0;
+    ghost.rec[ghost.rec_n - 1] = (int)G.score;
+    if ((int)G.score <= had)
+        return;
+    FILE * f = fopen(ghost.path, "w");
+    if (!f)
+        return;
+    for (int i = 0; i < ghost.rec_n; i++)
+        fprintf(f, "%d\n", ghost.rec[i]);
+    fclose(f);
+}
+
+static void draw_ghost(void)
+{
+    if (!ghost.ref_n || G.t < 0 || cfg.no_ghost)
+        return;
+    int k = (int)(G.t * 2);
+    int then = ghost.ref[k < ghost.ref_n ? k : ghost.ref_n - 1], d = (int)G.score - then;
+    char t[40];
+    snprintf(t, sizeof(t), "GHOST %+d", d);
+    font_draw_shadow(res.ui, t, SCREEN_W - 16, 214, 22, d >= 0 ? RGBA(130, 230, 150, 255) : RGBA(255, 140, 120, 255),
+                     ALIGN_RIGHT);
+}
+
+// ----------------------------------------------------------------------------------------------------------- battle
+
+static bool lefty_now(void)
+{
+    return cfg.lefty != (battle.on && G.t < battle.lefty_until);
+}
+
+static float battle_rand(void)
+{
+    battle.seed = battle.seed * 1103515245u + 12345u;
+    return (battle.seed >> 8 & 0xffff) / 65536.0f;
+}
+
+static void battle_reset(void)
+{
+    static const float skill[DIFF_COUNT] = {0.86f, 0.9f, 0.93f, 0.955f};
+    unsigned seed = battle.seed ? battle.seed : 7;
+    bool on = battle.on;
+    memset(&battle, 0, sizeof(battle));
+    battle.on = on;
+    battle.seed = seed;
+    battle.skill = skill[G.diff >= 0 && G.diff < DIFF_COUNT ? G.diff : 3];
+    battle.rock = 0.5f;
+    battle.next = G.first;
+}
+
+// an attack from the player, the oldest first
+static void battle_fire(void)
+{
+    if (!battle.mine_n || G.t < 0)
+        return;
+    int a = battle.mine[0];
+    memmove(battle.mine, battle.mine + 1, sizeof(int) * --battle.mine_n);
+    // on the rival every attack shakes them: fewer notes for a while, and a drain takes meter at once
+    battle.dazed_until = G.t + (a == ATK_DRAIN ? 3 : 7);
+    if (a == ATK_DRAIN)
+        battle.rock -= 0.15f;
+    char t[48];
+    snprintf(t, sizeof(t), "%s!", atk_names[a]);
+    popup_always(t);
+    sound_play(res.snd[SND_SP_DEPLOY], 0.9f, false);
+}
+
+// the rival plays up to now, and throws what it earned a moment after earning it
+static void battle_update(void)
+{
+    const Part * p = G.part;
+    while (battle.next < p->note_count && p->notes[battle.next].time / 1e6 <= G.t) {
+        const Note * n = &p->notes[battle.next++];
+        float skill = G.t < battle.dazed_until ? battle.skill - 0.3f : battle.skill;
+        if (battle_rand() < skill) {
+            battle.streak++;
+            int mult = 1 + (battle.streak / 10 < 3 ? battle.streak / 10 : 3);
+            battle.score += 50 * mult;
+            battle.rock = battle.rock + 0.012f > 1 ? 1 : battle.rock + 0.012f;
+            if ((n->flags & NOTE_SP_END) && battle.theirs_n < 3) {
+                battle.theirs[battle.theirs_n++] = (int)(battle_rand() * ATK_COUNT) % ATK_COUNT;
+                battle.theirs_t = G.t + 1.5 + battle_rand() * 3;
+            }
+        } else {
+            battle.streak = 0;
+            battle.rock -= 0.045f;
+        }
+    }
+    if (battle.theirs_n && G.t >= battle.theirs_t) {
+        int a = battle.theirs[0];
+        memmove(battle.theirs, battle.theirs + 1, sizeof(int) * --battle.theirs_n);
+        battle.theirs_t = G.t + 4;
+        if (a == ATK_LEFTY)
+            battle.lefty_until = G.t + 7;
+        else if (a == ATK_BLACKOUT)
+            battle.blackout_until = G.t + 7;
+        else
+            rock_change(-0.15f);
+        char t[48];
+        snprintf(t, sizeof(t), "RIVAL: %s!", atk_names[a]);
+        popup_always(t);
+        sound_play(res.snd[SND_BOO1], cfg.crowd_vol * 0.06f, false);
+    }
+}
+
+static void draw_battle(void)
+{
+    if (!battle.on)
+        return;
+    // the rival's meter down the right edge, its score above
+    const float x = SCREEN_W - 30, top = 300, h = 150;
+    font_draw_shadow(res.ui, "RIVAL", x + 8, top - 48, 20, RGBA(255, 160, 140, 255), ALIGN_RIGHT);
+    char t[48];
+    snprintf(t, sizeof(t), "%ld", battle.score);
+    font_draw_shadow(res.ui, t, x + 8, top - 26, 20, WHITE, ALIGN_RIGHT);
+    gfx_rect(x - 2, top - 2, 16, h + 4, RGBA(0, 0, 0, 200));
+    float r = battle.rock < 0 ? 0 : battle.rock;
+    uint32_t c = r > 0.66f ? RGBA(90, 220, 90, 255) : r > 0.33f ? RGBA(240, 200, 60, 255) : RGBA(230, 60, 50, 255);
+    gfx_rect(x, top + h * (1 - r), 12, h * r, c);
+    if (G.t < battle.dazed_until)
+        font_draw_shadow(res.ui, "HIT!", x + 8, top + h + 6, 18, RGBA(255, 210, 90, 255), ALIGN_RIGHT);
+    // the attacks in hand
+    for (int i = 0; i < battle.mine_n; i++)
+        font_draw_shadow(res.ui, atk_names[battle.mine[i]], 16, 226 + i * 22, 18,
+                         i ? RGBA(200, 200, 200, 255) : RGBA(255, 210, 90, 255), ALIGN_LEFT);
+    if (battle.mine_n)
+        font_draw_shadow(res.ui, "ATTACK: Star Power button", 16, 204, 16, RGBA(200, 200, 210, 255), ALIGN_LEFT);
+}
+
 static void draw_live_stats(void)
 {
     int judged = G.hits + G.misses;
@@ -3245,8 +3550,19 @@ static void draw_hud(void)
         font_draw_shadow(res.ui, "BOT", SCREEN_W - 70, 12, 24, RGBA(255, 255, 255, 200), ALIGN_LEFT);
     if (practice.on) {
         char t[32];
-        snprintf(t, sizeof(t), "PRACTICE  %d%%", (int)(practice.speed * 100 + 0.5f));
+        if (practice.ramp && (int)(practice.speed * 100 + 0.5f) < practice.target)
+            snprintf(t, sizeof(t), "PRACTICE  %d%% > %d%%", (int)(practice.speed * 100 + 0.5f), practice.target);
+        else
+            snprintf(t, sizeof(t), "PRACTICE  %d%%", (int)(practice.speed * 100 + 0.5f));
         font_draw_shadow(res.ui, t, SCREEN_W - 16, 44, 22, RGBA(255, 225, 150, 255), ALIGN_RIGHT);
+    }
+    draw_ghost();
+    draw_battle();
+    if (G.sing && !G.vocal && G.vox_graded) {
+        // the singer's own tally, over the lyrics' side
+        char t[48];
+        snprintf(t, sizeof(t), "VOCALS %d   %d/%d", (int)G.vox_points, G.vox_good, G.vox_graded);
+        font_draw_shadow(res.ui, t, 16, 186, 20, RGBA(150, 210, 255, 255), ALIGN_LEFT);
     }
     if (!G.vocal) {
         draw_live_stats();

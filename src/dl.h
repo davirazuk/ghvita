@@ -99,5 +99,16 @@ typedef struct {
 int dl_jobs_list(DlJob * out, int max);             // the whole queue, waiting and finished, for the queue screen
 // a song folder installed since the last call (the main thread adds it to the library)
 bool dl_take_installed(char * folder, size_t size);
+
+// newer charts of songs from Chorus: a worker searches for each and finds the same chart with another md5
+typedef struct {
+    char source[80];                // "chorus:<md5>" as the song has it
+    char name[96], artist[96], charter[64];
+    char folder[256];
+} DlUpdateAsk;
+bool dl_updates_start(const DlUpdateAsk * ask, int n);  // false: one's already going, or nothing to ask
+bool dl_updates_progress(int * done, int * total, int * found);   // true while it's going
+// what it found, once it's done: the new charts and the folders they replace
+int dl_updates_take(DlHit * out, char (*old)[256], int max);
 // the cover of a hit, fetched in the background: the file once it's there, else NULL (asks for it)
 const char * dl_cover(const DlHit * h);

@@ -3,6 +3,8 @@
 // song downloader)
 #include <math.h>
 #include <pthread.h>
+#include <dirent.h>
+#include <sys/stat.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,6 +17,10 @@
 #include "audio.h"
 #include "shrink.h"
 #include "songs.h"
+#include "player.h"
+#include "songconv.h"
+#include "net.h"
+#include "achieve.h"
 #include "tour.h"
 #include "career.h"
 #include "chart.h"
@@ -24,7 +30,7 @@
 #include "update.h"
 
 enum { S_TITLE, S_MAIN, S_TOUR, S_SONGS, S_SELECT, S_PRACTICE, S_PLAY, S_PAUSE, S_RESUME, S_RESULTS, S_OPTIONS, S_CALIBRATE, S_EMPTY,
-       S_DOWNLOAD, S_UPDATE, S_CAREER, S_NEWS };
+       S_DOWNLOAD, S_UPDATE, S_CAREER, S_NEWS, S_PLAYERS, S_PLAYER_EDIT };
 
 static int screen = S_TITLE;
 static double now_s, screen_t;
@@ -42,7 +48,8 @@ static int * view;
 static int view_n, view_cap;
 static bool view_stale = true;
 static char find_text[64];
-enum { SHOW_ALL, SHOW_FAVS, SHOW_NEW, SHOW_PART };   // then SHOW_PART + each part
+// what the song list shows: the made-up lists (played long ago, never five stars, short ones), then SHOW_PART + each part
+enum { SHOW_ALL, SHOW_FAVS, SHOW_NEW, SHOW_STALE, SHOW_UNSTARRED, SHOW_SHORT, SHOW_LONG, SHOW_PART };
 static int show;
 static double sel_t;
 static Tex * art;
@@ -53,7 +60,14 @@ static int want_diff;               // the difficulty last picked (a part withou
 static uint8_t sel_diffs[PART_COUNT];   // the difficulties each part of the chosen song has, a bit each
 static int menu_index;
 static Result result;
-static bool result_best;
+static int result_ach[6], result_ach_n;   // achievements this song unlocked
+static int result_medal;                  // a better medal than the chart had, or 0
+static bool result_best, result_daily;   // a new best; today's daily song done
+// the results screen's other page: this chart's last plays (this one last)
+#define HIST_MAX 10
+static Played hist[HIST_MAX];
+static int hist_n;
+static bool results_history, hist_has_this;   // this play is hist's last (it was saved)
 static int options_from;
 // calibration
 static double calib_hits[32];
@@ -270,11 +284,20 @@ static void draw_toast(void)
 
 // ------------------------------------------------------------------------------------------------------ the title
 
+static int players_row;
+static bool players_from_title;    // the picker came up at start: back goes to the title
+
 static void title_screen(void)
 {
     if (pressed & (BTN_CROSS | BTN_START)) {
         ui_sound(SND_UI_SELECT);
-        go(S_MAIN);
+        // more than one player: who's playing, first
+        if (player_count() > 1) {
+            players_row = player_current();
+            players_from_title = true;
+            go(S_PLAYERS);
+        } else
+            go(S_MAIN);
     }
     gfx_begin(0, 0, 0);
     gfx_2d();
@@ -374,6 +397,107 @@ static void menu_music_stop(void)
     menu_tune = false;
 }
 
+// ---------------------------------------------------------------------------------------------------- daily song
+// One song a day from the library, the same all day whatever the sort; finishing it on any part keeps a streak going.
+// daily.txt: "<day> <streak> <best streak>", the day the last one was finished.
+
+static void open_select(const Song * s);
+
+// days since 1970 by the local calendar, so the song changes at the player's midnight
+static long local_day(void)
+{
+    time_t now = time(NULL);
+    struct tm * tm = localtime(&now);
+    if (!tm)
+        return (long)(now / 86400);
+    int y = tm->tm_year + 1900, m = tm->tm_mon + 1, d = tm->tm_mday;
+    y -= m <= 2;
+    long era = (y >= 0 ? y : y - 399) / 400;
+    long yoe = y - era * 400, doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+    return era * 146097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719468;
+}
+
+static struct {
+    long done_day;          // the day the daily song was last finished
+    int streak, best;
+    bool loaded;
+} daily;
+
+static void daily_load(void)
+{
+    if (daily.loaded)
+        return;
+    daily.loaded = true;
+    char path[400];
+    snprintf(path, sizeof(path), "%sdaily.txt", player_dir());
+    FILE * f = fopen(path, "r");
+    if (f) {
+        if (fscanf(f, "%ld %d %d", &daily.done_day, &daily.streak, &daily.best) != 3)
+            daily.done_day = daily.streak = daily.best = 0;
+        fclose(f);
+    }
+}
+
+// the streak as it stands today: one missed day and it's gone
+static int daily_streak(void)
+{
+    daily_load();
+    return daily.done_day >= local_day() - 1 ? daily.streak : 0;
+}
+
+static bool daily_done_today(void)
+{
+    daily_load();
+    return daily.done_day == local_day();
+}
+
+// today's song: the one whose name hashes lowest with today's date
+static int daily_pick(void)
+{
+    long day = local_day();
+    int pick = -1;
+    uint32_t low = 0xffffffffu;
+    for (int i = 0; i < songs_count(); i++) {
+        const Song * s = songs_get(i);
+        const char * name = strrchr(s->folder, '/');
+        name = name ? name + 1 : s->folder;
+        uint32_t h = 2166136261u ^ (uint32_t)day;
+        for (const char * c = name; *c; c++)
+            h = (h ^ (uint8_t)*c) * 16777619u;
+        h ^= h >> 15;
+        h *= 0x2c1b3c6du;
+        h ^= h >> 12;
+        if (pick < 0 || h < low)
+            low = h, pick = i;
+    }
+    return pick;
+}
+
+static bool daily_is(const Song * s)
+{
+    int k = daily_pick();
+    return s && k >= 0 && songs_get(k) == s;
+}
+
+// a finished play of today's song: true when it made today count
+static bool daily_finished(const Song * s)
+{
+    if (!daily_is(s) || daily_done_today())
+        return false;
+    long day = local_day();
+    daily.streak = daily.done_day == day - 1 ? daily.streak + 1 : 1;
+    daily.best = daily.streak > daily.best ? daily.streak : daily.best;
+    daily.done_day = day;
+    char path[400];
+    snprintf(path, sizeof(path), "%sdaily.txt", player_dir());
+    FILE * f = fopen(path, "w");
+    if (f) {
+        fprintf(f, "%ld %d %d\n", daily.done_day, daily.streak, daily.best);
+        fclose(f);
+    }
+    return true;
+}
+
 static void main_menu(void)
 {
     static int offered;                 // the build last put up: a newer one found later is offered too
@@ -387,8 +511,10 @@ static void main_menu(void)
         go(S_UPDATE);
         return;
     }
-    static const char * items[] = {"QUICKPLAY", "WORLD TOUR", "DOWNLOAD SONGS", "OPTIONS", "CALIBRATE", "CAREER", "EXIT"};
-    const int n = 7;
+    static const char * items[] = {"QUICKPLAY", "DAILY SONG", "WORLD TOUR", "DOWNLOAD SONGS", "OPTIONS", "CALIBRATE",
+                                   "CAREER", "EXIT"};
+    enum { M_QUICK, M_DAILY, M_TOUR, M_DOWNLOAD, M_OPTIONS, M_CALIBRATE, M_CAREER, M_EXIT };
+    const int n = 8;
     if (repeat & BTN_UP) {
         menu_index = (menu_index + n - 1) % n;
         ui_sound(SND_UI_MOVE);
@@ -397,26 +523,42 @@ static void main_menu(void)
         menu_index = (menu_index + 1) % n;
         ui_sound(SND_UI_MOVE);
     }
+    if (pressed & BTN_SELECT) {
+        ui_sound(SND_UI_SELECT);
+        players_row = player_current();
+        go(S_PLAYERS);
+        return;
+    }
     if (pressed & BTN_CIRCLE) {
         ui_sound(SND_UI_BACK);
         go(S_TITLE);
     } else if (pressed & BTN_CROSS) {
         ui_sound(SND_UI_SELECT);
         int which = menu_index;
-        if (which == 0)
+        if (which == M_QUICK)
             go(songs_count() ? S_SONGS : S_EMPTY);
-        else if (which == 1)
+        else if (which == M_DAILY) {
+            int k = daily_pick();
+            if (k < 0)
+                go(S_EMPTY);
+            else {
+                sel = k;
+                sel_t = now_s;
+                menu_music_stop();
+                open_select(songs_get(k));
+            }
+        } else if (which == M_TOUR)
             tour_enter();
-        else if (which == 2)
+        else if (which == M_DOWNLOAD)
             go(S_DOWNLOAD);
-        else if (which == 3) {
+        else if (which == M_OPTIONS) {
             options_from = S_MAIN;
             go(S_OPTIONS);
-        } else if (which == 4) {
+        } else if (which == M_CALIBRATE) {
             calib_count = 0;
             calib_playing = false;
             go(S_CALIBRATE);
-        } else if (which == 5)
+        } else if (which == M_CAREER)
             go(S_CAREER);
         else {
             plat_quit();
@@ -430,14 +572,31 @@ static void main_menu(void)
         gfx_sprite(&(Sprite){res.logo, 0, 0, 1, 1, 512, 370}, 500, 60, 420, 303, WHITE);
     panel(40, 108, 420, 340);
     for (int i = 0; i < n; i++) {
-        float y = 122 + i * 46;
+        float y = 118 + i * 41;
         if (i == menu_index)
-            gfx_sprite(atlas_get(res.hud, "wor_select"), 50, y - 5, 400, 46, WHITE);
-        font_draw_shadow(res.title, items[i], 80, y, 38, i == menu_index ? RGBA(255, 230, 150, 255)
+            gfx_sprite(atlas_get(res.hud, "wor_select"), 50, y - 5, 400, 42, WHITE);
+        font_draw_shadow(res.title, items[i], 80, y, 34, i == menu_index ? RGBA(255, 230, 150, 255)
                                                                            : RGBA(200, 190, 180, 255), ALIGN_LEFT);
+        if (i == M_DAILY && songs_count()) {
+            // a tick once it's done today, else the streak waiting on it
+            char d[32] = "";
+            int st = daily_streak();
+            if (daily_done_today())
+                snprintf(d, sizeof(d), "done  %d day%s", st, st == 1 ? "" : "s");
+            else if (st)
+                snprintf(d, sizeof(d), "%d day streak", st);
+            font_draw_shadow(res.ui, d, 440, y + 8, 20, daily_done_today() ? RGBA(130, 230, 130, 255)
+                                                                            : RGBA(255, 200, 110, 255), ALIGN_RIGHT);
+        }
+    }
+    if (menu_index == M_DAILY && songs_count()) {
+        const Song * ds = songs_get(daily_pick());
+        char d[240];
+        snprintf(d, sizeof(d), "Today: %s - %s", ds->name, ds->artist);
+        font_draw_fit(res.ui, d, 500, 380, 22, 440, RGBA(255, 230, 160, 255), ALIGN_LEFT);
     }
     char t[200], now[160];
-    snprintf(t, sizeof(t), "%d songs", songs_count());
+    snprintf(t, sizeof(t), "%d %s", songs_count(), songs_count() == 1 ? "song" : "songs");
     font_draw_shadow(res.ui, t, 60, 456, 24, RGBA(220, 220, 220, 255), ALIGN_LEFT);
     // which build this is: a card can quietly keep an old one
     font_draw(res.ui, "build " __DATE__ " " __TIME__, SCREEN_W - 20, 490, 16, RGBA(200, 200, 210, 200), ALIGN_RIGHT);
@@ -447,8 +606,10 @@ static void main_menu(void)
         font_draw_fit(res.ui, t, 190, 458, 20, 740, RGBA(140, 220, 255, 255), ALIGN_LEFT);
     }
     draw_toast();
-    static const char * help[] = {"btn_cross", "Select", "btn_circle", "Back"};
-    help_bar(help, 4);
+    char who[64];
+    snprintf(who, sizeof(who), "Player: %s", player_name(player_current()));
+    const char * help[] = {"btn_cross", "Select", "btn_circle", "Back", "btn_select", who};
+    help_bar(help, 6);
     gfx_end();
 }
 
@@ -1325,7 +1486,7 @@ static void download_screen(void)
         dl_panel = false;
         pick_open = false;
         go(S_MAIN);
-        menu_index = 2;             // back on DOWNLOAD SONGS
+        menu_index = 3;             // back on DOWNLOAD SONGS
         return;
     }
     if ((pressed & BTN_CROSS) && has) {
@@ -1537,8 +1698,104 @@ static void download_screen(void)
 
 // songs the downloader has finished join the library while no song list or song is on screen (their indexes
 // mustn't move meanwhile)
+// chart updates under way: the new chart's id and the folder it takes the place of
+#define SWAP_MAX 64
+static struct {
+    char id[80];
+    char old[256];
+} swaps[SWAP_MAX];
+static int swaps_n;
+static bool upd_was_running;
+
+// a new download that's an update: the old folder goes and the new one takes its name, so its scores still count
+static void swap_in_update(char * folder, size_t size)
+{
+    char ini[460], line[200], src[100] = "";
+    snprintf(ini, sizeof(ini), "%s/ghvita.ini", folder);
+    FILE * f = fopen(ini, "r");
+    if (!f)
+        return;
+    while (fgets(line, sizeof(line), f))
+        if (!strncmp(line, "source = ", 9)) {
+            snprintf(src, sizeof(src), "%s", line + 9);
+            src[strcspn(src, "\r\n ")] = 0;
+        }
+    fclose(f);
+    for (int i = 0; i < swaps_n; i++) {
+        if (strcmp(swaps[i].id, src))
+            continue;
+        int k = songs_find(swaps[i].old);
+        if (k >= 0)
+            songs_delete(k);
+        else
+            dl_remove_tree(swaps[i].old);
+        if (rename(folder, swaps[i].old) == 0)
+            snprintf(folder, size, "%s", swaps[i].old);
+        plat_log("update: %s replaced", swaps[i].old);
+        swaps[i] = swaps[--swaps_n];
+        return;
+    }
+}
+
+// the update check: when its worker's done, what it found goes in the download queue
+static void updates_poll(void)
+{
+    int done, total, found;
+    bool running = dl_updates_progress(&done, &total, &found);
+    if (running || !upd_was_running)
+        return;
+    upd_was_running = false;
+    static DlHit hits[64];
+    static char old[64][256];
+    int n = dl_updates_take(hits, old, 64), queued = 0;
+    for (int i = 0; i < n; i++) {
+        if (swaps_n < SWAP_MAX && dl_queue(&hits[i])) {
+            snprintf(swaps[swaps_n].id, sizeof(swaps[0].id), "%s", hits[i].id);
+            snprintf(swaps[swaps_n].old, sizeof(swaps[0].old), "%s", old[i]);
+            swaps_n++;
+            queued++;
+        }
+    }
+    char t[96];
+    if (!total)
+        snprintf(t, sizeof(t), "No songs from Chorus to check");
+    else if (!n)
+        snprintf(t, sizeof(t), "All %d Chorus songs are up to date", total);
+    else
+        snprintf(t, sizeof(t), "%d updated %s downloading", queued, queued == 1 ? "chart" : "charts");
+    say(t);
+}
+
+static void updates_check(void)
+{
+    static DlUpdateAsk ask[2000];
+    int n = 0;
+    for (int i = 0; i < songs_count() && n < 2000; i++) {
+        const Song * s = songs_get(i);
+        if (strncmp(s->source, "chorus:", 7))
+            continue;
+        DlUpdateAsk * a = &ask[n++];
+        snprintf(a->source, sizeof(a->source), "%s", s->source);
+        snprintf(a->name, sizeof(a->name), "%s", s->name);
+        snprintf(a->artist, sizeof(a->artist), "%s", s->artist);
+        snprintf(a->charter, sizeof(a->charter), "%s", s->charter);
+        snprintf(a->folder, sizeof(a->folder), "%s", s->folder);
+    }
+    if (!n) {
+        say("No songs from Chorus to check");
+        return;
+    }
+    if (dl_updates_start(ask, n)) {
+        upd_was_running = true;
+        char t[64];
+        snprintf(t, sizeof(t), "Checking %d songs for newer charts", n);
+        say(t);
+    }
+}
+
 static void take_downloads(void)
 {
+    updates_poll();
     if (screen == S_SONGS || screen == S_SELECT || screen == S_PRACTICE || screen == S_PLAY || screen == S_PAUSE ||
         screen == S_RESUME || screen == S_RESULTS)
         return;
@@ -1550,6 +1807,7 @@ static void take_downloads(void)
     snprintf(keep, sizeof(keep), "%s", cur ? cur->folder : "");
     int added = 0;
     do {
+        swap_in_update(folder, sizeof(folder));
         int i = songs_add(folder);
         if (i >= 0) {
             added++;
@@ -1674,9 +1932,57 @@ static bool song_matches(const Song * s, const char * text)
     return true;
 }
 
+// a chart's medal from its best: 0 none, 1 bronze (4 stars), 2 silver (95% of the notes), 3 gold (full combo)
+enum { MEDAL_NONE, MEDAL_BRONZE, MEDAL_SILVER, MEDAL_GOLD };
+static const char * const medal_names[] = {"", "BRONZE", "SILVER", "GOLD"};
+static const uint32_t medal_cols[] = {0, RGBA(205, 127, 50, 255), RGBA(200, 205, 215, 255), RGBA(255, 205, 60, 255)};
+
+static int medal_of(const Score * b)
+{
+    return b->fc ? MEDAL_GOLD : b->percent >= 95 ? MEDAL_SILVER : b->stars >= 4 ? MEDAL_BRONZE : MEDAL_NONE;
+}
+
+static void draw_medal(int m, float x, float y, float r)
+{
+    if (!m)
+        return;
+    gfx_rect(x - r, y - r, 2 * r, 2 * r, RGBA(0, 0, 0, 160));
+    gfx_rect(x - r + 2, y - r + 2, 2 * r - 4, 2 * r - 4, medal_cols[m]);
+    char c[2] = {medal_names[m][0], 0};
+    font_draw(res.ui, c, x, y - r * 0.8f, r * 1.5f, RGBA(40, 30, 20, 255), ALIGN_CENTER);
+}
+
+// all the medals won, over every song: {bronze, silver, gold}
+static void medal_totals(int out[4])
+{
+    memset(out, 0, 4 * sizeof(int));
+    for (int i = 0; i < songs_count(); i++) {
+        const Song * s = songs_get(i);
+        for (int p = 0; p < PART_COUNT; p++)
+            for (int d = 0; d < DIFF_COUNT; d++)
+                out[medal_of(&s->best[p][d])]++;
+    }
+}
+
+// five stars or better on any part at any difficulty
+static bool song_starred(const Song * s)
+{
+    for (int p = 0; p < PART_COUNT; p++)
+        for (int d = 0; d < DIFF_COUNT; d++)
+            if (s->best[p][d].stars >= 5)
+                return true;
+    return false;
+}
+
 static bool song_shown(const Song * s)
 {
+    // played, but not in the last 30 days (plays from before times were kept count as long ago)
+    long month_ago = (long)time(NULL) - 30L * 24 * 3600;
     if ((show == SHOW_FAVS && !s->fav) || (show == SHOW_NEW && s->plays) ||
+        (show == SHOW_STALE && (!s->plays || s->last_played > month_ago)) ||
+        (show == SHOW_UNSTARRED && (!s->plays || song_starred(s))) ||
+        (show == SHOW_SHORT && (s->length_ms <= 0 || s->length_ms > 180000)) ||
+        (show == SHOW_LONG && s->length_ms <= 360000) ||
         (show >= SHOW_PART && !(s->parts & (1 << (show - SHOW_PART)))))
         return false;
     return song_matches(s, find_text);
@@ -1713,6 +2019,14 @@ static const char * show_name(void)
         return "Favourites";
     if (show == SHOW_NEW)
         return "Not played yet";
+    if (show == SHOW_STALE)
+        return "Not played in a month";
+    if (show == SHOW_UNSTARRED)
+        return "Played, never 5 stars";
+    if (show == SHOW_SHORT)
+        return "Short (3 min or less)";
+    if (show == SHOW_LONG)
+        return "Long (over 6 min)";
     if (show >= SHOW_PART) {
         snprintf(t, sizeof(t), "Has %s", part_name(show - SHOW_PART));
         return t;
@@ -1776,7 +2090,7 @@ static int setlist_find(int song)
 
 static void list_menu_update(void)
 {
-    enum { ROWS = 8 };
+    enum { ROWS = 9 };
     Song * s = songs_get(sel);
     if (repeat & BTN_UP)
         list_row = (list_row + ROWS - 1) % ROWS;
@@ -1833,6 +2147,10 @@ static void list_menu_update(void)
             return;
         } else if (list_row == 7)
             setlist_n = 0;
+        else if (list_row == 8) {
+            updates_check();
+            list_menu = false;
+        }
     }
     if (pressed & (BTN_CIRCLE | BTN_SELECT)) {
         ui_sound(SND_UI_BACK);
@@ -1844,8 +2162,8 @@ static void list_menu_update(void)
 static void list_menu_draw(const Song * s)
 {
     gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(0, 0, 0, 170));
-    panel(200, 84, 560, 384);
-    char rows[8][64];
+    panel(200, 70, 560, 426);
+    char rows[9][64];
     snprintf(rows[0], sizeof(rows[0]), "Sort by   %s", sort_name(cfg.sort));
     snprintf(rows[1], sizeof(rows[1]), "Show   %s", show_name());
     snprintf(rows[2], sizeof(rows[2]), "%s", s && s->fav ? "Take out of favourites" : "Add to favourites");
@@ -1854,8 +2172,13 @@ static void list_menu_draw(const Song * s)
     snprintf(rows[5], sizeof(rows[5]), "%s", setlist_find(sel) >= 0 ? "Take out of the setlist" : "Add to the setlist");
     snprintf(rows[6], sizeof(rows[6]), "Play the setlist (%d %s)", setlist_n, setlist_n == 1 ? "song" : "songs");
     snprintf(rows[7], sizeof(rows[7]), "Clear the setlist");
-    for (int i = 0; i < 8; i++) {
-        float y = 102 + i * 44;
+    int done, total, found;
+    if (dl_updates_progress(&done, &total, &found))
+        snprintf(rows[8], sizeof(rows[8]), "Checking for newer charts %d/%d", done, total);
+    else
+        snprintf(rows[8], sizeof(rows[8]), "Check for newer charts");
+    for (int i = 0; i < 9; i++) {
+        float y = 86 + i * 44;
         if (i == list_row)
             gfx_sprite(atlas_get(res.hud, "wor_select"), 224, y - 4, 512, 42, WHITE);
         font_draw_fit(res.ui, rows[i], SCREEN_W / 2, y + 2, 28, 460, i == list_row ? RGBA(255, 230, 150, 255)
@@ -2119,7 +2442,11 @@ static void draw_select(const Song * s, bool loading)
         const Score * b = &s->best[sel_part][d];
         if (b->stars)
             draw_stars(b->stars, 520, y + 4, 24);
+        draw_medal(medal_of(b), 668, y + 16, 13);
     }
+    // what the medals ask for, under the rows
+    font_draw(res.ui, "Medals:  Bronze 4 stars   Silver 95% of notes   Gold full combo", SCREEN_W / 2, 446, 18,
+              RGBA(190, 185, 175, 255), ALIGN_CENTER);
     if (tour_on) {
         char t2[80];
         snprintf(t2, sizeof(t2), "%s%s", tour_slot == TOUR_ENCORE ? "Encore at " : "Live at ",
@@ -2130,8 +2457,8 @@ static void draw_select(const Song * s, bool loading)
         font_draw_shadow(res.title, "LOADING", SCREEN_W / 2, 488, 36, RGBA(255, 220, 120, 255), ALIGN_CENTER);
     else {
         static const char * help[] = {"btn_cross", "Rock!", "btn_circle", "Back", "btn_left", "Part", "btn_up",
-                                      "Difficulty", "btn_square", "Practice"};
-        help_bar(help, 10);
+                                      "Difficulty", "btn_square", "Practice", "btn_triangle", "Battle"};
+        help_bar(help, sel_part != PART_VOCALS && !tour_on ? 12 : 10);
     }
     gfx_end();
 }
@@ -2148,6 +2475,11 @@ static struct {
     int notes;
 } pr[PR_MAX + 1];
 static int pr_count, pr_from, pr_to, pr_top, pr_focus, pr_speed = 100;
+// the menu goes a step at a time: where to start, where to end, then how fast
+enum { PR_STEP_FROM, PR_STEP_TO, PR_STEP_SET };
+static int pr_step, pr_set_row, pr_ramp, pr_target = 100;
+static char pr_song[sizeof(((Song *)0)->folder)];
+static int pr_song_part = -1, pr_song_diff = -1, pr_song_count;
 static bool practicing, practice_starting;
 
 // "verse_1" reads "Verse 1"
@@ -2179,6 +2511,7 @@ static void read_sections(const Song * s)
 {
     char path[600];
     snprintf(path, sizeof(path), "%s/notes.vhc", s->folder);
+    int saved_from = pr_from, saved_to = pr_to;
     pr_count = pr_from = pr_to = pr_top = pr_focus = 0;
     Chart * c = chart_load(path);
     if (!c)
@@ -2210,6 +2543,16 @@ static void read_sections(const Song * s)
     }
     pr_to = pr_count - 1;
     chart_free(c);
+    // the same song, part and difficulty as last time: the same stretch, picked already
+    if (!strcmp(pr_song, s->folder) && pr_song_part == sel_part && pr_song_diff == sel_diff && pr_song_count == pr_count) {
+        pr_from = saved_from, pr_to = saved_to;
+        pr_step = PR_STEP_SET;
+    } else
+        pr_step = PR_STEP_FROM;
+    pr_focus = pr_step == PR_STEP_SET ? pr_from : 0;
+    pr_set_row = 0;
+    snprintf(pr_song, sizeof(pr_song), "%s", s->folder);
+    pr_song_part = sel_part, pr_song_diff = sel_diff, pr_song_count = pr_count;
 }
 
 static void practice_screen(void)
@@ -2222,6 +2565,7 @@ static void practice_screen(void)
     if (practice_starting) {
         practice_starting = false;
         game_practice(pr[pr_from].t, pr[pr_to + 1].t, pr_speed / 100.0f);
+        game_practice_ramp(pr_ramp, pr_target);
         if (game_start(s, sel_part, sel_diff)) {
             practicing = true;
             game_set_autoplay(autoplay);
@@ -2231,37 +2575,87 @@ static void practice_screen(void)
         game_stop();
         plat_log("can't practice %s", s->folder);
     }
-    int from = pr_from, to = pr_to, speed = pr_speed;
-    if (repeat & BTN_UP)
-        pr_from--;
-    if (repeat & BTN_DOWN)
-        pr_from++;
-    pr_from = pr_from < 0 ? 0 : pr_from >= pr_count ? pr_count - 1 : pr_from;
-    if (pr_from != from) {
-        pr_focus = pr_from;
-        if (pr_to < pr_from)
-            pr_to = pr_from;
+    bool moved = false, start = false;
+    if (pr_step != PR_STEP_SET) {
+        // a cursor over the sections; the end can't come before the start
+        int lo = pr_step == PR_STEP_TO ? pr_from : 0, was = pr_focus;
+        if (repeat & BTN_UP)
+            pr_focus--;
+        if (repeat & BTN_DOWN)
+            pr_focus++;
+        if (repeat & BTN_L)
+            pr_focus -= PR_ROWS;
+        if (repeat & BTN_R)
+            pr_focus += PR_ROWS;
+        pr_focus = pr_focus < lo ? lo : pr_focus >= pr_count ? pr_count - 1 : pr_focus;
+        moved = pr_focus != was;
+        if (pr_step == PR_STEP_FROM)
+            pr_from = pr_focus, pr_to = pr_to < pr_from ? pr_from : pr_to;
+        else
+            pr_to = pr_focus;
+        if (pressed & BTN_CROSS) {
+            ui_sound(SND_UI_SELECT);
+            if (pr_step == PR_STEP_FROM) {
+                pr_step = PR_STEP_TO;
+                pr_focus = pr_to = pr_from;
+            } else {
+                pr_step = PR_STEP_SET;
+                pr_set_row = 0;
+            }
+        } else if (pressed & BTN_TRIANGLE) {
+            // the whole song in one press
+            ui_sound(SND_UI_SELECT);
+            pr_from = 0, pr_to = pr_count - 1, pr_focus = 0;
+            pr_step = PR_STEP_SET;
+            pr_set_row = 0;
+        } else if (pressed & BTN_CIRCLE) {
+            ui_sound(SND_UI_BACK);
+            if (pr_step == PR_STEP_TO) {
+                pr_step = PR_STEP_FROM;
+                pr_focus = pr_from;
+            } else {
+                go(S_SELECT);
+                return;
+            }
+        }
+    } else {
+        // Start, Speed, Speed up, Up to (only while speeding up)
+        int rows = pr_ramp ? 4 : 3, was_row = pr_set_row, sp = pr_speed, ra = pr_ramp, ta = pr_target;
+        if (repeat & BTN_UP)
+            pr_set_row = (pr_set_row + rows - 1) % rows;
+        if (repeat & BTN_DOWN)
+            pr_set_row = (pr_set_row + 1) % rows;
+        int dir = (repeat & BTN_LEFT) ? -1 : (repeat & BTN_RIGHT) ? 1 : 0;
+        if (pr_set_row == 1)
+            pr_speed += 5 * dir;
+        else if (pr_set_row == 2)
+            pr_ramp = (pr_ramp / 5 + dir + 3) % 3 * 5;     // off, +5%, +10%
+        else if (pr_set_row == 3)
+            pr_target += 5 * dir;
+        pr_speed = pr_speed < 50 ? 50 : pr_speed > 150 ? 150 : pr_speed;
+        pr_target = pr_target < 55 ? 55 : pr_target > 150 ? 150 : pr_target;
+        if (pr_ramp && pr_target <= pr_speed)
+            pr_target = pr_speed + 5 > 150 ? 150 : pr_speed + 5;
+        if (!pr_ramp && pr_set_row > 2)
+            pr_set_row = 2;
+        moved = pr_set_row != was_row || sp != pr_speed || ra != pr_ramp || ta != pr_target;
+        if (pressed & BTN_CROSS) {
+            if (pr_set_row == 0) {
+                start = true;
+            } else {
+                pr_set_row = 0;
+                ui_sound(SND_UI_MOVE);
+            }
+        } else if (pressed & BTN_START)
+            start = true;
+        else if (pressed & BTN_CIRCLE) {
+            ui_sound(SND_UI_BACK);
+            pr_step = PR_STEP_TO;
+            pr_focus = pr_to;
+        }
     }
-    if (repeat & BTN_L)
-        pr_to--;
-    if (repeat & BTN_R)
-        pr_to++;
-    pr_to = pr_to < pr_from ? pr_from : pr_to >= pr_count ? pr_count - 1 : pr_to;
-    if (pr_to != to)
-        pr_focus = pr_to;
-    if (repeat & BTN_LEFT)
-        pr_speed -= 5;
-    if (repeat & BTN_RIGHT)
-        pr_speed += 5;
-    pr_speed = pr_speed < 50 ? 50 : pr_speed > 150 ? 150 : pr_speed;
-    if (pr_from != from || pr_to != to || pr_speed != speed)
+    if (moved)
         ui_sound(SND_UI_MOVE);
-    if (pressed & BTN_CIRCLE) {
-        ui_sound(SND_UI_BACK);
-        go(S_SELECT);
-        return;
-    }
-    bool start = pressed & BTN_CROSS;
     if (start) {
         stop_preview();
         ui_sound(SND_UI_SELECT);
@@ -2276,13 +2670,21 @@ static void practice_screen(void)
     draw_background(res.bg_menu, RGBA(150, 150, 150, 255));
     banner("PRACTICE");
     char t[120];
+    static const char * step_name[] = {"Pick where to start", "Pick where to end", "Set the speed"};
+    font_draw(res.ui, step_name[pr_step], 40, 76, 22, RGBA(255, 225, 150, 255), ALIGN_LEFT);
+    font_draw(res.ui, "Starts", 490, 80, 18, RGBA(170, 170, 175, 255), ALIGN_RIGHT);
+    if (sel_part != PART_VOCALS)
+        font_draw(res.ui, "Notes", 572, 80, 18, RGBA(170, 170, 175, 255), ALIGN_RIGHT);
     for (int r = 0; r < PR_ROWS && pr_top + r < pr_count; r++) {
         int i = pr_top + r;
         float y = 104 + r * 56;
-        bool on = i >= pr_from && i <= pr_to, cur = i == pr_focus;
-        gfx_sprite(atlas_get(res.hud, on ? "wor_select" : "wor_row"), 14, y, 580, 54, WHITE);
-        font_draw_fit(res.ui, pr[i].name, 40, y + 11, 28, 380, cur ? RGBA(255, 236, 170, 255) : on ? RGBA(240, 225, 190, 255)
-                                                                                                : RGBA(190, 190, 195, 255),
+        bool on = i >= pr_from && i <= pr_to, cur = pr_step != PR_STEP_SET && i == pr_focus;
+        bool dim = pr_step == PR_STEP_TO && i < pr_from;
+        gfx_sprite(atlas_get(res.hud, on ? "wor_select" : "wor_row"), 14, y, 580, 54, dim ? RGBA(255, 255, 255, 110) : WHITE);
+        if (cur)
+            font_draw_shadow(res.title, ">", 24, y + 9, 30, RGBA(255, 236, 170, 255), ALIGN_LEFT);
+        font_draw_fit(res.ui, pr[i].name, 44, y + 11, 28, 376, cur ? RGBA(255, 236, 170, 255) : on ? RGBA(240, 225, 190, 255)
+                                                                                         : RGBA(190, 190, 195, dim ? 120 : 255),
                       ALIGN_LEFT);
         int secs = (int)pr[i].t;
         snprintf(t, sizeof(t), "%d:%02d", secs / 60, secs % 60);
@@ -2292,26 +2694,60 @@ static void practice_screen(void)
             font_draw(res.ui, t, 572, y + 15, 22, RGBA(255, 200, 110, 255), ALIGN_RIGHT);
         }
     }
+    if (pr_top > 0)
+        font_draw(res.ui, "more above", 304, 92, 16, RGBA(170, 170, 175, 255), ALIGN_CENTER);
+    if (pr_top + PR_ROWS < pr_count)
+        font_draw(res.ui, "more below", 304, 104 + PR_ROWS * 56 - 4, 16, RGBA(170, 170, 175, 255), ALIGN_CENTER);
     panel(608, 96, 340, 396);
-    font_draw_fit(res.title, s->name, 778, 116, 34, 300, RGBA(255, 220, 140, 255), ALIGN_CENTER);
+    font_draw_fit(res.title, s->name, 778, 112, 34, 300, RGBA(255, 220, 140, 255), ALIGN_CENTER);
     snprintf(t, sizeof(t), "%s  %s", part_name(sel_part), diff_name(sel_diff));
-    font_draw_fit(res.ui, t, 778, 160, 24, 300, RGBA(230, 230, 230, 255), ALIGN_CENTER);
-    font_draw(res.ui, "From", 636, 214, 22, RGBA(180, 180, 180, 255), ALIGN_LEFT);
-    font_draw_fit(res.ui, pr[pr_from].name, 636, 240, 28, 290, RGBA(255, 236, 190, 255), ALIGN_LEFT);
-    font_draw(res.ui, "To the end of", 636, 284, 22, RGBA(180, 180, 180, 255), ALIGN_LEFT);
-    font_draw_fit(res.ui, pr[pr_to].name, 636, 310, 28, 290, RGBA(255, 236, 190, 255), ALIGN_LEFT);
+    font_draw_fit(res.ui, t, 778, 152, 22, 300, RGBA(230, 230, 230, 255), ALIGN_CENTER);
+    // the stretch: from, to, how long, how many notes
+    int notes = 0;
+    for (int i = pr_from; i <= pr_to; i++)
+        notes += pr[i].notes;
     int len = (int)(pr[pr_to + 1].t - pr[pr_from].t + 0.5);
-    snprintf(t, sizeof(t), "%d:%02d", len / 60, len % 60);
-    font_draw(res.ui, t, 926, 214, 22, RGBA(200, 200, 200, 255), ALIGN_RIGHT);
-    font_draw(res.ui, "Speed", 636, 362, 22, RGBA(180, 180, 180, 255), ALIGN_LEFT);
-    snprintf(t, sizeof(t), "< %d%% >", pr_speed);
-    font_draw_shadow(res.title, t, 778, 390, 40, WHITE, ALIGN_CENTER);
+    snprintf(t, sizeof(t), "%s", pr[pr_from].name);
+    font_draw(res.ui, "From", 636, 188, 18, RGBA(180, 180, 180, 255), ALIGN_LEFT);
+    font_draw_fit(res.ui, t, 636, 206, 24, 290, RGBA(255, 236, 190, 255), ALIGN_LEFT);
+    font_draw(res.ui, "To the end of", 636, 238, 18, RGBA(180, 180, 180, 255), ALIGN_LEFT);
+    font_draw_fit(res.ui, pr[pr_to].name, 636, 256, 24, 290, RGBA(255, 236, 190, 255), ALIGN_LEFT);
+    if (sel_part != PART_VOCALS)
+        snprintf(t, sizeof(t), "%d:%02d long, %d notes", len / 60, len % 60, notes);
+    else
+        snprintf(t, sizeof(t), "%d:%02d long", len / 60, len % 60);
+    font_draw(res.ui, t, 636, 288, 18, RGBA(200, 200, 200, 255), ALIGN_LEFT);
+    // the settings: live in the last step, a summary before it
+    const char * labels[] = {"START", "Speed", "Speed up", "Up to"};
+    char vals[4][24] = {""};
+    snprintf(vals[1], sizeof(vals[1]), "< %d%% >", pr_speed);
+    snprintf(vals[2], sizeof(vals[2]), pr_ramp ? "< +%d%% a clear >" : "< Off >", pr_ramp);
+    snprintf(vals[3], sizeof(vals[3]), "< %d%% >", pr_target);
+    int rows = pr_ramp ? 4 : 3;
+    for (int r = 0; r < rows; r++) {
+        float y = 318 + r * 40;
+        bool cur = pr_step == PR_STEP_SET && r == pr_set_row;
+        if (cur)
+            gfx_sprite(atlas_get(res.hud, "wor_select"), 622, y - 4, 312, 38, WHITE);
+        uint32_t col = pr_step != PR_STEP_SET ? RGBA(150, 150, 150, 255) : cur ? RGBA(255, 236, 170, 255) : RGBA(220, 220, 220, 255);
+        if (r == 0)
+            font_draw_shadow(res.title, labels[0], 778, y - 2, 32, col, ALIGN_CENTER);
+        else {
+            font_draw(res.ui, labels[r], 636, y + 4, 20, col, ALIGN_LEFT);
+            font_draw(res.ui, vals[r], 924, y + 4, 20, col, ALIGN_RIGHT);
+        }
+    }
     if (start)
         font_draw_shadow(res.title, "LOADING", SCREEN_W / 2, 488, 36, RGBA(255, 220, 120, 255), ALIGN_CENTER);
-    else {
-        static const char * help[] = {"btn_cross", "Start", "btn_up", "From", "btn_r", "To", "btn_left", "Speed", "btn_circle",
-                                      "Back"};
-        help_bar(help, 10);
+    else if (pr_step == PR_STEP_FROM) {
+        static const char * help[] = {"btn_cross", "Start here", "btn_triangle", "Whole song", "btn_up", "Move", "btn_circle", "Back"};
+        help_bar(help, 8);
+    } else if (pr_step == PR_STEP_TO) {
+        static const char * help[] = {"btn_cross", "End here", "btn_up", "Move", "btn_circle", "Change start"};
+        help_bar(help, 6);
+    } else {
+        static const char * help[] = {"btn_cross", "Choose", "btn_left", "Change", "btn_start", "Start", "btn_circle", "Change end"};
+        help_bar(help, 8);
     }
     gfx_end();
 }
@@ -2362,6 +2798,18 @@ static void select_screen(void)
         go(from_list());
         return;
     }
+    if ((pressed & BTN_TRIANGLE) && sel_part != PART_VOCALS && !tour_on) {
+        // a battle with a computer rival on this chart
+        stop_preview();
+        ui_sound(SND_UI_SELECT);
+        game_battle();
+        if (game_start(s, sel_part, sel_diff)) {
+            practicing = false;
+            game_set_autoplay(autoplay);
+            go(S_PLAY);
+            return;
+        }
+    }
     if (pressed & BTN_SQUARE) {
         read_sections(s);
         ui_sound(pr_count ? SND_UI_SELECT : SND_UI_BACK);
@@ -2401,16 +2849,29 @@ static void finish_song(int how)
     game_log_whammy();
     Song * s = songs_get(sel);
     result_best = false;
+    result_medal = 0;
     if (s && !result.failed) {
         Score sc = {result.score, (uint8_t)result.stars,
                     (uint8_t)(result.notes_total ? result.notes_hit * 100 / result.notes_total : 0), result.fc};
         result_best = result.score > s->best[result.part][result.diff].score;
+        int had = medal_of(&s->best[result.part][result.diff]), got = medal_of(&sc);
+        result_medal = got > had && !autoplay ? got : 0;
         if (!autoplay)
             songs_save_score(s, result.part, result.diff, sc);
     }
+    result_daily = s && !result.failed && !autoplay && !practicing && daily_finished(s);
+    hist_n = s && !practicing ? songs_history(s, result.part, result.diff, hist, HIST_MAX) : 0;
+    hist_has_this = s && !result.failed && !autoplay;
+    results_history = false;
     if (!autoplay && !practicing)
         career_add(result.part, result.score, result.stars, result.notes_hit, result.notes_total, result.best_streak,
                    result.overhits, result.played_s, result.failed, result.fc);
+    AchPlay ap = {result.part, result.diff, result.stars, result.score, result.best_streak, result.overhits, result.sp_hit,
+                  result.sp_total, result.notes_total ? result.notes_hit * 100 / result.notes_total : 0, result.failed,
+                  result.fc, practicing, autoplay, daily_streak(), songs_count()};
+    result_ach_n = achieve_check(&ap, result_ach, 6);
+    for (int i = 0; i < result_ach_n && i < 6; i++)
+        plat_log("achievement: %s", achieve_get(result_ach[i])->name);
     game_stop();
     if (how == GAME_DONE) {
         sound_play(res.snd[SND_CHEER1 + rand() % 3], cfg.crowd_vol * 0.1f, false);
@@ -2451,7 +2912,7 @@ static void play_screen(void)
 
 static void pause_screen(void)
 {
-    static const char * items[] = {"RESUME", "RESTART", "OPTIONS", "QUIT"};
+    const char * items[] = {"RESUME", "RESTART", "OPTIONS", practicing ? "PRACTICE MENU" : "QUIT"};
     const int n = 4;
     if (repeat & BTN_UP) {
         menu_index = (menu_index + n - 1) % n;
@@ -2513,6 +2974,13 @@ static void pause_screen(void)
         snprintf(line, sizeof(line), "%d%% through   %d%% of notes", song_pct, notes_pct);
     else
         snprintf(line, sizeof(line), "%d%% through", song_pct);
+    int pspeed, pruns, pbest;
+    if (practicing && game_practice_info(&pspeed, &pruns, &pbest) && pruns) {
+        // practice: the stretch, and how the runs through it have gone
+        char more[64];
+        snprintf(more, sizeof(more), "   %d %s, best %d%%", pruns, pruns == 1 ? "run" : "runs", pbest);
+        strncat(line, more, sizeof(line) - strlen(line) - 1);
+    }
     font_draw_shadow(res.ui, line, SCREEN_W / 2, 418, 22, RGBA(225, 215, 200, 255), ALIGN_CENTER);
     gfx_end();
 }
@@ -2595,6 +3063,10 @@ static void results_screen(void)
         go(pr_count ? S_PRACTICE : S_SELECT);
         return;
     }
+    if ((pressed & (BTN_L | BTN_R | BTN_SELECT)) && hist_n >= (hist_has_this ? 2 : 1)) {
+        ui_sound(SND_UI_MOVE);
+        results_history = !results_history;
+    }
     if ((pressed & BTN_TRIANGLE) && s) {
         ui_sound(SND_UI_SELECT);
         if (game_start(s, result.part, result.diff)) {
@@ -2608,14 +3080,20 @@ static void results_screen(void)
     draw_background(res.bg_results, WHITE);
     gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(0, 0, 0, 90));
     panel(40, 30, 880, 470);
-    font_draw_fit(res.title, result.failed ? "SONG FAILED" : s ? s->name : "", SCREEN_W / 2, 48, 52, 820,
-                  result.failed ? RGBA(255, 90, 70, 255) : RGBA(255, 220, 140, 255), ALIGN_CENTER);
+    if (result.battle)
+        font_draw_fit(res.title, result.battle == 1 ? "YOU WIN!" : "RIVAL WINS", SCREEN_W / 2, 48, 52, 820,
+                      result.battle == 1 ? RGBA(120, 230, 120, 255) : RGBA(255, 90, 70, 255), ALIGN_CENTER);
+    else
+        font_draw_fit(res.title, result.failed ? "SONG FAILED" : s ? s->name : "", SCREEN_W / 2, 48, 52, 820,
+                      result.failed ? RGBA(255, 90, 70, 255) : RGBA(255, 220, 140, 255), ALIGN_CENTER);
     if (s) {
         // failed, the big line doesn't name the song
         char who[200];
         snprintf(who, sizeof(who), "%s  -  %s", s->name, s->artist);
-        font_draw_fit(res.ui, result.failed ? who : s->artist, SCREEN_W / 2, 104, 26, 820, RGBA(230, 230, 230, 255),
-                      ALIGN_CENTER);
+        if (result.battle)
+            snprintf(who, sizeof(who), "%s  -  you %d, rival %d", s->name, result.score, result.rival_score);
+        font_draw_fit(res.ui, result.failed || result.battle ? who : s->artist, SCREEN_W / 2, 104, 26, 820,
+                      RGBA(230, 230, 230, 255), ALIGN_CENTER);
     }
     draw_cover(art_for == sel ? art : NULL, 84, 150, 200);
     char t[96];
@@ -2659,7 +3137,41 @@ static void results_screen(void)
     bool strip = false;
     for (int i = 0; i < RESULT_STRIP; i++)
         strip |= result.strip[i] != 255;
-    if (result.fc)
+    if (results_history) {
+        // the last plays as bars, this one lit; the best and the average beside
+        const float x = 84, w = 792, top = 396, h = 34;
+        int best = 0;
+        long sum = 0;
+        for (int i = 0; i < hist_n; i++) {
+            best = hist[i].score.score > best ? hist[i].score.score : best;
+            sum += hist[i].score.score;
+        }
+        gfx_rect(x - 3, top - 3, w + 6, h + 6, RGBA(0, 0, 0, 200));
+        float cell = w / HIST_MAX;
+        for (int i = 0; i < hist_n; i++) {
+            const Score * sc = &hist[i].score;
+            float bh = best ? h * sc->score / (float)best : 0;
+            bh = bh < 3 ? 3 : bh;
+            bool last = i == hist_n - 1 && hist_has_this;
+            uint32_t c = last ? RGBA(255, 210, 90, 255) : sc->fc ? RGBA(120, 220, 255, 255) : RGBA(150, 150, 160, 255);
+            gfx_rect(x + i * cell + 4, top + h - bh, cell - 8, bh, c);
+            char v[16];
+            snprintf(v, sizeof(v), "%d%%", sc->percent);
+            font_draw(res.ui, v, x + i * cell + cell / 2, top + h - 18, 16,
+                      bh >= 18 ? RGBA(20, 20, 20, 255) : RGBA(230, 230, 230, 255), ALIGN_CENTER);
+        }
+        char line[120];
+        snprintf(line, sizeof(line), "Last %d %s   best %d   average %ld", hist_n, hist_n == 1 ? "play" : "plays", best,
+                 sum / hist_n);
+        font_draw_fit(res.ui, line, x, 436, 24, 600, RGBA(220, 210, 200, 255), ALIGN_LEFT);
+        int before = hist_n - (hist_has_this ? 2 : 1);   // the play before this one
+        if (before >= 0 && !result.failed) {
+            int prev = hist[before].score.score, d = result.score - prev;
+            snprintf(line, sizeof(line), "%+d vs last time", d);
+            font_draw_fit(res.ui, line, x + w, 436, 24, 260, d >= 0 ? RGBA(130, 230, 130, 255) : RGBA(255, 150, 120, 255),
+                          ALIGN_RIGHT);
+        }
+    } else if (result.fc)
         font_draw_shadow(res.title, "FULL COMBO!", SCREEN_W / 2, 392, 56, RGBA(255, 210, 60, 255), ALIGN_CENTER);
     else if (strip) {
         // the song start to end: green all hit, down to red; it fills in as the stars come
@@ -2688,8 +3200,38 @@ static void results_screen(void)
     }
     if (result_best)
         font_draw_shadow(res.title, "NEW BEST!", 870, 148, 36, RGBA(120, 220, 255, 255), ALIGN_RIGHT);
-    static const char * help[] = {"btn_cross", "Continue", "btn_triangle", "Retry", "btn_square", "Practice it"};
-    help_bar(help, results_can_practice() ? 6 : 4);
+    if (result.vox_graded) {
+        // two playing: the singer's share, apart from the instrument's
+        char d[96];
+        snprintf(d, sizeof(d), "Vocals: %d points, %d of %d phrases strong   %s: %d", result.vox_points, result.vox_good,
+                 result.vox_graded, part_name(result.part), result.score - result.vox_points);
+        font_draw_fit(res.ui, d, SCREEN_W / 2, 470, 20, 800, RGBA(150, 210, 255, 255), ALIGN_CENTER);
+    }
+    if (result_medal) {
+        char d[48];
+        snprintf(d, sizeof(d), "%s MEDAL!", medal_names[result_medal]);
+        draw_medal(result_medal, 70, 54, 16);
+        font_draw_shadow(res.title, d, 96, 38, 32, medal_cols[result_medal], ALIGN_LEFT);
+    }
+    for (int i = 0; i < result_ach_n && i < 2; i++) {
+        // what this song unlocked, under the stars
+        char d[96];
+        snprintf(d, sizeof(d), "UNLOCKED: %s%s", achieve_get(result_ach[i])->name,
+                 i == 1 && result_ach_n > 2 ? " and more" : "");
+        font_draw_shadow(res.ui, d, SCREEN_W - 90, 76 + i * 22, 20, RGBA(255, 210, 90, 255), ALIGN_RIGHT);
+    }
+    if (result_daily) {
+        char d[48];
+        snprintf(d, sizeof(d), "DAILY SONG DONE  %d day%s", daily_streak(), daily_streak() == 1 ? "" : "s");
+        font_draw_shadow(res.ui, d, 330, 160, 24, RGBA(130, 230, 130, 255), ALIGN_LEFT);
+    }
+    const char * help[8] = {"btn_cross", "Continue", "btn_triangle", "Retry"};
+    int nh = 4;
+    if (results_can_practice())
+        help[nh++] = "btn_square", help[nh++] = "Practice it";
+    if (hist_n >= (hist_has_this ? 2 : 1))
+        help[nh++] = "btn_r", help[nh++] = results_history ? "This play" : "History";
+    help_bar(help, nh);
     gfx_end();
 }
 
@@ -2894,7 +3436,7 @@ static void tour_screen(void)
 
 enum { O_SPEED, O_HIGHWAY, O_VENUE, O_BAND, O_SING, O_SINGDIFF, O_OFFSET, O_LAYOUT, O_DRUMKEYS, O_DRUMHITS, O_TILT, O_NOFAIL, O_LEFTY, O_MUSIC, O_SFX, O_CROWD, O_FPS,
        O_CAMERA, O_HWALPHA, O_VLIGHT, O_FLASH, O_POPUPS, O_TIMING, O_LIVE, O_VANISH, O_MISSSND, O_REAR, O_BEND, O_COUNTDOWN,
-       O_RESET, O_FIVEPADS, O_DOUBLEKICK, O_EASYSUS, O_COUNTIN, O_SCREENS, O_PROGRESS, O_CUPS, O_AUTOREPRESS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, O_CROWDHANDS, O_VIGNETTE, O_LYRICS, O_MENUMUSIC, O_SINGSP, O_SHRINKCHECK, O_COUNT };
+       O_RESET, O_FIVEPADS, O_DOUBLEKICK, O_EASYSUS, O_COUNTIN, O_SCREENS, O_PROGRESS, O_CUPS, O_AUTOREPRESS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, O_CROWDHANDS, O_VIGNETTE, O_LYRICS, O_MENUMUSIC, O_SINGSP, O_SHRINKCHECK, O_GHOST, O_COUNT };
 
 // the options by subject, L and R between them
 enum { OPT_TABS = 7, OPT_TAB_MAX = 11 };
@@ -2904,7 +3446,7 @@ static const int opt_tabs[OPT_TABS][OPT_TAB_MAX + 1] = {
     {O_LAYOUT, O_DRUMKEYS, O_FIVEPADS, O_DOUBLEKICK, O_LEFTY, O_TILT, O_REAR, O_SINGSP, -1},
     {O_HIGHWAY, O_HWALPHA, O_CAMERA, O_CUPS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, -1},
     {O_VENUE, O_VLIGHT, O_BAND, O_CROWDHANDS, O_VIGNETTE, O_SCREENS, O_FLASH, -1},
-    {O_LYRICS, O_POPUPS, O_PROGRESS, O_TIMING, O_LIVE, O_FPS, -1},
+    {O_LYRICS, O_POPUPS, O_PROGRESS, O_TIMING, O_LIVE, O_GHOST, O_FPS, -1},
     {O_MUSIC, O_SFX, O_CROWD, O_MENUMUSIC, O_COUNTIN, O_DRUMHITS, O_MISSSND, O_BEND, -1},
     {O_SHRINKCHECK, -1},
 };
@@ -3026,6 +3568,7 @@ static void option_text(int i, char * name, char * value, size_t n)
     case O_POPUPS: strcpy(name, "Streak messages"); snprintf(value, n, "%s", cfg.no_popups ? "Off" : "On"); break;
     case O_TIMING: strcpy(name, "Timing bar"); snprintf(value, n, "%s", cfg.timing_bar ? "On" : "Off"); break;
     case O_LIVE: strcpy(name, "Live percent"); snprintf(value, n, "%s", cfg.live_stats ? "On" : "Off"); break;
+    case O_GHOST: strcpy(name, "Race your best"); snprintf(value, n, "%s", cfg.no_ghost ? "Off" : "On"); break;
     case O_VANISH: strcpy(name, "Vanishing notes"); snprintf(value, n, "%s", cfg.vanish ? "On" : "Off"); break;
     case O_MISSSND: strcpy(name, "Wrong note sounds"); snprintf(value, n, "%s", cfg.no_miss_sound ? "Off" : "On"); break;
     case O_REAR: strcpy(name, "Rear pad whammy"); snprintf(value, n, "%s", cfg.no_rear_whammy ? "Off" : "On"); break;
@@ -3121,6 +3664,7 @@ static void change_option(int i, int d)
     case O_POPUPS: cfg.no_popups = !cfg.no_popups; break;
     case O_TIMING: cfg.timing_bar = !cfg.timing_bar; break;
     case O_LIVE: cfg.live_stats = !cfg.live_stats; break;
+    case O_GHOST: cfg.no_ghost = !cfg.no_ghost; break;
     case O_VANISH: cfg.vanish = !cfg.vanish; break;
     case O_MISSSND: cfg.no_miss_sound = !cfg.no_miss_sound; break;
     case O_REAR: cfg.no_rear_whammy = !cfg.no_rear_whammy; break;
@@ -3298,6 +3842,7 @@ static void options_screen(void)
         "One of your songs plays quietly in the menus.",
         "While Star Power is banked, singing a note in tune starts it, like YARG's voice-activated option.",
         "X counts the songs whose audio isn't shrunk to Opus yet, then X shrinks them, right on the Vita.",
+        "GHOST +1200: how far ahead (or behind) your best run on the chart you were at this point.",
     };
     char line[160];
     const char * text = about[opt];
@@ -3328,12 +3873,568 @@ static void options_screen(void)
 
 // -------------------------------------------------------------------------------------------------------- career
 
+// --------------------------------------------------------------------------------------------------------- players
+// who's playing: Select on the main menu. Each has their own scores, favourites, settings, career, tour and streak.
+
+
+static void player_reload(void)
+{
+    config_load();
+    career_load();
+    achieve_load();
+    tour_load();
+    songs_reload_player();
+    songs_sort(cfg.sort);
+    daily.loaded = false;
+    view_stale = true;
+    art_for = preview_for = -1;
+}
+
+// after a delete: the current player may be someone else now
+static void player_switch_force(void)
+{
+    player_select(player_current());
+    player_reload();
+}
+
+static void player_switch(int i)
+{
+    if (i == player_current())
+        return;
+    player_select(i);
+    player_reload();
+    plat_log("player: %s", player_name(i));
+}
+
+static void player_named(const char * name)
+{
+    int i = player_add(name);
+    if (i >= 0) {
+        player_switch(i);
+        players_row = i;
+        char hi[64];
+        snprintf(hi, sizeof(hi), "Hi, %s!", player_name(i));
+        say(hi);
+    } else
+        say(player_count() >= PLAYER_MAX ? "That's as many players as there's room for" : "That name's taken");
+}
+
+// the cards' colours: two tones each, top and bottom
+static const uint32_t player_tones[PLAYER_COLORS][2] = {
+    {RGBA(230, 70, 60, 255), RGBA(140, 25, 30, 255)},   {RGBA(60, 140, 235, 255), RGBA(25, 60, 140, 255)},
+    {RGBA(70, 200, 110, 255), RGBA(25, 110, 55, 255)},  {RGBA(250, 190, 50, 255), RGBA(170, 100, 20, 255)},
+    {RGBA(170, 90, 230, 255), RGBA(85, 35, 140, 255)},  {RGBA(240, 120, 190, 255), RGBA(150, 45, 105, 255)},
+    {RGBA(60, 205, 210, 255), RGBA(20, 110, 120, 255)}, {RGBA(150, 150, 160, 255), RGBA(70, 70, 80, 255)},
+};
+
+// each card's picture, loaded again whenever a picture changes
+static Tex * pic_tex[PLAYER_MAX];
+static int pic_tex_version = -1;
+
+static Tex * player_tex(int i)
+{
+    if (pic_tex_version != player_picture_version()) {
+        for (int k = 0; k < PLAYER_MAX; k++) {
+            tex_free(pic_tex[k]);
+            pic_tex[k] = NULL;
+        }
+        for (int k = 0; k < player_count(); k++) {
+            char p[460];
+            player_picture(k, p, sizeof(p));
+            if (p[0])
+                pic_tex[k] = tex_load(p, TEX_MIPMAP);
+        }
+        pic_tex_version = player_picture_version();
+    }
+    return i >= 0 && i < PLAYER_MAX ? pic_tex[i] : NULL;
+}
+
+// a player's card face: their picture, or their initial on their colour
+static void draw_player_face(int i, float x, float top, float w, bool lit)
+{
+    const uint32_t * c = player_tones[player_color(i)];
+    gfx_rect_grad(x - w / 2, top, w, w, c[0], c[1]);
+    Tex * t = player_tex(i);
+    if (t)
+        gfx_sprite(&(Sprite){t, 0, 0, 1, 1, w, w}, x - w / 2, top, w, w, WHITE);
+    else {
+        char initial[2] = {player_name(i)[0], 0};
+        if (initial[0] >= 'a' && initial[0] <= 'z')
+            initial[0] -= 32;
+        font_draw_shadow(res.title, initial, x, top + w * 0.16f, w * 0.68f, lit ? WHITE : RGBA(170, 170, 170, 255),
+                         ALIGN_CENTER);
+    }
+    if (!lit)
+        gfx_rect(x - w / 2, top, w, w, RGBA(0, 0, 0, 90));
+}
+
+static int edit_player;     // whose card the edit screen has
+static int pe_row;
+static bool pe_delete_armed;
+
+static void players_screen(void)
+{
+    static float scroll;                // eases toward the chosen card
+    int n = player_count(), cards = n < PLAYER_MAX ? n + 1 : n;   // the last card adds a player
+    if (dl_typing) {
+        kb_update();
+        pressed = repeat = 0;
+    }
+    if (players_row >= cards)
+        players_row = cards - 1;
+    if ((repeat & BTN_LEFT) && players_row > 0) {
+        players_row--;
+        ui_sound(SND_UI_MOVE);
+    }
+    if ((repeat & BTN_RIGHT) && players_row < cards - 1) {
+        players_row++;
+        ui_sound(SND_UI_MOVE);
+    }
+    if ((pressed & BTN_SQUARE) && players_row < n) {
+        ui_sound(SND_UI_SELECT);
+        edit_player = players_row;
+        pe_row = 0;
+        pe_delete_armed = false;
+        go(S_PLAYER_EDIT);
+        return;
+    }
+    if ((pressed & BTN_TRIANGLE) && players_row < n) {
+        // another colour for this player's card
+        player_set_color(players_row, player_color(players_row) + 1);
+        ui_sound(SND_UI_MOVE);
+    }
+    if (pressed & BTN_CROSS) {
+        ui_sound(SND_UI_SELECT);
+        if (players_row < n) {
+            player_switch(players_row);
+            players_from_title = false;
+            go(S_MAIN);
+            pressed = 0;
+            return;
+        }
+        dl_typed[0] = 0;
+        kb_apply = player_named;
+        kb_library = false;
+        dl_typing = true;
+    } else if (pressed & (BTN_CIRCLE | BTN_SELECT)) {
+        ui_sound(SND_UI_BACK);
+        go(players_from_title ? S_TITLE : S_MAIN);
+        players_from_title = false;
+        return;
+    }
+    scroll += (players_row - scroll) * 0.25f;
+    gfx_begin(0, 0, 0);
+    gfx_2d();
+    draw_background(res.bg_menu, RGBA(110, 110, 110, 255));
+    gfx_rect_grad(0, 0, SCREEN_W, 160, RGBA(0, 0, 0, 200), RGBA(0, 0, 0, 0));
+    font_draw_shadow(res.title, "WHO'S PLAYING?", SCREEN_W / 2, 50, 52, RGBA(255, 225, 150, 255), ALIGN_CENTER);
+    // the cards in a row, the chosen one in the middle and bigger
+    const float size = 170, gap = 210, cy = 270;
+    for (int i = 0; i < cards; i++) {
+        float x = SCREEN_W / 2 + (i - scroll) * gap;
+        if (x < -size || x > SCREEN_W + size)
+            continue;
+        float d = fabsf(i - scroll), grow = d < 1 ? 1 + 0.18f * (1 - d) : 1;
+        float w = size * grow, top = cy - w / 2;
+        bool cur = i == players_row;
+        uint32_t dim = cur ? WHITE : RGBA(170, 170, 170, 255);
+        if (cur) {
+            // a gold frame around the chosen one
+            float b = 5;
+            gfx_rect(x - w / 2 - b, top - b, w + 2 * b, w + 2 * b, RGBA(255, 210, 90, 255));
+        }
+        if (i < n) {
+            draw_player_face(i, x, top, w, cur);
+            font_draw_fit(res.ui, player_name(i), x, top + w + 14, cur ? 30 : 24, gap - 16,
+                          cur ? RGBA(255, 236, 190, 255) : RGBA(200, 200, 200, 255), ALIGN_CENTER);
+            if (i == player_current())
+                font_draw(res.ui, "last played", x, top + w + 50, 18, RGBA(130, 230, 130, 255), ALIGN_CENTER);
+        } else {
+            gfx_rect(x - w / 2, top, w, w, RGBA(40, 40, 48, 230));
+            gfx_rect(x - 4, top + w * 0.25f, 8, w * 0.5f, dim);
+            gfx_rect(x - w * 0.25f, top + w / 2 - 4, w * 0.5f, 8, dim);
+            font_draw_fit(res.ui, "Add player", x, top + w + 14, cur ? 30 : 24, gap - 16,
+                          cur ? RGBA(255, 236, 190, 255) : RGBA(200, 200, 200, 255), ALIGN_CENTER);
+        }
+    }
+    draw_toast();
+    if (dl_typing) {
+        kb_draw();
+        font_draw(res.ui, "Type a name, then Start", SCREEN_W / 2, 470, 22, RGBA(255, 220, 140, 255), ALIGN_CENTER);
+    } else if (players_row < n) {
+        static const char * help[] = {"btn_cross", "Play", "btn_left", "Choose", "btn_square", "Edit", "btn_triangle", "Colour",
+                                      "btn_circle", "Back"};
+        help_bar(help, 10);
+    } else {
+        static const char * help[] = {"btn_cross", "Add", "btn_left", "Choose", "btn_circle", "Back"};
+        help_bar(help, 6);
+    }
+    gfx_end();
+}
+
+// ----------------------------------------------------------------------------------------------- editing a player
+// Square on a card: the name, the colour, a picture (one of your songs' covers, one downloaded, or one of yours from
+// the card's avatars folder), or the player gone.
+
+enum { PE_NAME, PE_COLOR, PE_SONGS, PE_WEB, PE_CARD, PE_CLEAR, PE_DELETE, PE_ROWS };
+static int pe_cover = -1, pe_style, pe_seed = 1, pe_card;
+static Tex * pe_prev;                   // the picture the row offers, before it's taken
+static char pe_prev_path[460];
+static char pe_files[64][128];          // the avatars folder's pictures
+static int pe_file_n = -1;
+static const char * const pe_styles[] = {"adventurer", "avataaars", "bottts", "pixel-art", "fun-emoji", "lorelei",
+                                         "micah", "big-smile", "croodles", "thumbs", "notionists", "open-peeps"};
+#define PE_STYLES (int)(sizeof(pe_styles) / sizeof(pe_styles[0]))
+
+// the download: a worker fetches a picture into the preview file
+static volatile int pe_web_state;       // 0 idle, 1 fetching, 2 ready, 3 failed
+static char pe_web_url[200];
+static int pe_web_shown = -1;           // which (style, seed) the preview is of
+
+static void * pe_web_thread(void * arg)
+{
+    (void)arg;
+    char * body = NULL, err[160];
+    size_t len = 0;
+    HttpReq r = {.url = pe_web_url, .stall_s = 15};
+    int status = http_fetch(&r, &body, &len, err, sizeof(err));
+    bool ok = status == 200 && len > 8 && !memcmp(body, "\x89PNG", 4);
+    if (ok) {
+        char p[460];
+        snprintf(p, sizeof(p), "%stmp_avatar.png", plat_data_dir());
+        FILE * f = fopen(p, "wb");
+        ok = f && fwrite(body, 1, len, f) == len;
+        if (f)
+            fclose(f);
+    } else
+        plat_log("avatar: %s answered %d %s", pe_web_url, status, err);
+    free(body);
+    pe_web_state = ok ? 2 : 3;
+    return NULL;
+}
+
+static void pe_web_fetch(void)
+{
+    if (pe_web_state == 1)
+        return;
+    snprintf(pe_web_url, sizeof(pe_web_url), "https://api.dicebear.com/9.x/%s/png?seed=%s%d&size=256",
+             pe_styles[pe_style], player_name(edit_player), pe_seed);
+    pe_web_state = 1;
+    pthread_t t;
+    if (pthread_create(&t, NULL, pe_web_thread, NULL) != 0)
+        pe_web_state = 3;
+    else
+        pthread_detach(t);
+}
+
+static void pe_show(const char * path)
+{
+    if (!strcmp(path, pe_prev_path) && pe_prev)
+        return;
+    tex_free(pe_prev);
+    pe_prev = path[0] ? tex_load(path, TEX_MIPMAP) : NULL;
+    snprintf(pe_prev_path, sizeof(pe_prev_path), "%s", path);
+}
+
+static void pe_list_files(void)
+{
+    pe_file_n = 0;
+    char d[400];
+    snprintf(d, sizeof(d), "%savatars", plat_data_dir());
+    mkdir(d, 0777);
+    DIR * dir = opendir(d);
+    if (!dir)
+        return;
+    struct dirent * e;
+    while ((e = readdir(dir)) && pe_file_n < 64) {
+        const char * x = strrchr(e->d_name, '.');
+        if (x && (!strcasecmp(x, ".png") || !strcasecmp(x, ".jpg") || !strcasecmp(x, ".jpeg")))
+            snprintf(pe_files[pe_file_n++], sizeof(pe_files[0]), "%s", e->d_name);
+    }
+    closedir(dir);
+}
+
+// the next song (dir 1) or the one before with a cover
+static void pe_next_cover(int dir)
+{
+    int n = songs_count();
+    for (int k = 0; k < n; k++) {
+        pe_cover = ((pe_cover < 0 ? (dir > 0 ? -1 : 0) : pe_cover) + dir + n) % n;
+        char p[460];
+        snprintf(p, sizeof(p), "%s/album.jpg", songs_get(pe_cover)->folder);
+        struct stat st;
+        if (stat(p, &st) == 0)
+            return;
+    }
+    pe_cover = -1;
+}
+
+static bool pe_take_file(const char * path, bool normalise)
+{
+    FILE * f = fopen(path, "rb");
+    if (!f)
+        return false;
+    fseek(f, 0, SEEK_END);
+    long n = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    unsigned char * b = n > 0 && n < 16 * 1024 * 1024 ? malloc(n) : NULL;
+    bool ok = b && fread(b, 1, n, f) == (size_t)n;
+    fclose(f);
+    if (ok && normalise) {
+        // a picture of any size from the card: a 256x256 JPEG, as the song covers are
+        char tmp[460];
+        snprintf(tmp, sizeof(tmp), "%stmp_avatar.jpg", plat_data_dir());
+        ok = songconv_cover(b, n, tmp);
+        free(b);
+        return ok && pe_take_file(tmp, false);
+    }
+    ok = ok && player_set_picture(edit_player, b, (int)n);
+    free(b);
+    return ok;
+}
+
+static void pe_renamed(const char * name)
+{
+    if (!player_rename(edit_player, name))
+        say("That name's empty or taken");
+}
+
+static void player_edit_screen(void)
+{
+    int me = edit_player;
+    if (me < 0 || me >= player_count()) {
+        go(S_PLAYERS);
+        return;
+    }
+    if (dl_typing) {
+        kb_update();
+        pressed = repeat = 0;
+    }
+    if (pe_file_n < 0)
+        pe_list_files();
+    int was = pe_row;
+    if (repeat & BTN_UP)
+        pe_row = (pe_row + PE_ROWS - 1) % PE_ROWS;
+    if (repeat & BTN_DOWN)
+        pe_row = (pe_row + 1) % PE_ROWS;
+    if (pe_row != was) {
+        ui_sound(SND_UI_MOVE);
+        pe_delete_armed = false;
+    }
+    int d = (repeat & BTN_LEFT) ? -1 : (repeat & BTN_RIGHT) ? 1 : 0;
+    if (d) {
+        ui_sound(SND_UI_MOVE);
+        if (pe_row == PE_COLOR)
+            player_set_color(me, player_color(me) + d);
+        else if (pe_row == PE_SONGS)
+            pe_next_cover(d);
+        else if (pe_row == PE_WEB) {
+            pe_style = (pe_style + d + PE_STYLES) % PE_STYLES;
+            pe_web_shown = -1;
+        } else if (pe_row == PE_CARD && pe_file_n > 0)
+            pe_card = (pe_card + d + pe_file_n) % pe_file_n;
+    }
+    if ((pressed & BTN_TRIANGLE) && pe_row == PE_WEB) {
+        // another of the same style
+        pe_seed++;
+        pe_web_shown = -1;
+        ui_sound(SND_UI_MOVE);
+    }
+    // what the row offers, in the preview
+    char offer[460] = "";
+    if (pe_row == PE_SONGS) {
+        if (pe_cover < 0)
+            pe_next_cover(1);
+        if (pe_cover >= 0)
+            snprintf(offer, sizeof(offer), "%s/album.jpg", songs_get(pe_cover)->folder);
+    } else if (pe_row == PE_WEB) {
+        int want = pe_style * 100000 + pe_seed;
+        if (pe_web_shown != want && pe_web_state != 1) {
+            pe_web_fetch();
+            pe_web_shown = want;
+        }
+        if (pe_web_state == 2)
+            snprintf(offer, sizeof(offer), "%stmp_avatar.png", plat_data_dir());
+    } else if (pe_row == PE_CARD && pe_file_n > 0)
+        snprintf(offer, sizeof(offer), "%savatars/%s", plat_data_dir(), pe_files[pe_card % pe_file_n]);
+    // a new download lands in the same file: load it again
+    if (pe_row == PE_WEB && pe_web_state == 2 && pe_web_shown >= 0) {
+        static int loaded = -1;
+        if (loaded != pe_web_shown) {
+            pe_prev_path[0] = 0;
+            loaded = pe_web_shown;
+        }
+    }
+    pe_show(offer);
+    if (pressed & BTN_CROSS) {
+        ui_sound(SND_UI_SELECT);
+        bool ok = true;
+        switch (pe_row) {
+        case PE_NAME:
+            snprintf(dl_typed, sizeof(dl_typed), "%s", player_name(me));
+            kb_apply = pe_renamed;
+            kb_library = false;
+            dl_typing = true;
+            break;
+        case PE_COLOR: player_set_color(me, player_color(me) + 1); break;
+        case PE_SONGS: ok = offer[0] && pe_take_file(offer, false); break;
+        case PE_WEB: ok = pe_web_state == 2 && pe_take_file(offer, false); break;
+        case PE_CARD: ok = offer[0] && pe_take_file(offer, true); break;
+        case PE_CLEAR: player_clear_picture(me); break;
+        case PE_DELETE:
+            if (player_count() <= 1) {
+                say("The last player can't go");
+                break;
+            }
+            if (!pe_delete_armed) {
+                pe_delete_armed = true;
+                break;
+            }
+            {
+                bool was_current = me == player_current();
+                char gone[PLAYER_NAME + 16];
+                snprintf(gone, sizeof(gone), "%s is gone", player_name(me));
+                player_delete(me);
+                if (was_current) {
+                    // whoever's left first plays now
+                    player_switch_force();
+                }
+                say(gone);
+                pe_delete_armed = false;
+                players_row = player_current();
+                go(S_PLAYERS);
+                return;
+            }
+        }
+        if (!ok)
+            say(pe_row == PE_WEB && pe_web_state == 1   ? "Still downloading, a moment"
+                : pe_row == PE_WEB && pe_web_state != 2 ? "The download failed: Triangle tries another"
+                                                        : "That picture couldn't be used");
+        else if (pe_row == PE_SONGS || pe_row == PE_WEB || pe_row == PE_CARD)
+            say("Picture set");
+    } else if (pressed & BTN_CIRCLE) {
+        ui_sound(SND_UI_BACK);
+        pe_delete_armed = false;
+        pe_file_n = -1;
+        tex_free(pe_prev);
+        pe_prev = NULL;
+        pe_prev_path[0] = 0;
+        go(S_PLAYERS);
+        return;
+    }
+    gfx_begin(0, 0, 0);
+    gfx_2d();
+    draw_background(res.bg_menu, RGBA(110, 110, 110, 255));
+    banner("EDIT PLAYER");
+    panel(30, 84, 560, 400);
+    char vals[PE_ROWS][96];
+    static const char * const labels[PE_ROWS] = {"Name", "Colour", "Picture from your songs", "Download a picture",
+                                                 "Picture from the card", "No picture", "Delete player"};
+    snprintf(vals[PE_NAME], 96, "%s", player_name(me));
+    snprintf(vals[PE_COLOR], 96, "< %d >", player_color(me) + 1);
+    snprintf(vals[PE_SONGS], 96, "%s", pe_cover >= 0 ? songs_get(pe_cover)->name : "no covers");
+    snprintf(vals[PE_WEB], 96, "< %s >", pe_styles[pe_style]);
+    snprintf(vals[PE_CARD], 96, "%s", pe_file_n > 0 ? pe_files[pe_card % pe_file_n] : "none yet");
+    snprintf(vals[PE_CLEAR], 96, "%s", "");
+    snprintf(vals[PE_DELETE], 96, "%s", pe_delete_armed ? "X again to delete" : "");
+    for (int i = 0; i < PE_ROWS; i++) {
+        float y = 102 + i * 52;
+        bool cur = i == pe_row;
+        if (cur)
+            gfx_sprite(atlas_get(res.hud, "wor_select"), 44, y - 4, 532, 46, WHITE);
+        uint32_t col = i == PE_DELETE ? RGBA(255, 140, 120, 255) : cur ? RGBA(255, 230, 150, 255) : RGBA(215, 205, 195, 255);
+        font_draw_shadow(res.ui, labels[i], 60, y + 6, 24, col, ALIGN_LEFT);
+        font_draw_fit(res.ui, vals[i], 562, y + 9, 20, 230, cur ? RGBA(255, 236, 190, 255) : RGBA(180, 180, 185, 255),
+                      ALIGN_RIGHT);
+    }
+    // the card as it is, and what the row offers
+    draw_player_face(me, 770, 100, 170, true);
+    font_draw_fit(res.ui, player_name(me), 770, 280, 28, 300, RGBA(255, 236, 190, 255), ALIGN_CENTER);
+    if (pe_row == PE_SONGS || pe_row == PE_WEB || pe_row == PE_CARD) {
+        font_draw(res.ui, "Picture:", 650, 330, 18, RGBA(180, 180, 185, 255), ALIGN_LEFT);
+        if (pe_prev)
+            gfx_sprite(&(Sprite){pe_prev, 0, 0, 1, 1, 120, 120}, 770 - 60, 350, 120, 120, WHITE);
+        else
+            font_draw(res.ui, pe_row == PE_WEB && pe_web_state == 1 ? "downloading..." :
+                      pe_row == PE_WEB ? "couldn't download" : "-", 770, 400, 20, RGBA(200, 200, 205, 255), ALIGN_CENTER);
+        if (pe_row == PE_CARD && pe_file_n <= 0)
+            font_draw_fit(res.ui, "Put PNG or JPEG pictures in ux0:data/ghvita/avatars", 770, 440, 16, 330,
+                          RGBA(200, 200, 205, 255), ALIGN_CENTER);
+    }
+    draw_toast();
+    if (dl_typing) {
+        kb_draw();
+        font_draw(res.ui, "Type the name, then Start", SCREEN_W / 2, 470, 22, RGBA(255, 220, 140, 255), ALIGN_CENTER);
+    } else if (pe_row == PE_WEB) {
+        static const char * help[] = {"btn_cross", "Use it", "btn_left", "Style", "btn_triangle", "Another", "btn_circle", "Back"};
+        help_bar(help, 8);
+    } else if (pe_row == PE_SONGS || pe_row == PE_CARD) {
+        static const char * help[] = {"btn_cross", "Use it", "btn_left", "Browse", "btn_circle", "Back"};
+        help_bar(help, 6);
+    } else {
+        static const char * help[] = {"btn_cross", "Choose", "btn_up", "Move", "btn_circle", "Back"};
+        help_bar(help, 6);
+    }
+    gfx_end();
+}
+
+// the career's other pages: the achievements, fourteen to a page
+static int career_page;
+
+static void achievements_draw(int page)
+{
+    banner("ACHIEVEMENTS");
+    panel(40, 84, 880, 400);
+    char t[64];
+    snprintf(t, sizeof(t), "%d of %d", achieve_unlocked(), achieve_count());
+    font_draw_shadow(res.ui, t, SCREEN_W - 50, 40, 26, RGBA(255, 215, 110, 255), ALIGN_RIGHT);
+    for (int k = 0; k < 14; k++) {
+        int i = page * 14 + k;
+        const Achievement * a = achieve_get(i);
+        if (!a)
+            break;
+        bool got = achieve_has(i);
+        float x = 70 + (k / 7) * 430, y = 104 + (k % 7) * 52;
+        gfx_rect(x, y + 4, 34, 34, got ? RGBA(255, 200, 70, 255) : RGBA(60, 60, 66, 255));
+        if (got) {
+            // a tick
+            gfx_rect(x + 7, y + 20, 8, 5, RGBA(80, 45, 0, 255));
+            gfx_rect(x + 12, y + 12, 5, 13, RGBA(80, 45, 0, 255));
+            gfx_rect(x + 15, y + 10, 13, 5, RGBA(80, 45, 0, 255));
+        }
+        font_draw_fit(res.ui, a->name, x + 46, y, 24, 360, got ? RGBA(255, 236, 190, 255) : RGBA(170, 170, 175, 255),
+                      ALIGN_LEFT);
+        font_draw_fit(res.ui, a->how, x + 46, y + 25, 17, 360, got ? RGBA(210, 205, 195, 255) : RGBA(130, 130, 135, 255),
+                      ALIGN_LEFT);
+    }
+}
+
 static void career_screen(void)
 {
+    int pages = 1 + (achieve_count() + 13) / 14;
+    if (pressed & BTN_R && career_page < pages - 1) {
+        career_page++;
+        ui_sound(SND_UI_MOVE);
+    }
+    if (pressed & BTN_L && career_page > 0) {
+        career_page--;
+        ui_sound(SND_UI_MOVE);
+    }
     if (pressed & (BTN_CIRCLE | BTN_CROSS)) {
         ui_sound(SND_UI_BACK);
         go(S_MAIN);
-        menu_index = 5;
+        menu_index = 6;             // back on CAREER
+        career_page = 0;
+        return;
+    }
+    if (career_page > 0) {
+        gfx_begin(0, 0, 0);
+        gfx_2d();
+        draw_background(res.bg_menu, RGBA(170, 170, 170, 255));
+        achievements_draw(career_page - 1);
+        static const char * help[] = {"btn_l", "Back a page", "btn_r", "Next page", "btn_circle", "Back"};
+        help_bar(help, 6);
+        gfx_end();
         return;
     }
     gfx_begin(0, 0, 0);
@@ -3350,6 +4451,15 @@ static void career_screen(void)
     else
         snprintf(line, sizeof(line), "%d stars", career.stars);
     font_draw(res.ui, line, SCREEN_W / 2, 154, 24, RGBA(220, 215, 205, 255), ALIGN_CENTER);
+    int medals[4];
+    medal_totals(medals);
+    for (int m = MEDAL_GOLD, k = 0; m >= MEDAL_BRONZE; m--, k++) {
+        // gold, silver, bronze: how many charts have each
+        float x = SCREEN_W / 2 - 150 + k * 120;
+        draw_medal(m, x, 64, 12);
+        snprintf(line, sizeof(line), "%d", medals[m]);
+        font_draw_shadow(res.ui, line, x + 18, 52, 24, medal_cols[m], ALIGN_LEFT);
+    }
     int fav = 0;
     for (int i = 1; i < PART_COUNT; i++)
         if (career.part_plays[i] > career.part_plays[fav])
@@ -3379,8 +4489,8 @@ static void career_screen(void)
         font_draw(res.ui, rows[i].label, 170, y, 28, RGBA(220, 210, 200, 255), ALIGN_LEFT);
         font_draw(res.ui, rows[i].value, 790, y, 28, RGBA(255, 236, 190, 255), ALIGN_RIGHT);
     }
-    static const char * help[] = {"btn_circle", "Back"};
-    help_bar(help, 2);
+    static const char * help[] = {"btn_r", "Achievements", "btn_circle", "Back"};
+    help_bar(help, 4);
     gfx_end();
 }
 
@@ -3388,12 +4498,12 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
-        "NEW HIGH SCORE! pops up mid-song, with the crowd cheering, the moment you pass your best on that chart.",
-        "PRESS X TO ROCK on the title no longer fades almost out.",
-        "The bassist no longer wanders into the singer on stage.",
-        "Button bars at the bottom shrink to fit: \"Back\" was cut off on DOWNLOAD SONGS.",
-        "Search filters line up on the right; unset ones say Any, and Genre says Loading while the list comes in.",
-        "Earlier: streak lamps after World Tour, three drum layouts, sing along at its own difficulty.",
+        "Players: WHO'S PLAYING? at the start. Square edits a card: name, colour, a picture (song covers, downloads or your own), delete.",
+        "Battle: Triangle on GET READY. Star Power phrases become attacks against a computer rival.",
+        "DAILY SONG on the main menu, with a streak. Medals (bronze, silver, gold) on every chart.",
+        "28 achievements on CAREER (press R). Race your best: GHOST +/- shows how you're doing against your best run.",
+        "Practice: start, end, then speed, step by step. Speed up as you clear. Speeds over 100% really play faster now.",
+        "Results: R shows your last 10 plays. Singing along shows the vocals' own score. Select > Check for newer charts.",
     };
     int n = (int)(sizeof(lines) / sizeof(lines[0]));
     gfx_begin(0, 0, 0);
@@ -3472,7 +4582,7 @@ static void calibrate_screen(void)
         audio_song_unload();
         calib_playing = false;
         go(S_MAIN);
-        menu_index = 4;             // back on CALIBRATE
+        menu_index = 5;             // back on CALIBRATE
         return;
     }
     gfx_begin(0, 0, 0);
@@ -3526,8 +4636,10 @@ int main(void)
     // QUICKPLAY's song and a random venue differ from boot to boot (test runs on the fixed clock stay repeatable)
     srand((unsigned)(getenv("GHV_FIXED") ? 1 : time(NULL)) ^ (unsigned)plat_now_us());
     gfx_init();
+    player_init();
     config_load();
     career_load();
+    achieve_load();
     audio_init();
     audio_set_volumes(cfg.music_vol / 10.0f, cfg.sfx_vol / 10.0f);
     res_load();
@@ -3594,6 +4706,8 @@ int main(void)
         case S_SELECT: select_screen(); break;
         case S_PRACTICE: practice_screen(); break;
         case S_CAREER: career_screen(); break;
+        case S_PLAYERS: players_screen(); break;
+        case S_PLAYER_EDIT: player_edit_screen(); break;
         case S_NEWS: news_screen(); break;
         case S_PLAY: play_screen(); break;
         case S_PAUSE: pause_screen(); break;

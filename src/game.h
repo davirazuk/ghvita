@@ -22,6 +22,10 @@ typedef struct {
     int misses;
     const char * weak_pad;      // drums: the pad hit least, NULL if none
     int weak_pct;
+    int vox_points;             // singing along: the voice's share of the score
+    int vox_good, vox_graded;   // phrases sung strong (80%+) of those graded, 0 when not singing along
+    int battle;                 // 0 not a battle, 1 won, 2 lost
+    int rival_score;
 } Result;
 
 enum { GAME_PLAYING, GAME_DONE, GAME_FAILED, GAME_PAUSE };
@@ -31,6 +35,12 @@ bool game_start(Song * song, int part, int diff);
 void game_force_venue(const char * zone);
 // the next game_start is practice: from..to seconds over and over at speed (0.5..1), and nothing counts
 void game_practice(double from, double to, float speed);
+// the next game_start is a battle against a computer rival: Star Power phrases earn attacks to throw at them
+void game_battle(void);
+// after game_practice: each run through with 90% of the notes speeds the next up by step_pct, up to target_pct
+void game_practice_ramp(int step_pct, int target_pct);
+// while practising: the speed now, runs through so far, the best run's % of notes
+bool game_practice_info(int * speed_pct, int * runs, int * best_pct);
 // one frame; pressed = buttons that went down this frame
 int game_update(const Pad * pad, uint32_t pressed);
 void game_draw(void);

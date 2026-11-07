@@ -74,9 +74,11 @@ static int64_t ring_start;              // the frame the rings start with (earli
 static float fade_vol = 1, fade_target = 1, fade_step;
 static float music_vol = 1, effects_vol = 1;
 static volatile int underruns;
-static float song_speed = 1;            // below 1: the song plays slower and lower, like a tape (practice)
+static float song_speed = 1;            // not 1: the song plays slower and lower, or faster and higher, like a tape (practice)
 static float slow_pos;                  // where the next output frame falls in the slowed buffer
-static float slowed[(MAX_MIX + 2) * 2]; // the song before it's stretched; its first two frames are the last block's
+#define MAX_SPEED 2               // the fastest the stretch goes
+// the song before it's stretched (up to MAX_SPEED x a buffer's frames); its first two frames are the last block's
+static float slowed[(MAX_MIX * MAX_SPEED + 4) * 2];
 
 // which song frame each output buffer started with, to match the output's "started" reports
 typedef struct {
@@ -372,7 +374,8 @@ static void mix(int16_t * out, int frames)
     h->playing = song_active && song_playing;
     if (song_active && song_playing) {
         // the frames of the song this buffer takes, and where they go
-        bool slow = song_speed < 1;
+        // any speed but 1 goes through the stretch: above 1 the buffer takes more of the song than it plays
+        bool slow = song_speed != 1;
         int count = slow ? (int)(slow_pos + frames * song_speed) : frames;
         float * dst = slow ? slowed + 4 : acc;
         if (slow)
@@ -690,7 +693,7 @@ static void start_preview(void)
 void audio_song_speed(float speed)
 {
     pthread_mutex_lock(&mix_lock);
-    song_speed = speed;
+    song_speed = speed < 0.25f ? 0.25f : speed > MAX_SPEED ? (float)MAX_SPEED : speed;
     slow_pos = 0;
     memset(slowed, 0, 4 * sizeof(float));
     pthread_mutex_unlock(&mix_lock);

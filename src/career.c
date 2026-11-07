@@ -1,3 +1,4 @@
+#include "player.h"
 #include "career.h"
 #include "plat.h"
 #include <stdio.h>
@@ -26,7 +27,7 @@ const char * career_rank(int * next_at)
 
 static void path_of(char * path, size_t n)
 {
-    snprintf(path, n, "%scareer.txt", plat_data_dir());
+    snprintf(path, n, "%scareer.txt", player_dir());
 }
 
 void career_load(void)

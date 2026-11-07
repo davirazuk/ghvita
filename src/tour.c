@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include "player.h"
 #include "plat.h"
 #include "songs.h"
 #include "tour.h"
@@ -51,7 +52,7 @@ void tour_load(void)
 {
     char path[400], line[400];
     memset(gigs, 0, sizeof(gigs));
-    snprintf(path, sizeof(path), "%stour.txt", plat_data_dir());
+    snprintf(path, sizeof(path), "%stour.txt", player_dir());
     FILE * f = fopen(path, "r");
     if (!f)
         return;
@@ -70,8 +71,8 @@ void tour_load(void)
 static void tour_save(void)
 {
     char path[400], fresh[400];
-    snprintf(path, sizeof(path), "%stour.txt", plat_data_dir());
-    snprintf(fresh, sizeof(fresh), "%stour.new", plat_data_dir());
+    snprintf(path, sizeof(path), "%stour.txt", player_dir());
+    snprintf(fresh, sizeof(fresh), "%stour.new", player_dir());
     FILE * f = fopen(fresh, "w");
     if (!f)
         return;

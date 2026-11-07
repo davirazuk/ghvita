@@ -10,6 +10,7 @@ The VPK holds art made from your own games: the repository has to stay private."
 import argparse, json, os, shutil, subprocess, sys, tempfile, zipfile, zlib
 
 ap = argparse.ArgumentParser(); ap.add_argument('--notes', default=''); ap.add_argument('--dry', action='store_true')
+ap.add_argument('--no-smoke', action='store_true', help='skip test/smoke.sh')
 a = ap.parse_args()
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__))); os.chdir(root)
 run = lambda *c, **k: subprocess.run(c, check=True, text=True, capture_output=True, **k).stdout.strip()
@@ -18,6 +19,9 @@ if json.loads(run('gh', 'repo', 'view', '--json', 'isPrivate'))['isPrivate'] is 
 if run('git', 'status', '--porcelain'):
     sys.exit('commit first: a release is exactly what HEAD is')
 n = int(run('git', 'rev-list', '--count', 'HEAD')); tag = f'v{n}'
+# the bot plays the test songs on the desktop build first: a build that crashes or drops notes never goes out
+if not a.no_smoke and subprocess.run(['bash', 'test/smoke.sh']).returncode != 0:
+    sys.exit('the smoke test failed (test/smoke.sh): fix it, or --no-smoke to release anyway')
 if subprocess.run(['gh', 'release', 'view', tag], capture_output=True).returncode == 0:
     sys.exit(f'{tag} is out already')
 sdk = os.environ.get('VITASDK', os.path.expanduser('~/opt/vitasdk'))
