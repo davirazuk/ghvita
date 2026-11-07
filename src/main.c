@@ -3,6 +3,8 @@
 // song downloader)
 #include <math.h>
 #include <pthread.h>
+#include <dirent.h>
+#include <sys/stat.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,6 +18,8 @@
 #include "shrink.h"
 #include "songs.h"
 #include "player.h"
+#include "songconv.h"
+#include "net.h"
 #include "achieve.h"
 #include "tour.h"
 #include "career.h"
@@ -26,7 +30,7 @@
 #include "update.h"
 
 enum { S_TITLE, S_MAIN, S_TOUR, S_SONGS, S_SELECT, S_PRACTICE, S_PLAY, S_PAUSE, S_RESUME, S_RESULTS, S_OPTIONS, S_CALIBRATE, S_EMPTY,
-       S_DOWNLOAD, S_UPDATE, S_CAREER, S_NEWS, S_PLAYERS };
+       S_DOWNLOAD, S_UPDATE, S_CAREER, S_NEWS, S_PLAYERS, S_PLAYER_EDIT };
 
 static int screen = S_TITLE;
 static double now_s, screen_t;
@@ -3873,11 +3877,8 @@ static void options_screen(void)
 // who's playing: Select on the main menu. Each has their own scores, favourites, settings, career, tour and streak.
 
 
-static void player_switch(int i)
+static void player_reload(void)
 {
-    if (i == player_current())
-        return;
-    player_select(i);
     config_load();
     career_load();
     achieve_load();
@@ -3887,6 +3888,21 @@ static void player_switch(int i)
     daily.loaded = false;
     view_stale = true;
     art_for = preview_for = -1;
+}
+
+// after a delete: the current player may be someone else now
+static void player_switch_force(void)
+{
+    player_select(player_current());
+    player_reload();
+}
+
+static void player_switch(int i)
+{
+    if (i == player_current())
+        return;
+    player_select(i);
+    player_reload();
     plat_log("player: %s", player_name(i));
 }
 
@@ -3911,6 +3927,51 @@ static const uint32_t player_tones[PLAYER_COLORS][2] = {
     {RGBA(60, 205, 210, 255), RGBA(20, 110, 120, 255)}, {RGBA(150, 150, 160, 255), RGBA(70, 70, 80, 255)},
 };
 
+// each card's picture, loaded again whenever a picture changes
+static Tex * pic_tex[PLAYER_MAX];
+static int pic_tex_version = -1;
+
+static Tex * player_tex(int i)
+{
+    if (pic_tex_version != player_picture_version()) {
+        for (int k = 0; k < PLAYER_MAX; k++) {
+            tex_free(pic_tex[k]);
+            pic_tex[k] = NULL;
+        }
+        for (int k = 0; k < player_count(); k++) {
+            char p[460];
+            player_picture(k, p, sizeof(p));
+            if (p[0])
+                pic_tex[k] = tex_load(p, TEX_MIPMAP);
+        }
+        pic_tex_version = player_picture_version();
+    }
+    return i >= 0 && i < PLAYER_MAX ? pic_tex[i] : NULL;
+}
+
+// a player's card face: their picture, or their initial on their colour
+static void draw_player_face(int i, float x, float top, float w, bool lit)
+{
+    const uint32_t * c = player_tones[player_color(i)];
+    gfx_rect_grad(x - w / 2, top, w, w, c[0], c[1]);
+    Tex * t = player_tex(i);
+    if (t)
+        gfx_sprite(&(Sprite){t, 0, 0, 1, 1, w, w}, x - w / 2, top, w, w, WHITE);
+    else {
+        char initial[2] = {player_name(i)[0], 0};
+        if (initial[0] >= 'a' && initial[0] <= 'z')
+            initial[0] -= 32;
+        font_draw_shadow(res.title, initial, x, top + w * 0.16f, w * 0.68f, lit ? WHITE : RGBA(170, 170, 170, 255),
+                         ALIGN_CENTER);
+    }
+    if (!lit)
+        gfx_rect(x - w / 2, top, w, w, RGBA(0, 0, 0, 90));
+}
+
+static int edit_player;     // whose card the edit screen has
+static int pe_row;
+static bool pe_delete_armed;
+
 static void players_screen(void)
 {
     static float scroll;                // eases toward the chosen card
@@ -3928,6 +3989,14 @@ static void players_screen(void)
     if ((repeat & BTN_RIGHT) && players_row < cards - 1) {
         players_row++;
         ui_sound(SND_UI_MOVE);
+    }
+    if ((pressed & BTN_SQUARE) && players_row < n) {
+        ui_sound(SND_UI_SELECT);
+        edit_player = players_row;
+        pe_row = 0;
+        pe_delete_armed = false;
+        go(S_PLAYER_EDIT);
+        return;
     }
     if ((pressed & BTN_TRIANGLE) && players_row < n) {
         // another colour for this player's card
@@ -3975,14 +4044,7 @@ static void players_screen(void)
             gfx_rect(x - w / 2 - b, top - b, w + 2 * b, w + 2 * b, RGBA(255, 210, 90, 255));
         }
         if (i < n) {
-            const uint32_t * c = player_tones[player_color(i)];
-            gfx_rect_grad(x - w / 2, top, w, w, c[0], c[1]);
-            if (!cur)
-                gfx_rect(x - w / 2, top, w, w, RGBA(0, 0, 0, 90));
-            char initial[2] = {player_name(i)[0], 0};
-            if (initial[0] >= 'a' && initial[0] <= 'z')
-                initial[0] -= 32;
-            font_draw_shadow(res.title, initial, x, top + w * 0.16f, w * 0.68f, dim, ALIGN_CENTER);
+            draw_player_face(i, x, top, w, cur);
             font_draw_fit(res.ui, player_name(i), x, top + w + 14, cur ? 30 : 24, gap - 16,
                           cur ? RGBA(255, 236, 190, 255) : RGBA(200, 200, 200, 255), ALIGN_CENTER);
             if (i == player_current())
@@ -4000,10 +4062,317 @@ static void players_screen(void)
         kb_draw();
         font_draw(res.ui, "Type a name, then Start", SCREEN_W / 2, 470, 22, RGBA(255, 220, 140, 255), ALIGN_CENTER);
     } else if (players_row < n) {
-        static const char * help[] = {"btn_cross", "Play", "btn_left", "Choose", "btn_triangle", "Colour", "btn_circle", "Back"};
-        help_bar(help, 8);
+        static const char * help[] = {"btn_cross", "Play", "btn_left", "Choose", "btn_square", "Edit", "btn_triangle", "Colour",
+                                      "btn_circle", "Back"};
+        help_bar(help, 10);
     } else {
         static const char * help[] = {"btn_cross", "Add", "btn_left", "Choose", "btn_circle", "Back"};
+        help_bar(help, 6);
+    }
+    gfx_end();
+}
+
+// ----------------------------------------------------------------------------------------------- editing a player
+// Square on a card: the name, the colour, a picture (one of your songs' covers, one downloaded, or one of yours from
+// the card's avatars folder), or the player gone.
+
+enum { PE_NAME, PE_COLOR, PE_SONGS, PE_WEB, PE_CARD, PE_CLEAR, PE_DELETE, PE_ROWS };
+static int pe_cover = -1, pe_style, pe_seed = 1, pe_card;
+static Tex * pe_prev;                   // the picture the row offers, before it's taken
+static char pe_prev_path[460];
+static char pe_files[64][128];          // the avatars folder's pictures
+static int pe_file_n = -1;
+static const char * const pe_styles[] = {"adventurer", "avataaars", "bottts", "pixel-art", "fun-emoji", "lorelei",
+                                         "micah", "big-smile", "croodles", "thumbs", "notionists", "open-peeps"};
+#define PE_STYLES (int)(sizeof(pe_styles) / sizeof(pe_styles[0]))
+
+// the download: a worker fetches a picture into the preview file
+static volatile int pe_web_state;       // 0 idle, 1 fetching, 2 ready, 3 failed
+static char pe_web_url[200];
+static int pe_web_shown = -1;           // which (style, seed) the preview is of
+
+static void * pe_web_thread(void * arg)
+{
+    (void)arg;
+    char * body = NULL, err[160];
+    size_t len = 0;
+    HttpReq r = {.url = pe_web_url, .stall_s = 15};
+    int status = http_fetch(&r, &body, &len, err, sizeof(err));
+    bool ok = status == 200 && len > 8 && !memcmp(body, "\x89PNG", 4);
+    if (ok) {
+        char p[460];
+        snprintf(p, sizeof(p), "%stmp_avatar.png", plat_data_dir());
+        FILE * f = fopen(p, "wb");
+        ok = f && fwrite(body, 1, len, f) == len;
+        if (f)
+            fclose(f);
+    } else
+        plat_log("avatar: %s answered %d %s", pe_web_url, status, err);
+    free(body);
+    pe_web_state = ok ? 2 : 3;
+    return NULL;
+}
+
+static void pe_web_fetch(void)
+{
+    if (pe_web_state == 1)
+        return;
+    snprintf(pe_web_url, sizeof(pe_web_url), "https://api.dicebear.com/9.x/%s/png?seed=%s%d&size=256",
+             pe_styles[pe_style], player_name(edit_player), pe_seed);
+    pe_web_state = 1;
+    pthread_t t;
+    if (pthread_create(&t, NULL, pe_web_thread, NULL) != 0)
+        pe_web_state = 3;
+    else
+        pthread_detach(t);
+}
+
+static void pe_show(const char * path)
+{
+    if (!strcmp(path, pe_prev_path) && pe_prev)
+        return;
+    tex_free(pe_prev);
+    pe_prev = path[0] ? tex_load(path, TEX_MIPMAP) : NULL;
+    snprintf(pe_prev_path, sizeof(pe_prev_path), "%s", path);
+}
+
+static void pe_list_files(void)
+{
+    pe_file_n = 0;
+    char d[400];
+    snprintf(d, sizeof(d), "%savatars", plat_data_dir());
+    mkdir(d, 0777);
+    DIR * dir = opendir(d);
+    if (!dir)
+        return;
+    struct dirent * e;
+    while ((e = readdir(dir)) && pe_file_n < 64) {
+        const char * x = strrchr(e->d_name, '.');
+        if (x && (!strcasecmp(x, ".png") || !strcasecmp(x, ".jpg") || !strcasecmp(x, ".jpeg")))
+            snprintf(pe_files[pe_file_n++], sizeof(pe_files[0]), "%s", e->d_name);
+    }
+    closedir(dir);
+}
+
+// the next song (dir 1) or the one before with a cover
+static void pe_next_cover(int dir)
+{
+    int n = songs_count();
+    for (int k = 0; k < n; k++) {
+        pe_cover = ((pe_cover < 0 ? (dir > 0 ? -1 : 0) : pe_cover) + dir + n) % n;
+        char p[460];
+        snprintf(p, sizeof(p), "%s/album.jpg", songs_get(pe_cover)->folder);
+        struct stat st;
+        if (stat(p, &st) == 0)
+            return;
+    }
+    pe_cover = -1;
+}
+
+static bool pe_take_file(const char * path, bool normalise)
+{
+    FILE * f = fopen(path, "rb");
+    if (!f)
+        return false;
+    fseek(f, 0, SEEK_END);
+    long n = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    unsigned char * b = n > 0 && n < 16 * 1024 * 1024 ? malloc(n) : NULL;
+    bool ok = b && fread(b, 1, n, f) == (size_t)n;
+    fclose(f);
+    if (ok && normalise) {
+        // a picture of any size from the card: a 256x256 JPEG, as the song covers are
+        char tmp[460];
+        snprintf(tmp, sizeof(tmp), "%stmp_avatar.jpg", plat_data_dir());
+        ok = songconv_cover(b, n, tmp);
+        free(b);
+        return ok && pe_take_file(tmp, false);
+    }
+    ok = ok && player_set_picture(edit_player, b, (int)n);
+    free(b);
+    return ok;
+}
+
+static void pe_renamed(const char * name)
+{
+    if (!player_rename(edit_player, name))
+        say("That name's empty or taken");
+}
+
+static void player_edit_screen(void)
+{
+    int me = edit_player;
+    if (me < 0 || me >= player_count()) {
+        go(S_PLAYERS);
+        return;
+    }
+    if (dl_typing) {
+        kb_update();
+        pressed = repeat = 0;
+    }
+    if (pe_file_n < 0)
+        pe_list_files();
+    int was = pe_row;
+    if (repeat & BTN_UP)
+        pe_row = (pe_row + PE_ROWS - 1) % PE_ROWS;
+    if (repeat & BTN_DOWN)
+        pe_row = (pe_row + 1) % PE_ROWS;
+    if (pe_row != was) {
+        ui_sound(SND_UI_MOVE);
+        pe_delete_armed = false;
+    }
+    int d = (repeat & BTN_LEFT) ? -1 : (repeat & BTN_RIGHT) ? 1 : 0;
+    if (d) {
+        ui_sound(SND_UI_MOVE);
+        if (pe_row == PE_COLOR)
+            player_set_color(me, player_color(me) + d);
+        else if (pe_row == PE_SONGS)
+            pe_next_cover(d);
+        else if (pe_row == PE_WEB) {
+            pe_style = (pe_style + d + PE_STYLES) % PE_STYLES;
+            pe_web_shown = -1;
+        } else if (pe_row == PE_CARD && pe_file_n > 0)
+            pe_card = (pe_card + d + pe_file_n) % pe_file_n;
+    }
+    if ((pressed & BTN_TRIANGLE) && pe_row == PE_WEB) {
+        // another of the same style
+        pe_seed++;
+        pe_web_shown = -1;
+        ui_sound(SND_UI_MOVE);
+    }
+    // what the row offers, in the preview
+    char offer[460] = "";
+    if (pe_row == PE_SONGS) {
+        if (pe_cover < 0)
+            pe_next_cover(1);
+        if (pe_cover >= 0)
+            snprintf(offer, sizeof(offer), "%s/album.jpg", songs_get(pe_cover)->folder);
+    } else if (pe_row == PE_WEB) {
+        int want = pe_style * 100000 + pe_seed;
+        if (pe_web_shown != want && pe_web_state != 1) {
+            pe_web_fetch();
+            pe_web_shown = want;
+        }
+        if (pe_web_state == 2)
+            snprintf(offer, sizeof(offer), "%stmp_avatar.png", plat_data_dir());
+    } else if (pe_row == PE_CARD && pe_file_n > 0)
+        snprintf(offer, sizeof(offer), "%savatars/%s", plat_data_dir(), pe_files[pe_card % pe_file_n]);
+    // a new download lands in the same file: load it again
+    if (pe_row == PE_WEB && pe_web_state == 2 && pe_web_shown >= 0) {
+        static int loaded = -1;
+        if (loaded != pe_web_shown) {
+            pe_prev_path[0] = 0;
+            loaded = pe_web_shown;
+        }
+    }
+    pe_show(offer);
+    if (pressed & BTN_CROSS) {
+        ui_sound(SND_UI_SELECT);
+        bool ok = true;
+        switch (pe_row) {
+        case PE_NAME:
+            snprintf(dl_typed, sizeof(dl_typed), "%s", player_name(me));
+            kb_apply = pe_renamed;
+            kb_library = false;
+            dl_typing = true;
+            break;
+        case PE_COLOR: player_set_color(me, player_color(me) + 1); break;
+        case PE_SONGS: ok = offer[0] && pe_take_file(offer, false); break;
+        case PE_WEB: ok = pe_web_state == 2 && pe_take_file(offer, false); break;
+        case PE_CARD: ok = offer[0] && pe_take_file(offer, true); break;
+        case PE_CLEAR: player_clear_picture(me); break;
+        case PE_DELETE:
+            if (player_count() <= 1) {
+                say("The last player can't go");
+                break;
+            }
+            if (!pe_delete_armed) {
+                pe_delete_armed = true;
+                break;
+            }
+            {
+                bool was_current = me == player_current();
+                char gone[PLAYER_NAME + 16];
+                snprintf(gone, sizeof(gone), "%s is gone", player_name(me));
+                player_delete(me);
+                if (was_current) {
+                    // whoever's left first plays now
+                    player_switch_force();
+                }
+                say(gone);
+                pe_delete_armed = false;
+                players_row = player_current();
+                go(S_PLAYERS);
+                return;
+            }
+        }
+        if (!ok)
+            say(pe_row == PE_WEB && pe_web_state == 1   ? "Still downloading, a moment"
+                : pe_row == PE_WEB && pe_web_state != 2 ? "The download failed: Triangle tries another"
+                                                        : "That picture couldn't be used");
+        else if (pe_row == PE_SONGS || pe_row == PE_WEB || pe_row == PE_CARD)
+            say("Picture set");
+    } else if (pressed & BTN_CIRCLE) {
+        ui_sound(SND_UI_BACK);
+        pe_delete_armed = false;
+        pe_file_n = -1;
+        tex_free(pe_prev);
+        pe_prev = NULL;
+        pe_prev_path[0] = 0;
+        go(S_PLAYERS);
+        return;
+    }
+    gfx_begin(0, 0, 0);
+    gfx_2d();
+    draw_background(res.bg_menu, RGBA(110, 110, 110, 255));
+    banner("EDIT PLAYER");
+    panel(30, 84, 560, 400);
+    char vals[PE_ROWS][96];
+    static const char * const labels[PE_ROWS] = {"Name", "Colour", "Picture from your songs", "Download a picture",
+                                                 "Picture from the card", "No picture", "Delete player"};
+    snprintf(vals[PE_NAME], 96, "%s", player_name(me));
+    snprintf(vals[PE_COLOR], 96, "< %d >", player_color(me) + 1);
+    snprintf(vals[PE_SONGS], 96, "%s", pe_cover >= 0 ? songs_get(pe_cover)->name : "no covers");
+    snprintf(vals[PE_WEB], 96, "< %s >", pe_styles[pe_style]);
+    snprintf(vals[PE_CARD], 96, "%s", pe_file_n > 0 ? pe_files[pe_card % pe_file_n] : "none yet");
+    snprintf(vals[PE_CLEAR], 96, "%s", "");
+    snprintf(vals[PE_DELETE], 96, "%s", pe_delete_armed ? "X again to delete" : "");
+    for (int i = 0; i < PE_ROWS; i++) {
+        float y = 102 + i * 52;
+        bool cur = i == pe_row;
+        if (cur)
+            gfx_sprite(atlas_get(res.hud, "wor_select"), 44, y - 4, 532, 46, WHITE);
+        uint32_t col = i == PE_DELETE ? RGBA(255, 140, 120, 255) : cur ? RGBA(255, 230, 150, 255) : RGBA(215, 205, 195, 255);
+        font_draw_shadow(res.ui, labels[i], 60, y + 6, 24, col, ALIGN_LEFT);
+        font_draw_fit(res.ui, vals[i], 562, y + 9, 20, 230, cur ? RGBA(255, 236, 190, 255) : RGBA(180, 180, 185, 255),
+                      ALIGN_RIGHT);
+    }
+    // the card as it is, and what the row offers
+    draw_player_face(me, 770, 100, 170, true);
+    font_draw_fit(res.ui, player_name(me), 770, 280, 28, 300, RGBA(255, 236, 190, 255), ALIGN_CENTER);
+    if (pe_row == PE_SONGS || pe_row == PE_WEB || pe_row == PE_CARD) {
+        font_draw(res.ui, "Picture:", 650, 330, 18, RGBA(180, 180, 185, 255), ALIGN_LEFT);
+        if (pe_prev)
+            gfx_sprite(&(Sprite){pe_prev, 0, 0, 1, 1, 120, 120}, 770 - 60, 350, 120, 120, WHITE);
+        else
+            font_draw(res.ui, pe_row == PE_WEB && pe_web_state == 1 ? "downloading..." :
+                      pe_row == PE_WEB ? "couldn't download" : "-", 770, 400, 20, RGBA(200, 200, 205, 255), ALIGN_CENTER);
+        if (pe_row == PE_CARD && pe_file_n <= 0)
+            font_draw_fit(res.ui, "Put PNG or JPEG pictures in ux0:data/ghvita/avatars", 770, 440, 16, 330,
+                          RGBA(200, 200, 205, 255), ALIGN_CENTER);
+    }
+    draw_toast();
+    if (dl_typing) {
+        kb_draw();
+        font_draw(res.ui, "Type the name, then Start", SCREEN_W / 2, 470, 22, RGBA(255, 220, 140, 255), ALIGN_CENTER);
+    } else if (pe_row == PE_WEB) {
+        static const char * help[] = {"btn_cross", "Use it", "btn_left", "Style", "btn_triangle", "Another", "btn_circle", "Back"};
+        help_bar(help, 8);
+    } else if (pe_row == PE_SONGS || pe_row == PE_CARD) {
+        static const char * help[] = {"btn_cross", "Use it", "btn_left", "Browse", "btn_circle", "Back"};
+        help_bar(help, 6);
+    } else {
+        static const char * help[] = {"btn_cross", "Choose", "btn_up", "Move", "btn_circle", "Back"};
         help_bar(help, 6);
     }
     gfx_end();
@@ -4338,6 +4707,7 @@ int main(void)
         case S_PRACTICE: practice_screen(); break;
         case S_CAREER: career_screen(); break;
         case S_PLAYERS: players_screen(); break;
+        case S_PLAYER_EDIT: player_edit_screen(); break;
         case S_NEWS: news_screen(); break;
         case S_PLAY: play_screen(); break;
         case S_PAUSE: pause_screen(); break;
