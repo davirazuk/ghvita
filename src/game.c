@@ -176,6 +176,7 @@ static struct {
     bool cam_snap;                      // the next frame puts the camera straight where it's going
     float fountain;                     // the Star Power sparklers along the stage front: 0 off .. 1 full
     float laser;                        // the lasers over the crowd: 0 off .. 1 full
+    double crash_t;                     // the drummer's last crash cymbal (the chart's): the lights flash with it
     double start_t;                     // the song time the run began at (a practice run starts partway in)
     int metro_next;                     // practice's metronome: the chart's next beat line
     float song_speed;                   // the music's speed: practice's, or the Options' Song speed
@@ -567,6 +568,9 @@ static void draw_rig(double beat, float pulse)
         level *= 0.6f;
     if (G.sp_active)
         level = 0.42f + 0.3f * pulse;
+    // a crash cymbal in the drummer's part hits the lights white for a moment
+    float crash = G.t >= G.crash_t && G.band_loud > 0.03f ? expf((float)-(G.t - G.crash_t) * 8) : 0;
+    level += 0.3f * crash;
     gfx_blend(BLEND_ADD);
     for (int i = 0; i < LAMPS; i++) {
         float from = (i - 2.5f) * 0.17f, angle;
@@ -606,6 +610,11 @@ static void draw_rig(double beat, float pulse)
     gfx_blend(BLEND_ADD);
     for (int i = 0; i < LAMPS; i++)
         gfx_sprite(dot, lamp_x[i] - size / 2, lamp_y[i] - size / 2 + 8, size, size, col3(G.key_col, 0.35f + 0.5f * pulse));
+    if (crash > 0.03f) {
+        float cs = (70 + 50 * crash) * G.cam_z;
+        for (int i = 0; i < LAMPS; i++)
+            gfx_sprite(dot, lamp_x[i] - cs / 2, lamp_y[i] - cs / 2 + 8, cs, cs, with_alpha(WHITE, 0.75f * crash));
+    }
     gfx_blend(BLEND_ALPHA);
 }
 
@@ -963,7 +972,8 @@ static void draw_stage(void)
     // a whole screen of blending: not when it would add nothing
     if (G.venue_lights && fmaxf(G.light_col[0], fmaxf(G.light_col[1], G.light_col[2])) > 0.02f) {
         gfx_blend(BLEND_ADD);
-        stage_layer(G.venue_lights, col3(G.light_col, 0.72f));
+        float crash = G.t >= G.crash_t && G.band_loud > 0.03f && !cfg.light_fx ? expf((float)-(G.t - G.crash_t) * 8) : 0;
+        stage_layer(G.venue_lights, col3(G.light_col, fminf(0.72f + 0.28f * crash, 1)));
         gfx_blend(BLEND_ALPHA);
     }
     if (cfg.stage_screens)
@@ -1067,6 +1077,8 @@ static bool band_playing(int r, double beat_len)
         if (end > b->held)
             b->held = end;
         b->pulse = 1;
+        if (r == 0 && (n->frets & 8) && !(n->flags & NOTE_TOM_G))
+            G.crash_t = n->time / 1e6;          // the green cymbal: a crash
         if (n->time / 1e6 >= b->hit_t && n->time / 1e6 > b->last_hit && band_strikes(r, n, b->last_hit)) {
             b->last_hit = n->time / 1e6;
             b->last_frets = r ? n->frets : kit_pads(n);
@@ -1655,6 +1667,7 @@ static void reset_play(void)
     G.sp_on_t = -100;
     G.cam_snap = true;
     G.fountain = G.laser = 0;
+    G.crash_t = -100;
     for (int i = 0; i < 6; i++) {
         G.flame_t[i] = -100;
         G.miss_t[i] = -100;
