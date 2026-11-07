@@ -46,7 +46,7 @@ jobs:
           sudo chown -R "$USER" $VITASDK
           echo "$VITASDK/bin" >> "$GITHUB_PATH"
           export PATH=$VITASDK/bin:$PATH
-          yes | vdpm install curl mbedtls libarchive un7zip opusfile opus mpg123 bzip2 zstd zlib libvorbis libogg \
+          yes | vdpm install curl-mbedtls mbedtls libarchive un7zip opusfile opus mpg123 bzip2 zstd zlib libvorbis libogg \
             vitaGL vitaShaRK libmathneon SceShaccCgExt taihen
 
       - name: The art, from the latest release
