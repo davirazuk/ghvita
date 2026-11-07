@@ -64,6 +64,7 @@ static int result_ach[6], result_ach_n;   // achievements this song unlocked
 static int result_medal;                  // a better medal than the chart had, or 0
 static bool result_best, result_daily;   // a new best; today's daily song done
 static int result_slowed;                 // the Song speed % of a run played slower than the song (it isn't saved), or 0
+static int result_faster;                 // the Song speed % of a run played faster (it's saved), or 0
 // the results screen's other page: this chart's last plays (this one last)
 #define HIST_MAX 10
 static Played hist[HIST_MAX];
@@ -3182,6 +3183,7 @@ static void finish_song(int how)
     // a run counts (scores, medals, the career, the tour, achievements) at the song's own speed or faster, and not in
     // practice: a practised stretch, or a slowed song, would otherwise go down as the chart's best
     result_slowed = !practicing && game_song_speed() < 0.995f ? (int)(game_song_speed() * 100 + 0.5f) : 0;
+    result_faster = !practicing && game_song_speed() > 1.005f ? (int)(game_song_speed() * 100 + 0.5f) : 0;
     bool counts = !autoplay && !practicing && !result_slowed;
     if (setlist_at >= 0 && !tour_on) {
         gig.songs++;
@@ -3759,6 +3761,10 @@ static void results_screen(void)
         snprintf(d, sizeof(d), "SONG SPEED %d%%", result_slowed);
         font_draw_shadow(res.ui, d, 185, 398, 22, RGBA(255, 160, 90, 255), ALIGN_CENTER);
         font_draw_shadow(res.ui, "Not saved", 185, 424, 20, RGBA(255, 190, 140, 255), ALIGN_CENTER);
+    } else if (result_faster && !result_daily) {
+        char d[48];
+        snprintf(d, sizeof(d), "SONG SPEED %d%%", result_faster);
+        font_draw_shadow(res.ui, d, 185, 398, 22, RGBA(255, 225, 150, 255), ALIGN_CENTER);
     }
     if (result_daily) {
         char d[48];
