@@ -33,7 +33,7 @@ typedef struct {
 } Song;
 
 enum { SORT_TITLE, SORT_ARTIST, SORT_ALBUM, SORT_YEAR, SORT_GENRE, SORT_CHARTER, SORT_HARD, SORT_LENGTH, SORT_NEW, SORT_PLAYS,
-       SORT_COUNT };
+       SORT_RECENT, SORT_COUNT };
 
 // progress (or NULL) every 25 songs found, and before each new Clone Hero song (a folder or a .sng dropped in songs/)
 // is converted, with its name

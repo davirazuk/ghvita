@@ -648,10 +648,19 @@ static int by_plays(const void * a, const void * b)
     return c ? c : by_artist(a, b);
 }
 
+// the latest played first; never played at the end, by artist
+static int by_recent(const void * a, const void * b)
+{
+    const Song * x = a, * y = b;
+    if (x->last_played != y->last_played)
+        return x->last_played < y->last_played ? 1 : -1;
+    return by_artist(a, b);
+}
+
 void songs_sort(int mode)
 {
     static int (* const cmp[SORT_COUNT])(const void *, const void *) = {
-        by_title, by_artist, by_album, by_year, by_genre, by_charter, by_hard, by_length, by_new, by_plays,
+        by_title, by_artist, by_album, by_year, by_genre, by_charter, by_hard, by_length, by_new, by_plays, by_recent,
     };
     if (count)
         qsort(songs, count, sizeof(Song), cmp[mode >= 0 && mode < SORT_COUNT ? mode : SORT_ARTIST]);
@@ -660,7 +669,7 @@ void songs_sort(int mode)
 const char * sort_name(int mode)
 {
     static const char * const names[SORT_COUNT] = {"Title", "Artist", "Album", "Year", "Genre", "Charter", "How hard", "Length",
-                                                   "Newest", "Most played"};
+                                                   "Newest", "Most played", "Recently played"};
     return names[mode >= 0 && mode < SORT_COUNT ? mode : SORT_ARTIST];
 }
 
@@ -689,6 +698,13 @@ void songs_group(const Song * s, int mode, char * out, size_t size)
     case SORT_LENGTH: snprintf(out, size, "%d min", s->length_ms / 60000); return;
     case SORT_NEW: snprintf(out, size, "%s", ""); return;
     case SORT_PLAYS: snprintf(out, size, "%d plays", s->plays); return;
+    case SORT_RECENT: {
+        // headings by how long ago
+        long ago = s->last_played ? (long)time(NULL) - s->last_played : -1;
+        snprintf(out, size, "%s", ago < 0 ? "Not played yet" : ago < 86400 ? "Today" : ago < 7 * 86400 ? "This week"
+                                  : ago < 31 * 86400 ? "This month" : "Earlier");
+        return;
+    }
     }
     unsigned char c = key && key[0] ? (unsigned char)key[0] : '#';
     if (c >= 'a' && c <= 'z')
