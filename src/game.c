@@ -1658,6 +1658,26 @@ void game_stop(void)
     game_log_whammy();
 }
 
+void game_playing(int * part, int * diff)
+{
+    *part = G.part_id;
+    *diff = G.diff;
+}
+
+// the section the song is in now (the chart's name for it), "" when the chart names none
+void game_section_now(char * out, int size)
+{
+    const Chart * c = G.chart;
+    out[0] = 0;
+    if (!c || !c->section_count)
+        return;
+    int k = -1;
+    for (int i = 0; i < c->section_count && c->sections[i].time / 1e6 <= G.t; i++)
+        k = i;
+    if (k >= 0)
+        snprintf(out, size, "%s", c->sections[k].name);
+}
+
 void game_status(int * song_pct, int * notes_pct)
 {
     double start = 0, end = G.last_note_end > 0 ? G.last_note_end : 1;
