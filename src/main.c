@@ -3267,11 +3267,31 @@ static void results_screen(void)
         // failed, the big line doesn't name the song
         char who[200];
         snprintf(who, sizeof(who), "%s  -  %s", s->name, s->artist);
-        if (result.battle)
-            snprintf(who, sizeof(who), "you %d, %s %d   attacks thrown %d, taken %d", result.score, result.rival_name,
-                     result.rival_score, result.attacks_thrown, result.attacks_taken);
-        font_draw_fit(res.ui, result.failed || result.battle ? who : s->artist, SCREEN_W / 2, 104, 26, 820,
-                      RGBA(230, 230, 230, 255), ALIGN_CENTER);
+        if (result.battle) {
+            // head to head: a bar each, as long as its score, the winner's lit
+            int top = result.score > result.rival_score ? result.score : result.rival_score;
+            if (top < 1)
+                top = 1;
+            const float bx = 330, bw = 420;
+            for (int k = 0; k < 2; k++) {
+                bool me = k == 0;
+                int sc = me ? result.score : result.rival_score;
+                bool won = me == (result.battle == 1);
+                float y = 98 + k * 22;
+                font_draw_fit(res.ui, me ? "You" : result.rival_name, bx - 12, y - 2, 18, 160,
+                              me ? RGBA(150, 215, 255, 255) : RGBA(255, 160, 140, 255), ALIGN_RIGHT);
+                gfx_rect(bx, y, bw, 14, RGBA(0, 0, 0, 170));
+                gfx_rect(bx, y, bw * sc / top, 14, me ? RGBA(70, 190, 255, won ? 255 : 150)
+                                                     : RGBA(235, 70, 55, won ? 255 : 150));
+                snprintf(who, sizeof(who), "%d", sc);
+                font_draw(res.ui, who, bx + bw + 10, y - 2, 18, WHITE, ALIGN_LEFT);
+            }
+            snprintf(who, sizeof(who), "%s hit %d%% of notes   attacks thrown %d, taken %d", result.rival_name,
+                     result.rival_pct, result.attacks_thrown, result.attacks_taken);
+            font_draw_fit(res.ui, who, SCREEN_W / 2, 464, 17, 820, RGBA(200, 195, 185, 255), ALIGN_CENTER);
+        } else
+            font_draw_fit(res.ui, result.failed ? who : s->artist, SCREEN_W / 2, 104, 26, 820, RGBA(230, 230, 230, 255),
+                          ALIGN_CENTER);
     }
     draw_cover(art_for == sel ? art : NULL, 84, 150, 200);
     char t[96];
