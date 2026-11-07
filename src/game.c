@@ -174,19 +174,29 @@ static struct {
 } practice;
 
 // a battle: a computer rival plays the same chart, each side's own rock meter; Star Power phrases earn attacks
-enum { ATK_LEFTY, ATK_BLACKOUT, ATK_DRAIN, ATK_COUNT };
-static const char * const atk_names[ATK_COUNT] = {"LEFTY FLIP", "BLACKOUT", "AMP DRAIN"};
+enum { ATK_LEFTY, ATK_BLACKOUT, ATK_DRAIN, ATK_SPEED, ATK_COUNT };
+static const char * const atk_names[ATK_COUNT] = {"LEFTY FLIP", "BLACKOUT", "AMP DRAIN", "SPEED UP"};
 static struct {
     bool armed, on;
-    float skill;                        // the rival's chance of hitting a note
+    float skill;                        // the rival's chance of hitting an easy note
+    float form;                         // its mood: up after a run of hits, down after misses (-0.12 .. +0.04)
     int next;                           // the rival's next note
     float rock;
     long score;
     int streak;
+    char name[24];
     int mine[3], mine_n;                // attacks ready to throw
-    int theirs[3], theirs_n;            // the rival's, thrown at theirs_t
-    double theirs_t;
-    double lefty_until, blackout_until, dazed_until;
+    int theirs[3], theirs_n;            // the rival's, held for the moment they hurt most
+    double theirs_ready;                // the rival won't throw before this
+    double warn_t;                      // a rival attack lands at warn_t (warned a second before)
+    int warn_atk;
+    int thrown, taken;                  // attacks the player threw, and took
+    int hits, played;                   // the rival's notes hit, of those it played
+    double lefty_until, blackout_until, speed_until;
+    double rival_hit_until;             // the player's attack still shaking the rival
+    float rival_hit;                    // how much it's shaken (off its hit chance)
+    float base_speed;
+    double sp_until;                    // the rival's own Star Power: its points doubled till then
     int result;                         // 1 won, 2 lost
     unsigned seed;
 } battle;
@@ -1515,6 +1525,7 @@ bool game_start(Song * song, int part, int diff)
     G.beat_best = song->best[part][diff].score;
     battle.on = battle.armed && !practice.on;
     battle.armed = false;
+    battle.base_speed = 0;      // the highway speed is read afresh
     ghost_start(song, part, diff);
     const Part * p = G.part;
     G.state = malloc(p->note_count + 1);
@@ -1630,7 +1641,10 @@ void game_restart(void)
 
 void game_stop(void)
 {
+    if (battle.on && battle.base_speed > 0)
+        G.speed = battle.base_speed;
     battle.on = false;
+    battle.base_speed = 0;
     if (G.drums)
         plat_log("drums: %d freestyle hits", G.freestyle);
     practice.on = false;
@@ -1707,6 +1721,10 @@ Result game_result(void)
             battle.result = (long)G.score >= battle.score ? 1 : 2;
         r.battle = battle.result;
         r.rival_score = (int)battle.score;
+        r.attacks_thrown = battle.thrown;
+        r.attacks_taken = battle.taken;
+        r.rival_pct = battle.played ? battle.hits * 100 / battle.played : 0;
+        snprintf(r.rival_name, sizeof(r.rival_name), "%s", battle.name);
     }
     r.part = G.part_id;
     r.diff = G.diff;
@@ -2899,6 +2917,7 @@ static void draw_zones(void)
 }
 
 static void lay(float x, float y, float z, float w, float d, const Sprite * s, uint32_t c);
+static void lay_cup(float x, float y, float z, float w, float d, const Sprite * s, uint32_t c);
 
 static void draw_cups(bool caps)
 {
@@ -2908,7 +2927,7 @@ static void draw_cups(bool caps)
         float x = lane_x(l);
         if (!caps) {
             snprintf(name, sizeof(name), "%s_%d", cfg.cup_skin ? "cupdeep" : "cup", lane_art(l));
-            lay(x, 0.015f, 0, cw, cup_d, atlas_get(res.game, name), WHITE);
+            lay_cup(x, 0.015f, 0, cw, cup_d, atlas_get(res.game, name), WHITE);
         } else if (G.held & (1 << l)) {
             // held, the cap stands in the cup, centred on it, raised a little
             snprintf(name, sizeof(name), "cap_%d", lane_art(l));
@@ -3006,6 +3025,18 @@ static void lay(float x, float y, float z, float w, float d, const Sprite * s, u
         return;
     }
     flat(x + w / 2, x - w / 2, z - d / 2, z + d / 2, y, s, 1, 0, c, c);
+}
+
+// a strikeline cup without the arch (World Tour's string hook) its art has across the top: lying on the neck or
+// standing, that arch never sat square over the cup. The art's top 27% goes and the cup keeps its own size
+static void lay_cup(float x, float y, float z, float w, float d, const Sprite * s, uint32_t c)
+{
+    const float cut = 0.27f;
+    if (!cfg.flat_notes) {
+        board(x, y, z - d * 0.25f, w, d * 0.5f * (1 - cut), s, 0, cut, 1, 1, c);
+        return;
+    }
+    flat(x + w / 2, x - w / 2, z - d / 2, z - d / 2 + d * (1 - cut), y, s, 1, cut, c, c);
 }
 
 static void lay_gem(float x, float y, float z, float w, float d, const Sprite * s, uint32_t c)
@@ -3297,74 +3328,163 @@ static float battle_rand(void)
 
 static void battle_reset(void)
 {
-    static const float skill[DIFF_COUNT] = {0.86f, 0.9f, 0.93f, 0.955f};
+    static const float skill[DIFF_COUNT] = {0.9f, 0.93f, 0.95f, 0.97f};
+    // the rival's own level on top of the difficulty's: easy, normal, hard, brutal
+    static const float level[4] = {-0.1f, 0, 0.02f, 0.035f};
+    static const char * const names[] = {"Lou", "Grim Ripper", "Lars Umlaut", "The Vandals", "Casey Lynch", "Izzy Sparks",
+                                         "Midori", "Johnny Napalm", "Axel Steel", "Judy Nails", "Pandora", "Clive Winston"};
     unsigned seed = battle.seed ? battle.seed : 7;
     bool on = battle.on;
+    float base = battle.base_speed > 0 ? battle.base_speed : (float)G.speed;
     memset(&battle, 0, sizeof(battle));
     battle.on = on;
-    battle.seed = seed;
-    // the rival's own level on top of the difficulty's: easy, normal, hard, brutal
-    static const float level[4] = {-0.1f, 0, 0.025f, 0.04f};
+    battle.seed = seed ^ (unsigned)(G.part ? G.part->note_count * 2654435761u : 0);
     battle.skill = skill[G.diff >= 0 && G.diff < DIFF_COUNT ? G.diff : 3] + level[cfg.rival & 3];
-    if (battle.skill > 0.995f)
-        battle.skill = 0.995f;
     battle.rock = 0.5f;
     battle.next = G.first;
+    battle.base_speed = base;
+    G.speed = base;
+    battle.theirs_ready = 8;            // nothing thrown in the first seconds
+    snprintf(battle.name, sizeof(battle.name), "%s", names[(int)(battle_rand() * 12) % 12]);
 }
 
-// an attack from the player, the oldest first
+// how hard a note is for the rival's fingers: chords, fast runs, long streams and taps cost it
+static float note_cost(int i)
+{
+    const Part * p = G.part;
+    const Note * n = &p->notes[i];
+    float cost = 0;
+    int frets = frets_count(n->frets);
+    if (frets >= 2)
+        cost += 0.012f * (frets - 1);
+    double gap = i > 0 ? (n->time - p->notes[i - 1].time) / 1e6 : 1;
+    if (gap < 0.09)
+        cost += 0.03f;
+    else if (gap < 0.14)
+        cost += 0.015f;
+    if (n->flags & NOTE_TAP)
+        cost += 0.01f;
+    // a stream: many notes in the next second
+    int dense = 0;
+    for (int k = i + 1; k < p->note_count && p->notes[k].time - n->time < 1000000; k++)
+        dense++;
+    if (dense > 10)
+        cost += 0.004f * (dense - 10);
+    return cost > 0.15f ? 0.15f : cost;
+}
+
+// how much is coming at the player in the next few seconds: notes a second
+static float notes_ahead(double secs)
+{
+    const Part * p = G.part;
+    int n = 0;
+    for (int k = G.first; k < p->note_count && p->notes[k].time / 1e6 < G.t + secs; k++)
+        if (p->notes[k].time / 1e6 >= G.t)
+            n++;
+    return n / (float)secs;
+}
+
+// an attack from the player, the oldest first: each shakes the rival its own way
 static void battle_fire(void)
 {
     if (!battle.mine_n || G.t < 0)
         return;
     int a = battle.mine[0];
     memmove(battle.mine, battle.mine + 1, sizeof(int) * --battle.mine_n);
-    // on the rival every attack shakes them: fewer notes for a while, and a drain takes meter at once
-    battle.dazed_until = G.t + (a == ATK_DRAIN ? 3 : 7);
+    static const float shake[ATK_COUNT] = {0.12f, 0.16f, 0.06f, 0.1f};
+    static const float secs[ATK_COUNT] = {6, 5, 3, 7};
+    battle.rival_hit = shake[a];
+    battle.rival_hit_until = G.t + secs[a];
     if (a == ATK_DRAIN)
         battle.rock -= 0.15f;
+    battle.form -= 0.02f;
+    battle.thrown++;
     char t[48];
     snprintf(t, sizeof(t), "%s!", atk_names[a]);
     popup_always(t);
     sound_play(res.snd[SND_SP_DEPLOY], 0.9f, false);
 }
 
-// the rival plays up to now, and throws what it earned a moment after earning it
+static void battle_land(int a)
+{
+    if (a == ATK_LEFTY)
+        battle.lefty_until = G.t + 7;
+    else if (a == ATK_BLACKOUT)
+        battle.blackout_until = G.t + 6;
+    else if (a == ATK_SPEED)
+        battle.speed_until = G.t + 7;
+    else
+        rock_change(-0.15f);
+    battle.taken++;
+    char t[48];
+    snprintf(t, sizeof(t), "%s!", atk_names[a]);
+    popup_always(t);
+    sound_play(res.snd[SND_BOO1], cfg.crowd_vol * 0.06f, false);
+}
+
+// the rival plays up to now, and throws what it earned when it hurts most
 static void battle_update(void)
 {
     const Part * p = G.part;
     while (battle.next < p->note_count && p->notes[battle.next].time / 1e6 <= G.t) {
-        const Note * n = &p->notes[battle.next++];
-        float skill = G.t < battle.dazed_until ? battle.skill - 0.3f : battle.skill;
-        if (battle_rand() < skill) {
+        int i = battle.next++;
+        const Note * n = &p->notes[i];
+        float chance = battle.skill - note_cost(i) + battle.form;
+        if (G.t < battle.rival_hit_until)
+            chance -= battle.rival_hit;
+        // with its back to the wall it tightens up
+        if (battle.rock < 0.25f)
+            chance += 0.04f;
+        battle.played++;
+        if (battle_rand() < chance) {
+            battle.hits++;
             battle.streak++;
-            int mult = 1 + (battle.streak / 10 < 3 ? battle.streak / 10 : 3);
-            battle.score += 50 * mult;
-            battle.rock = battle.rock + 0.012f > 1 ? 1 : battle.rock + 0.012f;
-            if ((n->flags & NOTE_SP_END) && battle.theirs_n < 3) {
-                battle.theirs[battle.theirs_n++] = (int)(battle_rand() * ATK_COUNT) % ATK_COUNT;
-                battle.theirs_t = G.t + 1.5 + battle_rand() * 3;
+            int mult = (1 + (battle.streak / 10 < 3 ? battle.streak / 10 : 3)) * (G.t < battle.sp_until ? 2 : 1);
+            // a note's points, and its sustain's as the player gets them (25 a beat, about)
+            battle.score += (50 * frets_count(n->frets) + (long)(n->len / 1e6 * 50)) * mult;
+            battle.rock = battle.rock + 0.015f > 1 ? 1 : battle.rock + 0.015f;
+            battle.form = battle.form + 0.002f > 0.04f ? 0.04f : battle.form + 0.002f;
+            if (n->flags & NOTE_SP_END) {
+                // a phrase: an attack if it has room for one, else its own Star Power
+                if (battle.theirs_n < 2)
+                    battle.theirs[battle.theirs_n++] = (int)(battle_rand() * ATK_COUNT) % ATK_COUNT;
+                else
+                    battle.sp_until = G.t + 8;
             }
         } else {
+            // a miss shakes it: the next ones are more likely to go too
             battle.streak = 0;
-            battle.rock -= 0.045f;
+            battle.rock -= 0.035f;
+            battle.form = battle.form - 0.015f < -0.08f ? -0.08f : battle.form - 0.015f;
         }
     }
-    if (battle.theirs_n && G.t >= battle.theirs_t) {
-        int a = battle.theirs[0];
-        memmove(battle.theirs, battle.theirs + 1, sizeof(int) * --battle.theirs_n);
-        battle.theirs_t = G.t + 4;
-        if (a == ATK_LEFTY)
-            battle.lefty_until = G.t + 7;
-        else if (a == ATK_BLACKOUT)
-            battle.blackout_until = G.t + 7;
-        else
-            rock_change(-0.15f);
-        char t[48];
-        snprintf(t, sizeof(t), "RIVAL: %s!", atk_names[a]);
-        popup_always(t);
-        sound_play(res.snd[SND_BOO1], cfg.crowd_vol * 0.06f, false);
+    battle.form *= 0.9995f;             // it settles back towards its level
+    // an attack on its way lands
+    if (battle.warn_t > 0 && G.t >= battle.warn_t) {
+        battle.warn_t = 0;
+        battle_land(battle.warn_atk);
     }
+    // the rival's throw: when the player is low, when a run is coming, or when it's sat on one too long
+    if (battle.theirs_n && !battle.warn_t && G.t >= battle.theirs_ready) {
+        bool finish = G.rock < 0.4f, run = notes_ahead(4) >= 6, bored = G.t >= battle.theirs_ready + 12;
+        int pick = -1;
+        for (int k = 0; k < battle.theirs_n && pick < 0; k++) {
+            int a = battle.theirs[k];
+            if ((a == ATK_DRAIN && finish) || (a != ATK_DRAIN && run))
+                pick = k;
+        }
+        if (pick < 0 && (bored || finish))
+            pick = 0;
+        if (pick >= 0) {
+            battle.warn_atk = battle.theirs[pick];
+            memmove(battle.theirs + pick, battle.theirs + pick + 1, sizeof(int) * (--battle.theirs_n - pick));
+            battle.warn_t = G.t + 1.0;
+            battle.theirs_ready = G.t + 6;
+        }
+    }
+    // Speed Up: the notes rush down the highway while it lasts
+    float want = G.t < battle.speed_until ? battle.base_speed * 1.6f : battle.base_speed;
+    G.speed += (want - G.speed) * 0.1f;
 }
 
 static void draw_battle(void)
@@ -3373,8 +3493,7 @@ static void draw_battle(void)
         return;
     // the rival's meter down the right edge, its score above
     const float x = SCREEN_W - 30, top = 300, h = 150;
-    static const char * const lv[4] = {"EASY RIVAL", "RIVAL", "HARD RIVAL", "BRUTAL RIVAL"};
-    font_draw_shadow(res.ui, lv[cfg.rival & 3], x + 8, top - 48, 20, RGBA(255, 160, 140, 255), ALIGN_RIGHT);
+    font_draw_shadow(res.ui, battle.name, x + 8, top - 48, 20, RGBA(255, 160, 140, 255), ALIGN_RIGHT);
     char t[48];
     snprintf(t, sizeof(t), "%ld", battle.score);
     font_draw_shadow(res.ui, t, x + 8, top - 26, 20, WHITE, ALIGN_RIGHT);
@@ -3382,8 +3501,14 @@ static void draw_battle(void)
     float r = battle.rock < 0 ? 0 : battle.rock;
     uint32_t c = r > 0.66f ? RGBA(90, 220, 90, 255) : r > 0.33f ? RGBA(240, 200, 60, 255) : RGBA(230, 60, 50, 255);
     gfx_rect(x, top + h * (1 - r), 12, h * r, c);
-    if (G.t < battle.dazed_until)
+    if (G.t < battle.rival_hit_until)
         font_draw_shadow(res.ui, "HIT!", x + 8, top + h + 6, 18, RGBA(255, 210, 90, 255), ALIGN_RIGHT);
+    if (battle.warn_t > 0) {
+        // the rival's attack on its way: a second's warning
+        char w[48];
+        snprintf(w, sizeof(w), "INCOMING: %s", atk_names[battle.warn_atk]);
+        font_draw_shadow(res.title, w, SCREEN_W / 2, 96, 30, RGBA(255, 110, 90, 255), ALIGN_CENTER);
+    }
     // the attacks in hand
     for (int i = 0; i < battle.mine_n; i++)
         font_draw_shadow(res.ui, atk_names[battle.mine[i]], 16, 226 + i * 22, 18,

@@ -2876,6 +2876,9 @@ static void finish_song(int how)
     result_daily = s && !result.failed && !autoplay && !practicing && daily_finished(s);
     hist_n = s && !practicing ? songs_history(s, result.part, result.diff, hist, HIST_MAX) : 0;
     hist_has_this = s && !result.failed && !autoplay;
+    if (result.battle)
+        plat_log("battle: %s, you %d, %s %d (%d%% of notes), attacks thrown %d, taken %d", result.battle == 1 ? "won" : "lost",
+                 result.score, result.rival_name, result.rival_score, result.rival_pct, result.attacks_thrown, result.attacks_taken);
     results_history = false;
     if (!autoplay && !practicing)
         career_add(result.part, result.score, result.stars, result.notes_hit, result.notes_total, result.best_streak,
@@ -3105,7 +3108,8 @@ static void results_screen(void)
         char who[200];
         snprintf(who, sizeof(who), "%s  -  %s", s->name, s->artist);
         if (result.battle)
-            snprintf(who, sizeof(who), "%s  -  you %d, rival %d", s->name, result.score, result.rival_score);
+            snprintf(who, sizeof(who), "you %d, %s %d   attacks thrown %d, taken %d", result.score, result.rival_name,
+                     result.rival_score, result.attacks_thrown, result.attacks_taken);
         font_draw_fit(res.ui, result.failed || result.battle ? who : s->artist, SCREEN_W / 2, 104, 26, 820,
                       RGBA(230, 230, 230, 255), ALIGN_CENTER);
     }
@@ -4773,6 +4777,8 @@ int main(void)
         Song * s = songs_get(sel);
         int part = getenv("GHV_PART") ? atoi(getenv("GHV_PART")) : 0;
         int diff = getenv("GHV_DIFF") ? atoi(getenv("GHV_DIFF")) : 3;
+        if (getenv("GHV_BATTLE"))
+            game_battle();          // tests: a battle (GHV_BATTLE=1)
         if (s && game_start(s, part, diff)) {
             game_set_autoplay(autoplay);
             go(S_PLAY);

@@ -27,6 +27,8 @@ typedef struct {
     int vox_good, vox_graded;   // phrases sung strong (80%+) of those graded, 0 when not singing along
     int battle;                 // 0 not a battle, 1 won, 2 lost
     int rival_score;
+    int attacks_thrown, attacks_taken, rival_pct;
+    char rival_name[24];
 } Result;
 
 enum { GAME_PLAYING, GAME_DONE, GAME_FAILED, GAME_PAUSE };
