@@ -3422,6 +3422,8 @@ static void results_screen(void)
     }
     if ((pressed & BTN_TRIANGLE) && s) {
         ui_sound(SND_UI_SELECT);
+        if (result.battle)
+            game_battle(result.rival_level);    // a battle's retry is a battle again, at the same rival level
         if (game_start(s, result.part, result.diff)) {
             game_set_autoplay(autoplay);
             go(S_PLAY);
@@ -5302,6 +5304,7 @@ static void news_screen(void)
 {
     static const char * const lines[] = {
         "A hit gem swells and fades at the strikeline. In slow songs the crowd holds up lighters.",
+        "Fixed: Retry after a battle played the song without the battle.",
         "Options: choosing a highway or a venue shows a preview of it. Fixed: Highway solid's value was cut to \"10...\".",
         "The rock meter glows red and its needle trembles when you're about to fail; full, it glows green.",
         "Options > Screen > Effects: Light turns off the heavier effects for a steadier frame rate.",
