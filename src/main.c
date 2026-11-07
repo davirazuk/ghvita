@@ -4610,12 +4610,11 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
-        "Players: WHO'S PLAYING? at the start. Square edits a card: name, colour, a picture (your songs' covers, album covers downloaded from Chorus, or your own), delete.",
-        "Battle: Triangle on GET READY. Star Power phrases become attacks against a computer rival.",
-        "DAILY SONG on the main menu, with a streak. Medals (bronze, silver, gold) on every chart.",
-        "28 achievements on CAREER (press R). Race your best: GHOST +/- shows how you're doing against your best run.",
-        "Practice: start, end, then speed, step by step. Speed up as you clear. Speeds over 100% really play faster now.",
-        "Results: R shows your last 10 plays. Singing along shows the vocals' own score. Select > Check for newer charts.",
+        "Downloads and update checks work on the Vita again (builds 62 to 75 couldn't connect).",
+        "Player pictures: Guitar Hero logos, the griffin and World Tour's magazines, or download any album cover.",
+        "Results: how many hits were on time, with an early / on time / late bar under Your timing.",
+        "Medals show in the song list. Show > Played, no gold medal yet. Options > Game > Battle rival: Easy to Brutal.",
+        "Earlier: players, battle mode, medals, achievements, race your best, daily song, practice speed-ups.",
     };
     int n = (int)(sizeof(lines) / sizeof(lines[0]));
     gfx_begin(0, 0, 0);
