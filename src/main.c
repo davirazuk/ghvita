@@ -174,6 +174,21 @@ static void draw_cover(Tex * t, float x, float y, float size)
 }
 
 // a panel of GHWT's stitched leather
+// the menus' highlight on the chosen row: World Tour's bar, breathing, a soft glow sweeping along it
+static void select_bar(float x, float y, float w, float h, uint32_t col)
+{
+    (void)col;
+    float b = 0.82f + 0.18f * sinf((float)now_s * 5);
+    int v = (int)(255 * b);
+    gfx_sprite(atlas_get(res.hud, "wor_select"), x, y, w, h, RGBA(v, v, v, 255));
+    float sweep = (float)fmod(now_s * 0.6, 1.6) - 0.3f;
+    if (sweep > 0 && sweep < 1) {
+        gfx_blend(BLEND_ADD);
+        gfx_sprite(atlas_get(res.game, "glow"), x + w * sweep - h, y - h * 0.2f, h * 2, h * 1.4f, RGBA(255, 220, 140, 70));
+        gfx_blend(BLEND_ALPHA);
+    }
+}
+
 static void panel(float x, float y, float w, float h)
 {
     gfx_nine(atlas_get(res.hud, "list_bg"), x, y, w, h, 40, 0.8f, WHITE);
@@ -618,7 +633,7 @@ static void main_menu(void)
     for (int i = 0; i < n; i++) {
         float y = 118 + i * 41;
         if (i == menu_index)
-            gfx_sprite(atlas_get(res.hud, "wor_select"), 50, y - 5, 400, 42, WHITE);
+            select_bar(50, y - 5, 400, 42, WHITE);
         font_draw_shadow(res.title, items[i], 80, y, 34, i == menu_index ? RGBA(255, 230, 150, 255)
                                                                            : RGBA(200, 190, 180, 255), ALIGN_LEFT);
         if (i == M_DAILY && songs_count()) {
@@ -1402,7 +1417,10 @@ static void dl_queue_screen(void)
         const DlJob * q = &jobs[top + r];
         float y = 130 + r * 56;
         bool on = top + r == dl_jobs_sel;
-        gfx_sprite(atlas_get(res.hud, on ? "wor_select" : "wor_row"), 14, y, 580, 54, WHITE);
+        if (on)
+            select_bar(14, y, 580, 54, WHITE);
+        else
+            gfx_sprite(atlas_get(res.hud, "wor_row"), 14, y, 580, 54, WHITE);
         font_draw_fit(res.ui, q->hit.site == DL_CHORUS ? "CH" : "RV", 42, y + 9, 16, 40, RGBA(135, 140, 150, 255),
                       ALIGN_LEFT);
         font_draw_fit(res.ui, q->hit.name, 80, y + 6, 22, 380, on ? RGBA(255, 220, 160, 255) : RGBA(220, 220, 225, 255),
@@ -1634,7 +1652,10 @@ static void download_screen(void)
         const DlHit * h = &rows[r];
         float y = 130 + r * 56;
         bool on = dl_top + r == dl_sel, dim = h->unplayable[0] != 0;
-        gfx_sprite(atlas_get(res.hud, on ? "wor_select" : "wor_row"), 14, y, 580, 54, WHITE);
+        if (on)
+            select_bar(14, y, 580, 54, WHITE);
+        else
+            gfx_sprite(atlas_get(res.hud, "wor_row"), 14, y, 580, 54, WHITE);
         char up[128], badge_buf[16], sub[200];
         upper(up, sizeof(up), h->name);
         if (h->charter[0])
@@ -2258,7 +2279,7 @@ static void list_menu_draw(const Song * s)
     for (int i = 0; i < 9; i++) {
         float y = 86 + i * 44;
         if (i == list_row)
-            gfx_sprite(atlas_get(res.hud, "wor_select"), 224, y - 4, 512, 42, WHITE);
+            select_bar(224, y - 4, 512, 42, WHITE);
         font_draw_fit(res.ui, rows[i], SCREEN_W / 2, y + 2, 28, 460, i == list_row ? RGBA(255, 230, 150, 255)
                                                                                    : RGBA(220, 215, 205, 255), ALIGN_CENTER);
     }
@@ -2418,7 +2439,10 @@ static void song_list(void)
         Song * x = songs_get(i);
         float y = 104 + r * 56;
         bool on = top + r == pos;
-        gfx_sprite(atlas_get(res.hud, on ? "wor_select" : "wor_row"), 14, y, 580, 54, WHITE);
+        if (on)
+            select_bar(14, y, 580, 54, WHITE);
+        else
+            gfx_sprite(atlas_get(res.hud, "wor_row"), 14, y, 580, 54, WHITE);
         Tex * th = thumb_get(x);
         gfx_rect(26, y + 5, 44, 44, RGBA(0, 0, 0, 160));
         if (th)
@@ -2544,7 +2568,7 @@ static void draw_select(const Song * s, bool loading)
         float y = 254 + d * 46;
         bool on = d == sel_diff, has = sel_diffs[sel_part] & (1 << d);
         if (on)
-            gfx_sprite(atlas_get(res.hud, "wor_select"), 60, y - 4, 500, 44, WHITE);
+            select_bar(60, y - 4, 500, 44, WHITE);
         font_draw_shadow(res.ui, diff_name(d), 90, y, 30,
                          on ? RGBA(255, 230, 150, 255) : has ? RGBA(190, 190, 190, 255) : RGBA(85, 80, 75, 255),
                          ALIGN_LEFT);
@@ -2865,7 +2889,7 @@ static void practice_screen(void)
         float y = 318 + r * 40;
         bool cur = pr_step == PR_STEP_SET && r == pr_set_row;
         if (cur)
-            gfx_sprite(atlas_get(res.hud, "wor_select"), 622, y - 4, 312, 38, WHITE);
+            select_bar(622, y - 4, 312, 38, WHITE);
         uint32_t col = pr_step != PR_STEP_SET ? RGBA(150, 150, 150, 255) : cur ? RGBA(255, 236, 170, 255) : RGBA(220, 220, 220, 255);
         if (r == 0)
             font_draw_shadow(res.title, labels[0], 778, y - 2, 32, col, ALIGN_CENTER);
@@ -3146,7 +3170,7 @@ static void pause_screen(void)
     for (int i = 0; i < n; i++) {
         float y = 192 + i * step;
         if (i == menu_index)
-            gfx_sprite(atlas_get(res.hud, "wor_select"), SCREEN_W / 2 - 170, y - 4, 340, step - 4, WHITE);
+            select_bar(SCREEN_W / 2 - 170, y - 4, 340, step - 4, WHITE);
         uint32_t col = i == menu_index ? RGBA(255, 230, 150, 255) : RGBA(210, 200, 190, 255);
         if (font_width(res.title, items[i], size) > 320)
             font_draw_fit(res.title, items[i], SCREEN_W / 2, y, size, 320, col, ALIGN_CENTER);
@@ -3642,7 +3666,7 @@ static void tour_screen(void)
         float y = 158 + g * 54;
         bool on = g == tour_gig;
         if (on)
-            gfx_sprite(atlas_get(res.hud, "wor_select"), 30, y - 6, 376, 50, tour_in_set ? RGBA(150, 150, 150, 255) : WHITE);
+            select_bar(30, y - 6, 376, 50, tour_in_set ? RGBA(150, 150, 150, 255) : WHITE);
         const char * title = res_venue_title(tour_zone(tour_leg, g));
         font_draw_fit(res.ui, leg_open ? title : "???", 56, y + 2, 28, 250,
                       on ? RGBA(255, 230, 150, 255) : leg_open ? RGBA(205, 200, 195, 255) : RGBA(100, 95, 90, 255),
@@ -3664,7 +3688,7 @@ static void tour_screen(void)
             float y = 162 + i * 78;
             bool on = tour_in_set && i == tour_slot, locked = i == TOUR_ENCORE && !encore_open;
             if (on)
-                gfx_sprite(atlas_get(res.hud, "wor_select"), 444, y - 8, 484, 74, WHITE);
+                select_bar(444, y - 8, 484, 74, WHITE);
             const Song * s = tour_ids[i] >= 0 ? songs_get(tour_ids[i]) : NULL;
             uint32_t c = locked ? RGBA(120, 115, 110, 255) : on ? RGBA(255, 230, 150, 255) : RGBA(225, 220, 212, 255);
             if (i == TOUR_ENCORE)
@@ -4051,7 +4075,7 @@ static void options_screen(void)
         float y = 140 + r * 32;
         bool on = opt_top + r == menu_index;
         if (on)
-            gfx_sprite(atlas_get(res.hud, "wor_select"), 130, y - 3, 700, 34, WHITE);
+            select_bar(130, y - 3, 700, 34, WHITE);
         uint32_t c = on ? RGBA(255, 230, 150, 255) : RGBA(220, 215, 205, 255);
         font_draw(res.ui, name, 160, y + 1, 26, c, ALIGN_LEFT);
         // the volumes and percentages show as a bar as well
@@ -4692,7 +4716,7 @@ static void player_edit_screen(void)
         float y = 98 + i * 47;
         bool cur = i == pe_row;
         if (cur)
-            gfx_sprite(atlas_get(res.hud, "wor_select"), 44, y - 4, 532, 46, WHITE);
+            select_bar(44, y - 4, 532, 46, WHITE);
         uint32_t col = i == PE_DELETE ? RGBA(255, 140, 120, 255) : cur ? RGBA(255, 230, 150, 255) : RGBA(215, 205, 195, 255);
         font_draw_shadow(res.ui, labels[i], 60, y + 6, 24, col, ALIGN_LEFT);
         font_draw_fit(res.ui, vals[i], 562, y + 9, 20, 230, cur ? RGBA(255, 236, 190, 255) : RGBA(180, 180, 185, 255),
