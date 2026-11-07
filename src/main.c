@@ -4250,6 +4250,15 @@ static void options_screen(void)
         }
         font_draw_fit(res.ui, value, 800, y + 1, 26, bar >= 0 ? 66 : 380, c, ALIGN_RIGHT);
     }
+    if (opt == O_VENUE && strcmp(cfg.venue, "song") && strcmp(cfg.venue, "random") && strcmp(cfg.venue, "classic")) {
+        // the chosen venue, small, in the panel's corner under the rows
+        Tex * v = res_venue_preview(cfg.venue);
+        if (v) {
+            const float w = 128, h = 73, x = 820 - w, y = 372;
+            gfx_rect(x - 3, y - 3, w + 6, h + 6, RGBA(255, 210, 90, 255));
+            gfx_sprite(&(Sprite){v, 0, 0, 1, 1, 960, 544}, x, y, w, h, WHITE);
+        }
+    }
     if (opt == O_HIGHWAY) {
         // the highway as it'll look: a strip of it running away into the distance beside the panel
         Tex * hw = res_highway_preview(cfg.highway);
@@ -5293,7 +5302,7 @@ static void news_screen(void)
 {
     static const char * const lines[] = {
         "A hit gem swells and fades at the strikeline. In slow songs the crowd holds up lighters.",
-        "Options: choosing a highway shows a preview of it. Fixed: Highway solid's value was cut to \"10...\".",
+        "Options: choosing a highway or a venue shows a preview of it. Fixed: Highway solid's value was cut to \"10...\".",
         "The rock meter glows red and its needle trembles when you're about to fail; full, it glows green.",
         "Options > Screen > Effects: Light turns off the heavier effects for a steadier frame rate.",
         "Options > Game > Timing window: Strict, Normal or Lenient. The score counter rolls up.",
