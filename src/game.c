@@ -3844,6 +3844,22 @@ static void draw_hud(void)
     // value instead of snapping with every note
     G.needle += (G.rock - G.needle) * 0.1f;
     float swing = (G.needle - 0.5f) * 2 * 0.85f;
+    if (h < 0.25f && !G.failed)
+        swing += sinf(t * 47) * 0.04f * (0.25f - h) / 0.25f;   // in the red, the needle trembles
+    if (h < 0.25f && !G.failed) {
+        // and a red glow swells around the dome
+        gfx_blend(BLEND_ADD);
+        float gw = 230 * k, ga = (0.25f - h) / 0.25f * (0.4f + 0.3f * fabsf(sinf(t * 6)));
+        gfx_sprite(atlas_get(res.game, "glow"), cx - gw / 2, cy - gw / 2, gw, gw, with_alpha(RGBA(255, 40, 20, 255), ga));
+        gfx_blend(BLEND_ALPHA);
+    } else if (G.rock > 0.95f) {
+        // full: a soft green glow
+        gfx_blend(BLEND_ADD);
+        float gw = 210 * k;
+        gfx_sprite(atlas_get(res.game, "glow"), cx - gw / 2, cy - gw / 2, gw, gw,
+                   with_alpha(RGBA(80, 255, 120, 255), 0.18f + 0.1f * fabsf(sinf(t * 3))));
+        gfx_blend(BLEND_ALPHA);
+    }
     sprite_rot(needle, dx + 128 * k, dy + 172 * k, 13 * k, 84 * k, needle->w / 2.0f, (float)needle->h, swing, WHITE);
     if (G.drums && G.t < 4.5) {
         // which thumb goes where
