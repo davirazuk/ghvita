@@ -4152,6 +4152,17 @@ static void draw_hud(void)
         else
             snprintf(t, sizeof(t), "PRACTICE  %d%%", (int)(practice.speed * 100 + 0.5f));
         font_draw_shadow(res.ui, t, SCREEN_W - 16, 44, 22, RGBA(255, 225, 150, 255), ALIGN_RIGHT);
+        // and where in the song you are, by the chart's section ("verse_1" reads "Verse 1")
+        char sec[48];
+        game_section_now(sec, sizeof(sec));
+        if (sec[0] && strncasecmp(sec, "ugc", 3)) {
+            for (char * c = sec; *c; c++)
+                if (*c == '_')
+                    *c = ' ';
+            if (sec[0] >= 'a' && sec[0] <= 'z')
+                sec[0] -= 32;
+            font_draw_shadow(res.ui, sec, SCREEN_W - 16, 70, 18, RGBA(220, 215, 205, 230), ALIGN_RIGHT);
+        }
     } else if (G.song_speed < 0.995f || G.song_speed > 1.005f) {
         char t[32];
         snprintf(t, sizeof(t), "SPEED  %d%%", (int)(G.song_speed * 100 + 0.5f));
