@@ -49,7 +49,7 @@ static int view_n, view_cap;
 static bool view_stale = true;
 static char find_text[64];
 // what the song list shows: the made-up lists (played long ago, never five stars, short ones), then SHOW_PART + each part
-enum { SHOW_ALL, SHOW_FAVS, SHOW_NEW, SHOW_STALE, SHOW_UNSTARRED, SHOW_SHORT, SHOW_LONG, SHOW_PART };
+enum { SHOW_ALL, SHOW_FAVS, SHOW_NEW, SHOW_STALE, SHOW_UNSTARRED, SHOW_NOGOLD, SHOW_SHORT, SHOW_LONG, SHOW_PART };
 static int show;
 static double sel_t;
 static Tex * art;
@@ -1952,6 +1952,16 @@ static void draw_medal(int m, float x, float y, float r)
     font_draw(res.ui, c, x, y - r * 0.8f, r * 1.5f, RGBA(40, 30, 20, 255), ALIGN_CENTER);
 }
 
+// a full combo on some part at some difficulty
+static bool song_has_gold(const Song * s)
+{
+    for (int p = 0; p < PART_COUNT; p++)
+        for (int d = 0; d < DIFF_COUNT; d++)
+            if (s->best[p][d].fc)
+                return true;
+    return false;
+}
+
 // all the medals won, over every song: {bronze, silver, gold}
 static void medal_totals(int out[4])
 {
@@ -1981,6 +1991,7 @@ static bool song_shown(const Song * s)
     if ((show == SHOW_FAVS && !s->fav) || (show == SHOW_NEW && s->plays) ||
         (show == SHOW_STALE && (!s->plays || s->last_played > month_ago)) ||
         (show == SHOW_UNSTARRED && (!s->plays || song_starred(s))) ||
+        (show == SHOW_NOGOLD && (!s->plays || song_has_gold(s))) ||
         (show == SHOW_SHORT && (s->length_ms <= 0 || s->length_ms > 180000)) ||
         (show == SHOW_LONG && s->length_ms <= 360000) ||
         (show >= SHOW_PART && !(s->parts & (1 << (show - SHOW_PART)))))
@@ -2023,6 +2034,8 @@ static const char * show_name(void)
         return "Not played in a month";
     if (show == SHOW_UNSTARRED)
         return "Played, never 5 stars";
+    if (show == SHOW_NOGOLD)
+        return "Played, no gold medal yet";
     if (show == SHOW_SHORT)
         return "Short (3 min or less)";
     if (show == SHOW_LONG)
@@ -2335,6 +2348,7 @@ static void song_list(void)
         const Score * b = &x->best[first_part(x)][cfg.last_diff];
         if (b->stars)
             draw_stars(b->stars, 470, y + 30, 18);
+        draw_medal(medal_of(b), 572, y + 39, 9);
         if (x->fav)
             gfx_sprite(atlas_get(res.hud, "hud_star_gold"), 20, y + 16, 20, 20, WHITE);
     }
@@ -3451,13 +3465,13 @@ static void tour_screen(void)
 
 enum { O_SPEED, O_HIGHWAY, O_VENUE, O_BAND, O_SING, O_SINGDIFF, O_OFFSET, O_LAYOUT, O_DRUMKEYS, O_DRUMHITS, O_TILT, O_NOFAIL, O_LEFTY, O_MUSIC, O_SFX, O_CROWD, O_FPS,
        O_CAMERA, O_HWALPHA, O_VLIGHT, O_FLASH, O_POPUPS, O_TIMING, O_LIVE, O_VANISH, O_MISSSND, O_REAR, O_BEND, O_COUNTDOWN,
-       O_RESET, O_FIVEPADS, O_DOUBLEKICK, O_EASYSUS, O_COUNTIN, O_SCREENS, O_PROGRESS, O_CUPS, O_AUTOREPRESS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, O_CROWDHANDS, O_VIGNETTE, O_LYRICS, O_MENUMUSIC, O_SINGSP, O_SHRINKCHECK, O_GHOST, O_COUNT };
+       O_RESET, O_FIVEPADS, O_DOUBLEKICK, O_EASYSUS, O_COUNTIN, O_SCREENS, O_PROGRESS, O_CUPS, O_AUTOREPRESS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, O_CROWDHANDS, O_VIGNETTE, O_LYRICS, O_MENUMUSIC, O_SINGSP, O_SHRINKCHECK, O_GHOST, O_RIVAL, O_COUNT };
 
 // the options by subject, L and R between them
 enum { OPT_TABS = 7, OPT_TAB_MAX = 11 };
 static const char * opt_tab_names[OPT_TABS] = {"GAME", "CONTROLS", "HIGHWAY", "STAGE", "SCREEN", "SOUND", "LIBRARY"};
 static const int opt_tabs[OPT_TABS][OPT_TAB_MAX + 1] = {
-    {O_SPEED, O_OFFSET, O_NOFAIL, O_EASYSUS, O_AUTOREPRESS, O_VANISH, O_COUNTDOWN, O_SING, O_SINGDIFF, O_RESET, -1},
+    {O_SPEED, O_OFFSET, O_NOFAIL, O_EASYSUS, O_AUTOREPRESS, O_VANISH, O_COUNTDOWN, O_SING, O_SINGDIFF, O_RIVAL, O_RESET, -1},
     {O_LAYOUT, O_DRUMKEYS, O_FIVEPADS, O_DOUBLEKICK, O_LEFTY, O_TILT, O_REAR, O_SINGSP, -1},
     {O_HIGHWAY, O_HWALPHA, O_CAMERA, O_CUPS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, -1},
     {O_VENUE, O_VLIGHT, O_BAND, O_CROWDHANDS, O_VIGNETTE, O_SCREENS, O_FLASH, -1},
@@ -3583,6 +3597,12 @@ static void option_text(int i, char * name, char * value, size_t n)
     case O_POPUPS: strcpy(name, "Streak messages"); snprintf(value, n, "%s", cfg.no_popups ? "Off" : "On"); break;
     case O_TIMING: strcpy(name, "Timing bar"); snprintf(value, n, "%s", cfg.timing_bar ? "On" : "Off"); break;
     case O_LIVE: strcpy(name, "Live percent"); snprintf(value, n, "%s", cfg.live_stats ? "On" : "Off"); break;
+    case O_RIVAL: {
+        static const char * const lv[4] = {"Easy", "Normal", "Hard", "Brutal"};
+        strcpy(name, "Battle rival");
+        snprintf(value, n, "%s", lv[cfg.rival & 3]);
+        break;
+    }
     case O_GHOST: strcpy(name, "Race your best"); snprintf(value, n, "%s", cfg.no_ghost ? "Off" : "On"); break;
     case O_VANISH: strcpy(name, "Vanishing notes"); snprintf(value, n, "%s", cfg.vanish ? "On" : "Off"); break;
     case O_MISSSND: strcpy(name, "Wrong note sounds"); snprintf(value, n, "%s", cfg.no_miss_sound ? "Off" : "On"); break;
@@ -3680,6 +3700,7 @@ static void change_option(int i, int d)
     case O_TIMING: cfg.timing_bar = !cfg.timing_bar; break;
     case O_LIVE: cfg.live_stats = !cfg.live_stats; break;
     case O_GHOST: cfg.no_ghost = !cfg.no_ghost; break;
+    case O_RIVAL: cfg.rival = (cfg.rival + d + 4) % 4; break;
     case O_VANISH: cfg.vanish = !cfg.vanish; break;
     case O_MISSSND: cfg.no_miss_sound = !cfg.no_miss_sound; break;
     case O_REAR: cfg.no_rear_whammy = !cfg.no_rear_whammy; break;
@@ -3858,6 +3879,7 @@ static void options_screen(void)
         "While Star Power is banked, singing a note in tune starts it, like YARG's voice-activated option.",
         "X counts the songs whose audio isn't shrunk to Opus yet, then X shrinks them, right on the Vita.",
         "GHOST +1200: how far ahead (or behind) your best run on the chart you were at this point.",
+        "How good the computer rival is in a battle (Triangle on GET READY).",
     };
     char line[160];
     const char * text = about[opt];

@@ -92,6 +92,7 @@ typedef struct {
     bool timing_bar;        // where the last hits fell in the window
     bool live_stats;        // percent hit and a full-combo mark in the song
     bool no_ghost;          // no racing the chart's best run
+    int rival;              // battle: the rival's skill, 0 easy 1 normal 2 hard 3 brutal
     bool vanish;            // notes vanish before they reach the strikeline
     bool no_miss_sound;
     bool no_rear_whammy;    // the rear touchpad isn't a whammy bar

@@ -3303,7 +3303,11 @@ static void battle_reset(void)
     memset(&battle, 0, sizeof(battle));
     battle.on = on;
     battle.seed = seed;
-    battle.skill = skill[G.diff >= 0 && G.diff < DIFF_COUNT ? G.diff : 3];
+    // the rival's own level on top of the difficulty's: easy, normal, hard, brutal
+    static const float level[4] = {-0.1f, 0, 0.025f, 0.04f};
+    battle.skill = skill[G.diff >= 0 && G.diff < DIFF_COUNT ? G.diff : 3] + level[cfg.rival & 3];
+    if (battle.skill > 0.995f)
+        battle.skill = 0.995f;
     battle.rock = 0.5f;
     battle.next = G.first;
 }
@@ -3369,7 +3373,8 @@ static void draw_battle(void)
         return;
     // the rival's meter down the right edge, its score above
     const float x = SCREEN_W - 30, top = 300, h = 150;
-    font_draw_shadow(res.ui, "RIVAL", x + 8, top - 48, 20, RGBA(255, 160, 140, 255), ALIGN_RIGHT);
+    static const char * const lv[4] = {"EASY RIVAL", "RIVAL", "HARD RIVAL", "BRUTAL RIVAL"};
+    font_draw_shadow(res.ui, lv[cfg.rival & 3], x + 8, top - 48, 20, RGBA(255, 160, 140, 255), ALIGN_RIGHT);
     char t[48];
     snprintf(t, sizeof(t), "%ld", battle.score);
     font_draw_shadow(res.ui, t, x + 8, top - 26, 20, WHITE, ALIGN_RIGHT);
