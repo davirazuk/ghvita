@@ -735,6 +735,7 @@ static bool rv_fetch(const char * text, int page, int records, DlHit ** out, int
     static const char * const systems[3] = {"ch", "ps", "rb3xbox"};
     for (int sys = 0; sys < (text[0] ? 3 : 2); sys++) {
         char q[400], post[1100], url[200], tail[300];
+        bool tried = false;
         url_escape(q, sizeof(q), text);
         DlFilter flat;
         dl_get_filter(DL_RHYTHMVERSE, &flat);
@@ -759,9 +760,23 @@ static bool rv_fetch(const char * text, int page, int records, DlHit ** out, int
         char * body = NULL;
         size_t len = 0;
         int st = http_fetch(&r, &body, &len, err, err_size);
+        if (st == 429 || st >= 500) {
+            // the site between two breaths (and Cloudflare's 500s come in bunches): ask again
+            plat_log("rv: %s answered %d, asking again", systems[sys], st);
+            st = http_fetch(&r, &body, &len, err, err_size);
+        }
         if (st >= 200 && st < 300) {
             DlHit * part;
             int t, m = parse_rv(body, len, &part, &t, err, err_size);
+            if (m < 0 && !tried) {
+                // the site also slips odd answers in as 200s ("You can't search with this end point" came
+                // and went on /list this very day): asking once more often finds a working page
+                plat_log("rv: %s sent an odd page, asking again", systems[sys]);
+                free(body);
+                st = http_fetch(&r, &body, &len, err, err_size);
+                m = parse_rv(body, len, &part, &t, err, err_size);
+                tried = true;
+            }
             if (m >= 0) {
                 any = true;
                 DlHit * more = realloc(*out, (*n + m + 1) * sizeof(DlHit));
