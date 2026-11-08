@@ -3310,9 +3310,10 @@ static void draw_rope(float xc, float r, float z0, float z1)
 
 static void draw_rail_meter(void)
 {
-    // the gold rope lies on the right rail with five glass lamps along its whole length, lying on the board beside it:
-    // each one's flat end runs along the rope (the board's perspective slants it as it slants the rope) and its round
-    // end points straight out over the stage. Yellow up to x2, green to x3, purple on to the top, as the footage has them
+    // the gold rope lies on the right rail with five glass lamps standing on it end to end: the GHWT HUD's own glass
+    // capsules drawn upright and camera-faced like the multiplier plate, so the bulbs keep their volume as they fall
+    // away down the rail; the cord then runs over each bulb's foot, the way the seat plants its lights. Yellow up to
+    // x2, green to x3, purple on to the top, as the footage has them
     const float z0 = 0.55f, z1 = 3.0f, xc = -HALF_W - 0.03f, rr = 0.055f, y = 0.016f;
     int m = multiplier(), base_m = 1 + G.streak / 10, max_m = G.part_id == PART_BASS ? 6 : 4;
     int lit = base_m >= max_m ? 5 : (G.streak % 10) / 2;
@@ -3323,34 +3324,29 @@ static void draw_rail_meter(void)
     gfx_blend(BLEND_ALPHA);
     // five equal slots end to end over the rope, a little in from its tips: no bare stretch of rope
     const float lz = z0 + 0.07f, slot = (z1 - 0.07f - lz) / 5;
-    // the lamp is drawn true to its art's square (0.95 long, 0.78 deep), so the glass reads as a dome: the art
-    // mapped with depth independent of the reach instead (slot * 1.32) stretched it ~2.5x along the rope and the
-    // domes flattened into dark slivers. 0.34 out of the rope, depth follows to keep the art's own proportions
-    const float reach = 0.34f, depth = reach * 0.80f, xf = xc + rr * 0.6f, xt = xf - reach;
+    // each bulb stands upright on the cord, camera-faced like the multiplier plate: laid flat on the board the glass
+    // never held its own volume (the varied reach made only slants and smears), and the footage's lamps are upright
+    // glass on the seat too. 0.5 off the board, 0.44 wide with the crop's own shape, the cord over each foot
+    const float bw = 0.44f, bh = 0.50f, by = y + rr * 0.6f;
     for (int i = 4; i >= 0; i--) {                      // far to near
         char name[32];
         int state = i < lit ? 2 : half && i == lit ? 1 : 0;
         snprintf(name, sizeof(name), "lamp_%d%s", state, hue);
         const Sprite * s = atlas_get(res.game, name);
-        float zc = lz + slot * (i + 0.5f), za = zc - depth / 2, zb = zc + depth / 2;
-        // the foot (the art's flat right end) under the rope, the round end out; the art's top, its shine, to the far side
-        const float p[4][3] = {{xf, y, zb}, {xt, y, zb}, {xt, y, za}, {xf, y, za}};
-        const float uv[4][2] = {{s->u1, s->v0}, {s->u0, s->v0}, {s->u0, s->v1}, {s->u1, s->v1}};
-        // unlit, the footage's domes are a dark red glass, not gold
-        const uint32_t lc = state == 0 ? RGBA(235, 120, 95, 255) : WHITE, c[4] = {lc, lc, lc, lc};
-        gfx_tex(s->tex);
-        gfx_quad(p, uv, c);
+        float zc = lz + slot * (i + 0.5f);
         if (state == 2) {
-            // lit (the art's glass is white-hot already): a little of its colour on the board round it, kept tight so
-            // each lamp still reads on its own
-            float gx = xf - reach * 0.55f, gw = reach * 0.75f, gd = depth * 1.1f;
+            // lit (the art's glass is white-hot already): its colour spills a little on the board round the foot, kept
+            // tight so each lamp still reads on its own
+            const float gw = 0.22f, gd = 0.15f;
             gfx_blend(BLEND_ADD);
-            flat(gx + gw, gx - gw, zc - gd, zc + gd, 0.013f, atlas_get(res.game, "glow"), 0, 1, with_alpha(light, 0.3f),
-                 with_alpha(light, 0.3f));
+            flat(xc + gw, xc - gw, zc - gd, zc + gd, 0.013f, atlas_get(res.game, "glow"), 0, 1,
+                 with_alpha(light, 0.28f), with_alpha(light, 0.28f));
             gfx_blend(BLEND_ALPHA);
         }
+        // the crop's own colour in all states: the unlit glass is the dark hue, the lit one is white-hot already
+        board(xc, by, zc, bw, bh, s, 0, 0, 1, 1, WHITE);
     }
-    // the rope over the lamps' feet: a slim round gold cord on the rail
+    // the cord over the bulbs' feet, as the seat holds its own lights
     draw_rope(xc, rr, z0, z1);
     if (m > 1) {
         char name[16];

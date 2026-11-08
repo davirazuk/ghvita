@@ -128,37 +128,12 @@ def frames(img, cols, rows):
 
 
 def lamp(state, hue):
-    """one rope lamp, crisp at any size: a glass dome, the round end left, the foot on the right under the rope.
-    0 dark glass, 1 half lit, 2 lit with a white-hot middle and the bloom outside it"""
-    S = 4
-    n = 64 * S
-    yy, xx = np.mgrid[0:n, 0:n] / S
-    cx, cy, r = 28.0, 32.0, 25.0
-    # a dome: round at the end, running straight on under the rope so it grows out of it
-    d = np.where(xx >= cx, np.abs(yy - cy), np.hypot(xx - cx, yy - cy))
-    body = d < r
-    ndist = np.clip(d / r, 0, 1)
-    hue = np.array(hue, float)
-    if state == 2:
-        rgb = hue[None, None] * (0.75 + 0.25 * (1 - ndist[..., None])) + (255 - hue[None, None]) * (1 - ndist[..., None] ** 2.2)[..., :] * 0.95
-    elif state == 1:
-        rgb = hue[None, None] * (0.32 + 0.5 * (1 - ndist[..., None])) + 25
-    else:
-        rgb = hue[None, None] * (0.13 + 0.16 * ndist[..., None] ** 2) + 12
-    # the glass: a bright edge, and a window of light up on the shoulder
-    edge = np.clip((ndist - 0.84) / 0.16, 0, 1)[..., None]
-    k = 0.55 if state < 2 else 0.22
-    rgb = rgb * (1 - edge * k) + hue[None, None] * edge * k + (40 if state < 2 else 0) * edge
-    spot = np.exp(-(((xx - cx + 9) / 7.5) ** 2 + ((yy - cy + 10) / 4.5) ** 2))[..., None]
-    rgb = rgb + (255 - rgb) * spot * (0.55 if state < 2 else 0.8)
-    alpha = np.where(body, 1.0 if state else 0.9, 0.0)
-    if state == 2:
-        # lit, the light eats the glass edge: no outline, a white middle going soft into the bloom
-        alpha = np.clip(1 - (d - r * 0.72) / (r * 0.46), 0, 1) ** 1.3
-        white = np.clip(1 - d / (r * 0.95), 0, 1)[..., None] ** 0.55
-        rgb = hue[None, None] * 0.55 + 115 + (140 - hue[None, None] * 0.55) * white
-    a = np.dstack([np.clip(rgb, 0, 255), alpha * 255]).astype(np.uint8)
-    return Image.fromarray(a, 'RGBA').resize((64, 64), Image.LANCZOS)
+    """one rope lamp, straight off the footage: tools/lampsrc/light_<state><hue>.png is the GHWT HUD's own glass
+    capsule, the colours derived off its crops. 0 dark glass, 1 half lit, 2 lit with a white-hot middle; hue is the
+    crop's colour suffix (empty = gold, _green, _purple, _blue)"""
+    from pathlib import Path
+    src = Path(__file__).resolve().parent / 'lampsrc' / ('light_%d%s.png' % (state, hue))
+    return Image.open(src).convert('RGBA').resize((64, 64), Image.LANCZOS)
 
 
 def mult_extra(m, G):
@@ -253,7 +228,7 @@ def game_atlas():
     A.add('bolt', Image.open(G + '/VH_Lightning_fx.png').convert('RGB').crop((128, 0, 256, 32)))
     for hname, hc in (('', (255, 196, 70)), ('_green', (90, 245, 110)), ('_purple', (255, 140, 225)), ('_blue', (95, 225, 255))):
         for st in range(3):
-            A.add('lamp_%d%s' % (st, hname), lamp(st, hc))
+            A.add('lamp_%d%s' % (st, hname), lamp(st, hname))
     A.add('sp_side', Image.open(G + '/starpower_sidegrade.png'))
     A.add('flare', Image.open(G + '/JOW_ButtonFlare01.png'))
     A.add('spark', Image.open(G + '/JOW_ButtonStar02.png'))

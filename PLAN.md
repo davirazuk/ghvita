@@ -192,7 +192,8 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 - Results: Square jumps to practice on the toughest named section (not in the tour).
 - A sustain let go before its last 0.12 s mutes the part until the next hit, as in YARG. Not a miss.
 - Drums: NOTE_KICK2 (flag 0x80) from .mid note 95 / .chart 32, played with Double kick on; only charts converted from now on have it. Drum pads "Five": 4-pad charts with tom/cymbal data (version 2) laid out on five (five_pads in game.c). Results name the weakest pad (10+ gems).
-- The streak lamps are half capsules: flat end on the seat, turned with the rail; light_1 is the lamp half way.
+- The streak lamps stand upright on the gold cord, camera-faced like the multiplier plate; the art is the GHWT
+  HUD's own glass capsules (tools/lampsrc), patched into the atlas by tools/lampsync.py in CI.
 - Drummer sheets rebaked with the cell bottom at -0.62 m: the old -0.35 cut the kit's feet. band.py and draw_band must agree. After a rebake: copy to backups/band_raw, band_ink.py, rawtex.py.
 - build-tools/ghvconv can be stale. To test a chart, put the raw folder in songs/ and let the game convert it.
 

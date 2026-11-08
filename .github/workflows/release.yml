@@ -68,6 +68,10 @@ jobs:
             python3 tools/mkavatars.py /tmp/sa/x/mods/yarg-look/YargLook/textures
           fi
 
+      - name: Streak lamps, the footage's own crops (so the new lamp art reaches the build)
+        run: |
+          python3 tools/lampsync.py assets/game.png assets/game.txt tools/lampsrc
+
       - name: Build, smoke test and publish
         run: |
           git config user.name "github-actions"
