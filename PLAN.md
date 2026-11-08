@@ -310,3 +310,20 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 - The build directory is shared between the sandbox and the machine: each side's cmake wrote its own
   tool paths into the cache and manifest, so every other build re-ran cmake and failed on the other
   side's paths. release.py now builds in build-release, the sandbox keeps build-vita.
+
+## Lamps tipped, RV pages and TLS probes (2026-11-08)
+- The domes lean 65 degrees to the right now, the user's pick off the six-orientation sheet (the 40-degree
+  first lean read as "still pointing left" to them). The bulbs keep the half-size bulbs v221 shipped; only the
+  crops carry the turn (tools/lampsrc mirrors the art and tips it 65 degrees).
+- RhythmVerse's API is 1-based and its pages 500 on page=0 for every client: POST
+  /api/<sys>/songfiles/list with page=0 answers a 5172-byte HTML "Slim Application Error", page=1+ answers
+  healthy JSON, ten in a row. The game already searches at page=1 (dl_search seeds want.page = 1, dl_more
+  walks cur_page + 1), so the shipped list/search requests all stand inside the site's own numbering.
+  The page-0 crash bites any omitted implementation, not this one.
+- TLS probed the way the Vita feels it: rhythmverse.co serves an RSA chain and answers
+  ECDHE-RSA-AES128-GCM-SHA256, ECDHE-RSA-AES128-SHA256 and plain RSA-AES128-SHA under TLS 1.2;
+  api.enchor.us serves ECDSA only. Enchor working on the Vita proves the stack's ECDSA suites; the RSA ones
+  are in vdpm's mbedtls defaults, so the handshake shouldn't be the RV blocker. Everything shorter of that
+  (the list body, parse shape, picker keys, download_file route, cacert chain) answers healthy from the
+  desk — the device's own status line ("Couldn't search: ...", the curl error string straight from curl)
+  is still the one missing fact.
