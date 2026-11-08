@@ -1977,9 +1977,15 @@ static void run_job(Job * j)
         if (ok) {
             HttpReq r = {.url = url, .to_file = file, .cancel = &j->cancel, .done = &j->done, .total = &j->total};
             int status = http_fetch(&r, NULL, NULL, err, sizeof(err));
+            if (status == 429 || status >= 500) {
+                plat_log("dl: the host answered %d, asking again once", status);
+                status = http_fetch(&r, NULL, NULL, err, sizeof(err));
+            }
             if (status != 200) {
                 if (status == 404 || status == 410)
                     snprintf(err, sizeof(err), "the file is gone from its host");
+                else if (status == 429)
+                    snprintf(err, sizeof(err), "the host is holding it busy: try again soon");
                 else if (status)
                     snprintf(err, sizeof(err), "the host answered %d", status);
                 ok = false;
