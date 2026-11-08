@@ -268,6 +268,13 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   sort[0][sort_by]=author/update_date (verified live: 2DHumanity -> Zantor; record_updated descending),
   Chorus {"type":"charter"/"modifiedTime"}. The sites' own systems still come in mixed streams, which is why
   the client re-sorts. dl_filter_text draws the active filters and sort as a dim line under the site tabs.
+- RhythmVerse sometimes hands out its errors as 200s: the envelope says "You can't search with this end
+  point" and the like, once in a while, on whatever route. rv_fetch asks a second time when it sees them
+  (and on 429/5xx run_job does for its downloads too), so the odd pages no longer end the batch.
+- A job the queue's dl.txt carried over from an older build can hold its RhythmVerse path raw (the space in
+  a file's name ends a curl's host there): run_job sends the path through rvescape once more, idempotent.
+- The streak lamp art is the GHWT HUD's own crops (tools/lampsrc, dome up); CI's lampsync step pastes them
+  into the carried-on atlas by cell, and mkassets's lamp() reads the same crops for its own regens.
 - The queue: three job threads (downloads share the line; the unpack/convert is serialized by install_lock
   since the decoders were built for one). Each job gets its own tmp/job-<id> corner (download.bin and unpacked
   were shared). shrink_defer: the downloader's installs run beside a song being played instead of waiting for
