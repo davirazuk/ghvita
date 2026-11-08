@@ -3266,24 +3266,30 @@ static void draw_rope(float xc, float r, float z0, float z1)
 {
     const Sprite * s = atlas_get(res.hud, "hud_rope");
     gfx_tex(s->tex);
-    // the shadow: the rope's own shape in black lying on the board, off to the far side of the light
-    {
-        const float x0 = xc + r * 0.4f, x1 = xc - r * 1.9f, y = 0.011f;
-        const float p[4][3] = {{x0, y, z0 - 0.03f}, {x1, y, z0 - 0.03f}, {x1, y, z1 - 0.03f}, {x0, y, z1 - 0.03f}};
+    // its shadow on the board, off to the outside: a faint wide one and a darker one close under it
+    for (int k = 0; k < 2; k++) {
+        const float x0 = xc + r * (k ? 0.3f : 0.6f), x1 = xc - r * (k ? 1.7f : 2.6f), y = 0.011f;
+        // inside the rope's own length, so it never pokes out past its ends
+        const float p[4][3] = {{x0, y, z0 + 0.06f}, {x1, y, z0 + 0.06f}, {x1, y, z1 - 0.06f}, {x0, y, z1 - 0.06f}};
         const float uv[4][2] = {{s->u0, s->v1}, {s->u1, s->v1}, {s->u1, s->v0}, {s->u0, s->v0}};
-        const uint32_t c = RGBA(0, 0, 0, 140), cs[4] = {c, c, c, c};
+        const uint32_t c = RGBA(0, 0, 0, k ? 150 : 70), cs[4] = {c, c, c, c};
         gfx_quad(p, uv, cs);
     }
-    // the side you see: from its outer edge, over the top, round and down the side facing the highway's middle (where
-    // the camera is). The art's width wraps round it. Angle 0 points away from the highway, pi towards its middle
-    enum { STRIPS = 6 };
-    const float a0 = 0.25f, a1 = 3.45f, yc = r + 0.004f, lx = 0.3f, ly = 0.95f;
-    const float ll = sqrtf(lx * lx + ly * ly);
+    // a round cord: strips round the side you see, from its outer edge over the top and down the side facing the
+    // highway's middle (where the camera is), each as bright as it faces the light above, dark at its edges, with a
+    // shine along it where the light glances off towards you. Angle 0 points away from the highway, pi towards its middle
+    enum { STRIPS = 10 };
+    const float a0 = 0.15f, a1 = 3.3f, yc = r + 0.004f;
+    const float lx = 0.35f, ly = 0.94f, hx = 0.48f, hy = 0.88f;     // the light; halfway between it and the camera
     for (int k = 0; k < STRIPS; k++) {
         float ta = a0 + (a1 - a0) * k / STRIPS, tb = a0 + (a1 - a0) * (k + 1) / STRIPS, tm = (ta + tb) / 2;
-        // the strip's normal against the light (from above, a little from the highway's side), plus some fill
-        float lit = (-cosf(tm) * lx + sinf(tm) * ly) / ll;
-        float b = 0.38f + 0.72f * (lit > 0 ? lit : 0);
+        float nx = -cosf(tm), ny = sinf(tm);                    // the strip's normal: towards the middle, up
+        float dif = nx * lx + ny * ly, spec = nx * hx + ny * hy;
+        dif = dif > 0 ? dif : 0;
+        spec = spec > 0 ? powf(spec, 18) : 0;
+        float b = 0.14f + 0.95f * dif;
+        if (k == 0 || k == STRIPS - 1)
+            b *= 0.6f;                                          // its edges turn away into shadow
         int v = (int)(255 * (b > 1 ? 1 : b));
         uint32_t c = RGBA(v, v, v, 255);
         // +x is towards the highway's middle: the rope lies at the right rail, which the camera's mirror puts at -x
@@ -3293,12 +3299,18 @@ static void draw_rope(float xc, float r, float z0, float z1)
         const float uv[4][2] = {{ua, s->v1}, {ub, s->v1}, {ub, s->v0}, {ua, s->v0}};
         const uint32_t cs[4] = {c, c, c, c};
         gfx_quad(p, uv, cs);
+        if (spec > 0.03f) {
+            const uint32_t sc = RGBA(255, 245, 210, (int)(200 * (spec > 1 ? 1 : spec))), ss[4] = {sc, sc, sc, sc};
+            gfx_blend(BLEND_ADD);
+            gfx_quad(p, uv, ss);
+            gfx_blend(BLEND_ALPHA);
+        }
     }
 }
 
 static void draw_rail_meter(void)
 {
-    // the gold rope lies on the right rail with five glass lamps along it, stood straight out to the side of the screen;
+    // the gold rope lies on the right rail with five glass lamps plugged into it, square to it;
     // yellow up to x2, green to x3, purple on to the top, as the footage has them
     const float rope0 = -HALF_W + 0.07f, rope1 = -HALF_W - 0.15f, z0 = 0.55f, z1 = 3.0f;    // flush on the rail
     // the cord shows its top and the side towards you: this thick, it looks as wide as the rope art lying flat did
@@ -3326,10 +3338,14 @@ static void draw_rail_meter(void)
         float seg = hypotf(b[0] - a[0], b[1] - a[1]);
         if (seg < 0.5f)
             continue;
-        // a glass bulb pointing straight out to the side of the screen, as in the footage; the art's capsule fills a
-        // little over half its square across, so drawn this big they sit shoulder to shoulder
-        const float tilt = -0.09f, ux = cosf(tilt), uy = sinf(tilt), wide = seg * 0.68f;
-        const float len = wide * 2.0f, mx0 = (a[0] + b[0]) / 2, my0 = (a[1] + b[1]) / 2, vx = -uy * wide, vy = ux * wide;
+        // a glass bulb plugged into the rope: square to it on the screen, its flat foot lying flush along the rope and
+        // its round end pointing out away from the highway. The art's capsule fills a little over half its square
+        // across, so drawn this big they sit shoulder to shoulder
+        float dx = (b[0] - a[0]) / seg, dy = (b[1] - a[1]) / seg, ux = -dy, uy = dx;
+        if (ux < 0)
+            ux = -ux, uy = -uy;                                 // out, to the right of the screen
+        const float wide = seg * 0.68f, len = wide * 2.35f, mx0 = (a[0] + b[0]) / 2, my0 = (a[1] + b[1]) / 2;
+        const float vx = -dx * wide, vy = -dy * wide;           // the art's top (its shine) to the far, upper side
         const float p[4][3] = {{mx0 + ux * len - vx, my0 + uy * len - vy, 0}, {mx0 - vx, my0 - vy, 0}, {mx0 + vx, my0 + vy, 0},
                                {mx0 + ux * len + vx, my0 + uy * len + vy, 0}};
         const float uv[4][2] = {{s->u0, s->v0}, {s->u1, s->v0}, {s->u1, s->v1}, {s->u0, s->v1}};
