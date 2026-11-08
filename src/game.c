@@ -3298,45 +3298,56 @@ static void draw_rope(float xc, float r, float z0, float z1)
 
 static void draw_rail_meter(void)
 {
-    // the gold rope lies along the right rail with five glass lamps on the board beside it, their feet under it, lit
-    // from the strikeline up: yellow up to x2, green to x3, purple on to the top, as the footage has them
-    const float xc = -HALF_W - 0.03f, rr = 0.075f, z0 = 0.55f, z1 = 3.0f;      // on the rail's chrome
+    // the gold rope lies on the right rail with five glass lamps along it, stood straight out to the side of the screen;
+    // yellow up to x2, green to x3, purple on to the top, as the footage has them
+    const float rope0 = -HALF_W + 0.07f, rope1 = -HALF_W - 0.15f, z0 = 0.55f, z1 = 3.0f;    // flush on the rail
+    // the cord shows its top and the side towards you: this thick, it looks as wide as the rope art lying flat did
+    const float xc = (rope0 + rope1) / 2, rr = (rope0 - rope1) * 0.34f;
     int m = multiplier(), base_m = 1 + G.streak / 10, max_m = G.part_id == PART_BASS ? 6 : 4;
     int lit = base_m >= max_m ? 5 : (G.streak % 10) / 2;
     bool half = base_m < max_m && G.streak % 2;
     const char * hue = G.sp_active ? "_blue" : base_m >= 3 ? "_purple" : base_m == 2 ? "_green" : "";
-    const uint32_t light = G.sp_active ? RGBA(95, 225, 255, 255) : base_m >= 3 ? RGBA(255, 120, 225, 255)
+    const uint32_t light = G.sp_active ? RGBA(95, 225, 255, 255) : base_m >= 3 ? RGBA(255, 130, 225, 255)
                          : base_m == 2 ? RGBA(90, 245, 110, 255) : RGBA(255, 196, 70, 255);
     gfx_blend(BLEND_ALPHA);
-    // the lamps lie on the board, so the highway's tilt and perspective are theirs: each a glass capsule pointing out
-    // from the rope, its flat foot under the rope, side by side up the rail
-    const float lz = z0 + 0.5f, lg = (z1 - 0.4f - lz) / 5, reach = 0.4f, y = 0.016f;
+    gfx_2d();
     for (int i = 0; i < 5; i++) {
         char name[32];
         int state = i < lit ? 2 : half && i == lit ? 1 : 0;
         snprintf(name, sizeof(name), "lamp_%d%s", state, hue);
         const Sprite * s = atlas_get(res.game, name);
-        // the art's capsule fills a little over half its square across: this deep, the lamps sit side by side with a
-        // sliver of board between
-        float zc = lz + lg * (i + 0.5f), d = lg * 1.42f, za = zc - d / 2, zb = zc + d / 2;
-        float xf = xc + 0.04f, xt = xf - reach;          // the foot at the rope, the round end out past it
-        const float p[4][3] = {{xf, y, za}, {xt, y, za}, {xt, y, zb}, {xf, y, zb}};
-        const float uv[4][2] = {{s->u1, s->v1}, {s->u0, s->v1}, {s->u0, s->v0}, {s->u1, s->v0}};
+        // its stretch of the rope, on the screen. The lamp's flat foot goes in under the rope's middle (the rope's drawn
+        // over it after), so every lamp comes out of the rope the same, near or far
+        const float lz = z0 + 0.52f, lg = (z1 - 0.42f - lz) / 5;
+        const float a3[3] = {xc, 0.016f, lz + lg * i}, b3[3] = {xc, 0.016f, lz + lg * (i + 1)};
+        float a[2], b[2];
+        project(a3[0], a3[1], a3[2], &a[0], &a[1]);
+        project(b3[0], b3[1], b3[2], &b[0], &b[1]);
+        float seg = hypotf(b[0] - a[0], b[1] - a[1]);
+        if (seg < 0.5f)
+            continue;
+        // a glass bulb pointing straight out to the side of the screen, as in the footage; the art's capsule fills a
+        // little over half its square across, so drawn this big they sit shoulder to shoulder
+        const float tilt = -0.09f, ux = cosf(tilt), uy = sinf(tilt), wide = seg * 0.68f;
+        const float len = wide * 2.0f, mx0 = (a[0] + b[0]) / 2, my0 = (a[1] + b[1]) / 2, vx = -uy * wide, vy = ux * wide;
+        const float p[4][3] = {{mx0 + ux * len - vx, my0 + uy * len - vy, 0}, {mx0 - vx, my0 - vy, 0}, {mx0 + vx, my0 + vy, 0},
+                               {mx0 + ux * len + vx, my0 + uy * len + vy, 0}};
+        const float uv[4][2] = {{s->u0, s->v0}, {s->u1, s->v0}, {s->u1, s->v1}, {s->u0, s->v1}};
         // unlit, the footage's domes are a dark red glass, not gold
         const uint32_t lc = state == 0 ? RGBA(235, 120, 95, 255) : WHITE, c[4] = {lc, lc, lc, lc};
         gfx_tex(s->tex);
         gfx_quad(p, uv, c);
         if (state == 2) {
-            // lit (the art's glass is white-hot already): its light spilling onto the board round it, kept tight so each
-            // lamp still reads on its own
-            float gx = xf - reach * 0.6f, gw = reach * 0.85f, gd = lg * 0.95f;
+            // lit: white-hot, throwing its colour round itself, centred on the part that shows
+            float mx = mx0 + ux * len * 0.7f, my = my0 + uy * len * 0.7f, r = wide * 1.9f;
             gfx_blend(BLEND_ADD);
-            flat(gx + gw, gx - gw, zc - gd, zc + gd, 0.013f, atlas_get(res.game, "glow"), 0, 1, with_alpha(light, 0.4f),
-                 with_alpha(light, 0.4f));
+            gfx_sprite(atlas_get(res.game, "glow"), mx - r, my - r, r * 2, r * 2, with_alpha(light, 0.7f));
             gfx_blend(BLEND_ALPHA);
         }
     }
-    // the rope over the lamps' feet
+    // the rope over the lamps' feet: a gold cord with body, on the rail
+    gfx_3d(G.proj, G.view);
+    gfx_blend(BLEND_ALPHA);
     draw_rope(xc, rr, z0, z1);
     if (m > 1) {
         char name[16];
