@@ -3259,33 +3259,42 @@ static void draw_cups(bool caps)
 
 // the streak meter, as World Tour has it: a gold strip lying on the board beside the right rail, five lamps on it filling
 // from the strikeline up, the multiplier at its top. On the board, so it takes the camera's perspective
-static void rail_quad(const Sprite * s, float x0, float x1, float z0, float z1, bool along, bool flip, uint32_t col)
+
+// a stretch of the rope lying on the board, za to zb, showing the art's va..vb (0 its near end, 1 its far), its ends'
+// colours ca and cb (alpha fades its tips)
+static void rope_piece(const Sprite * s, float x0, float x1, float za, float zb, float va, float vb, uint32_t ca,
+                       uint32_t cb)
 {
-    const float y = 0.015f;
-    float u0 = flip ? s->u1 : s->u0, u1 = flip ? s->u0 : s->u1;
+    const float y = 0.015f, dv = s->v1 - s->v0;
+    float v_near = s->v1 - dv * va, v_far = s->v1 - dv * vb;
     gfx_tex(s->tex);
-    const float p[4][3] = {{x0, y, z0}, {x1, y, z0}, {x1, y, z1}, {x0, y, z1}};
-    // along: the art's height runs up the board; otherwise its width runs across it
-    float uv[4][2] = {{u0, s->v1}, {u1, s->v1}, {u1, s->v0}, {u0, s->v0}};
-    if (!along) {
-        uv[0][0] = u0; uv[0][1] = s->v0;
-        uv[1][0] = u1; uv[1][1] = s->v0;
-        uv[2][0] = u1; uv[2][1] = s->v1;
-        uv[3][0] = u0; uv[3][1] = s->v1;
-    }
-    const uint32_t c[4] = {col, col, col, col};
+    const float p[4][3] = {{x0, y, za}, {x1, y, za}, {x1, y, zb}, {x0, y, zb}};
+    const float uv[4][2] = {{s->u0, v_near}, {s->u1, v_near}, {s->u1, v_far}, {s->u0, v_far}};
+    const uint32_t c[4] = {ca, ca, cb, cb};
     gfx_quad(p, uv, c);
+}
+
+// the gold rope: the art end to end once (its own rounded tips are its ends), with a shadow under it on the board so it
+// reads as a cord lying there, not a sticker
+static void draw_rope(float x0, float x1, float z0, float z1)
+{
+    const Sprite * s = atlas_get(res.hud, "hud_rope");
+    const float sh = (x1 > x0 ? 1 : -1) * 0.035f;
+    rope_piece(s, x0 + sh, x1 + sh * 2, z0 - 0.02f, z1 - 0.02f, 0, 1, RGBA(0, 0, 0, 150), RGBA(0, 0, 0, 150));
+    rope_piece(s, x0, x1, z0, z1, 0, 1, WHITE, WHITE);
 }
 
 static void draw_rail_meter(void)
 {
-    // the gold rope hugs the outside of the rail with five glass domes along it, stood straight out from it and set
-    // apart; yellow up to x2, green to x3, purple on to the top, as the footage has them
-    const float rope0 = -HALF_W + 0.07f, rope1 = -HALF_W - 0.15f, z0 = 0.55f, z1 = 3.0f;    // flush on the rail
+    // the gold rope lies along the outside of the rail with five glass lamps along it, stood straight out to the side;
+    // yellow up to x2, green to x3, purple on to the top, as the footage has them
+    const float rope0 = -HALF_W - 0.035f, rope1 = -HALF_W - 0.195f, z0 = 0.55f, z1 = 3.0f;   // just outside the chrome
     int m = multiplier(), base_m = 1 + G.streak / 10, max_m = G.part_id == PART_BASS ? 6 : 4;
     int lit = base_m >= max_m ? 5 : (G.streak % 10) / 2;
     bool half = base_m < max_m && G.streak % 2;
     const char * hue = G.sp_active ? "_blue" : base_m >= 3 ? "_purple" : base_m == 2 ? "_green" : "";
+    const uint32_t light = G.sp_active ? RGBA(95, 225, 255, 255) : base_m >= 3 ? RGBA(255, 120, 225, 255)
+                         : base_m == 2 ? RGBA(90, 245, 110, 255) : RGBA(255, 196, 70, 255);
     gfx_blend(BLEND_ALPHA);
     gfx_2d();
     for (int i = 0; i < 5; i++) {
@@ -3294,8 +3303,8 @@ static void draw_rail_meter(void)
         snprintf(name, sizeof(name), "lamp_%d%s", state, hue);
         const Sprite * s = atlas_get(res.game, name);
         // its stretch of the rope, on the screen. The lamp's flat foot goes in under the rope's middle (the rope's drawn
-        // over it after), so every lamp comes out of the rope the same, near or far, with nothing between them
-        const float lz = z0 + 0.52f, lg = (z1 - 0.42f - lz) / 5, fx = (rope0 + rope1) / 2;
+        // over it after), so every lamp comes out of the rope the same, near or far
+        const float lz = z0 + 0.5f, lg = (z1 - 0.4f - lz) / 5, fx = (rope0 + rope1) / 2;
         const float a3[3] = {fx, 0.016f, lz + lg * i}, b3[3] = {fx, 0.016f, lz + lg * (i + 1)};
         float a[2], b[2];
         project(a3[0], a3[1], a3[2], &a[0], &a[1]);
@@ -3303,32 +3312,36 @@ static void draw_rail_meter(void)
         float seg = hypotf(b[0] - a[0], b[1] - a[1]);
         if (seg < 0.5f)
             continue;
-        // a stiff lamp pointing straight out to the side of the screen, as in the footage, not square to the slanted
-        // rope; the art's capsule fills a little over half its square, so the square is drawn a bit wider than its
-        // stretch for the lamps to sit shoulder to shoulder
-        const float tilt = -0.09f, ux = cosf(tilt), uy = sinf(tilt), wide = seg * 0.58f;
-        const float len = wide * 2.0f, mx0 = (a[0] + b[0]) / 2, my0 = (a[1] + b[1]) / 2, vx = -uy * wide, vy = ux * wide;
+        // a glass capsule pointing straight out to the side of the screen, as in the footage. The art's capsule fills a
+        // little over half its square across: drawn this wide the lamps sit side by side, a sliver between them
+        const float tilt = -0.09f, ux = cosf(tilt), uy = sinf(tilt), wide = seg * 0.6f;
+        const float len = wide * 2.1f, mx0 = (a[0] + b[0]) / 2, my0 = (a[1] + b[1]) / 2, vx = -uy * wide, vy = ux * wide;
         const float p[4][3] = {{mx0 + ux * len - vx, my0 + uy * len - vy, 0}, {mx0 - vx, my0 - vy, 0}, {mx0 + vx, my0 + vy, 0},
                                {mx0 + ux * len + vx, my0 + uy * len + vy, 0}};
         const float uv[4][2] = {{s->u0, s->v0}, {s->u1, s->v0}, {s->u1, s->v1}, {s->u0, s->v1}};
-        // unlit, the footage's domes are a dark red glass, not gold
-        const uint32_t lc = state == 0 ? RGBA(235, 120, 95, 255) : WHITE, c[4] = {lc, lc, lc, lc};
+        // unlit, the footage's domes are a dark red glass, not gold; lit, the art's nearly white glass takes the
+        // lamps' colour, its middle still the brightest
+        uint32_t lc = state == 0 ? RGBA(235, 120, 95, 255) : WHITE;
+        if (state == 2) {
+            int r8 = (int)(255 * 0.68f + ((light >> 0) & 255) * 0.32f), g8 = (int)(255 * 0.68f + ((light >> 8) & 255) * 0.32f);
+            int b8 = (int)(255 * 0.68f + ((light >> 16) & 255) * 0.32f);
+            lc = RGBA(r8, g8, b8, 255);
+        }
+        const uint32_t c[4] = {lc, lc, lc, lc};
         gfx_tex(s->tex);
         gfx_quad(p, uv, c);
         if (state == 2) {
-            // lit, it throws light round itself, centred on the part that shows
-            const uint32_t light = G.sp_active ? RGBA(95, 225, 255, 255) : base_m >= 3 ? RGBA(255, 130, 225, 255)
-                                 : base_m == 2 ? RGBA(90, 245, 110, 255) : RGBA(255, 196, 70, 255);
-            float mx = mx0 + ux * len * 0.7f, my = my0 + uy * len * 0.7f, r = wide * 1.9f;
+            // and the light it throws round itself, centred on the part that shows
+            float mx = mx0 + ux * len * 0.68f, my = my0 + uy * len * 0.68f, r = wide * 2.0f;
             gfx_blend(BLEND_ADD);
-            gfx_sprite(atlas_get(res.game, "glow"), mx - r, my - r, r * 2, r * 2, with_alpha(light, 0.6f));
+            gfx_sprite(atlas_get(res.game, "glow"), mx - r, my - r, r * 2, r * 2, with_alpha(light, 0.7f));
             gfx_blend(BLEND_ALPHA);
         }
     }
     // the rope over the lamps' feet
     gfx_3d(G.proj, G.view);
     gfx_blend(BLEND_ALPHA);
-    rail_quad(atlas_get(res.hud, "hud_rope"), rope0, rope1, z0, z1, true, false, WHITE);
+    draw_rope(rope0, rope1, z0, z1);
     if (m > 1) {
         char name[16];
         snprintf(name, sizeof(name), "mult_x%d", m);
@@ -3464,11 +3477,12 @@ static void draw_gems(void)
 static void draw_held_lanes(void)
 {
     gfx_blend(BLEND_ADD);
-    // a fret held: its lane lights faintly up the neck, under the notes, so the fingers show without tinting them
+    // a fret held: its lane lights faintly up the neck, under the notes, so the fingers show without tinting them. It
+    // comes out of the cup, from halfway up it (the cup's drawn over the start), not from the board's edge below
     for (int l = 0; l < G.lanes && !G.autoplay; l++)
         if (G.held & (1 << l)) {
             uint32_t lc = G.sp_active ? RGBA(150, 220, 255, 255) : lane_colour[lane_art(l)];
-            flat(lane_x(l) - 0.45f, lane_x(l) + 0.45f, -0.3f, 4.5f, 0.014f, NULL, 0, 1, with_alpha(lc, 0.22f),
+            flat(lane_x(l) - 0.45f, lane_x(l) + 0.45f, 0.0f, 4.5f, 0.014f, NULL, 0, 1, with_alpha(lc, 0.24f),
                  with_alpha(lc, 0));
         }
     gfx_blend(BLEND_ALPHA);
