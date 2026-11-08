@@ -511,6 +511,26 @@ static void html_unescape(char * s)
     *o = 0;
 }
 
+// the address's path piece byte-escaped the way a URL path takes it; running a path that's been through
+// this through again changes nothing, so a job the queue saved with a raw path can be cleaned on the way out
+static void rvescape(char * out, size_t size, const char * path)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    size_t k = 0;
+    for (const unsigned char * s = (const unsigned char *)path; *s && k + 4 < size; s++) {
+        bool keep = isalnum(*s) || strchr("/-._~!$&'()*+,;=:@", *s) ||
+                    (*s == '%' && isxdigit(s[1]) && isxdigit(s[2]));
+        if (keep)
+            out[k++] = (char)*s;
+        else {
+            out[k++] = '%';
+            out[k++] = hex[*s >> 4];
+            out[k++] = hex[*s & 15];
+        }
+    }
+    out[k] = 0;
+}
+
 // a RhythmVerse download address as something this can fetch
 static void resolve_rv(DlHit * h, const char * address)
 {
@@ -525,21 +545,8 @@ static void resolve_rv(DlHit * h, const char * address)
     }
     if (u[0] == '/') {
         // a file on RhythmVerse itself, its name as it is ("/download_file/x/Metallica - Am I Savage.zip")
-        static const char hex[] = "0123456789ABCDEF";
         char esc[500];
-        size_t k = 0;
-        for (const unsigned char * s = (const unsigned char *)u; *s && k + 4 < sizeof(esc); s++) {
-            bool keep = isalnum(*s) || strchr("/-._~!$&'()*+,;=:@", *s) ||
-                        (*s == '%' && isxdigit(s[1]) && isxdigit(s[2]));
-            if (keep)
-                esc[k++] = (char)*s;
-            else {
-                esc[k++] = '%';
-                esc[k++] = hex[*s >> 4];
-                esc[k++] = hex[*s & 15];
-            }
-        }
-        esc[k] = 0;
+        rvescape(esc, sizeof(esc), u);
         snprintf(h->url, sizeof(h->url), "https://rhythmverse.co%s", esc);
         return;
     }
@@ -1957,6 +1964,13 @@ static void run_job(Job * j)
                      .user = j};
         ok = mega_fetch(url + 5, file, xdir, &m, &folder, err, sizeof(err));
     } else {
+        if (!strncmp(url, "https://rhythmverse.co/", 23)) {
+            // a job from an older build's queue can carry the path raw: its name's space would end the address
+            char clean[500];
+            rvescape(clean, sizeof(clean), url + 23);
+            snprintf(page_url, sizeof(page_url), "https://rhythmverse.co/%s", clean);
+            url = page_url;
+        }
         if (!strncmp(url, "mediafire:", 10)) {
             // the download button's address is on the file's page
             char * body = NULL;
