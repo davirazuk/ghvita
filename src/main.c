@@ -5420,6 +5420,7 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "The streak lamps by the highway are back to their full size and brightness, shoulder to shoulder on the rope.",
         "GET READY: L and R change the song speed right there.",
         "The stage lights flash white on the drummer's crash cymbals, from the song's drum chart.",
         "Main menu: the time and the Vita's battery, top right.",
