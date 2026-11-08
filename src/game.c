@@ -3323,9 +3323,10 @@ static void draw_rail_meter(void)
     gfx_blend(BLEND_ALPHA);
     // five equal slots end to end over the rope, a little in from its tips: no bare stretch of rope
     const float lz = z0 + 0.07f, slot = (z1 - 0.07f - lz) / 5;
-    // the art's capsule is ~0.56 of its square deep and ~0.92 long: drawn this size each lamp fills most of its slot
-    // and reaches out about twice the rope's width, a sliver of board between neighbours
-    const float depth = slot * 1.32f, reach = 0.25f, xf = xc + rr * 0.6f, xt = xf - reach;
+    // the lamp is drawn true to its art's square (0.95 long, 0.78 deep), so the glass reads as a dome: the art
+    // mapped with depth independent of the reach instead (slot * 1.32) stretched it ~2.5x along the rope and the
+    // domes flattened into dark slivers. 0.34 out of the rope, depth follows to keep the art's own proportions
+    const float reach = 0.34f, depth = reach * 0.80f, xf = xc + rr * 0.6f, xt = xf - reach;
     for (int i = 4; i >= 0; i--) {                      // far to near
         char name[32];
         int state = i < lit ? 2 : half && i == lit ? 1 : 0;
@@ -3342,7 +3343,7 @@ static void draw_rail_meter(void)
         if (state == 2) {
             // lit (the art's glass is white-hot already): a little of its colour on the board round it, kept tight so
             // each lamp still reads on its own
-            float gx = xf - reach * 0.55f, gw = reach * 0.75f, gd = slot * 0.62f;
+            float gx = xf - reach * 0.55f, gw = reach * 0.75f, gd = depth * 1.1f;
             gfx_blend(BLEND_ADD);
             flat(gx + gw, gx - gw, zc - gd, zc + gd, 0.013f, atlas_get(res.game, "glow"), 0, 1, with_alpha(light, 0.3f),
                  with_alpha(light, 0.3f));
