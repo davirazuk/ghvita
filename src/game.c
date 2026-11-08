@@ -3325,8 +3325,8 @@ static void draw_rail_meter(void)
     // five equal slots end to end over the rope, a little in from its tips: no bare stretch of rope
     const float lz = z0 + 0.07f, slot = (z1 - 0.07f - lz) / 5;
     // each bulb leans on the cord and points its round dome up and to the right, but not standing up - the way the
-    // footage's lights lie across the rail (the crops carry the turn; tools/lampsrc mirrors the art and tips it 40
-    // degrees). A shade out from the cord's middle so the glass clears it, feet tucked under the rope drawn after
+    // footage's lights lie across the rail (the crops carry the turn; tools/lampsrc mirrors the art and tips it 65
+    // degrees, steeper than horizontal the way the seat's own lights sit). A shade out from the cord's middle so the glass clears it, feet tucked under the rope drawn after
     const float bw = 0.27f, bh = 0.30f, bx = rr * 0.6f, by = y + rr * 0.25f;
     for (int i = 4; i >= 0; i--) {                      // far to near
         char name[32];
