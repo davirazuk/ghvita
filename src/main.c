@@ -5421,7 +5421,7 @@ static void news_screen(void)
 {
     static const char * const lines[] = {
         "Holding a fret, its lane's light now comes out of the cup instead of from the bottom edge of the highway.",
-        "Streak meter: the lamps stand upright on the gold cord, the seat's own glass bulbs, camera-faced.",
+        "Streak meter: the lamps ride the gold cord at their footage's size, glass domes up.",
         "GET READY: L and R change the song speed right there.",
         "The stage lights flash white on the drummer's crash cymbals, from the song's drum chart.",
         "Main menu: the time and the Vita's battery, top right.",

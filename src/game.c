@@ -3337,7 +3337,7 @@ static void draw_rail_meter(void)
         if (state == 2) {
             // lit (the art's glass is white-hot already): its colour spills a little on the board round the foot, kept
             // tight so each lamp still reads on its own
-            const float gw = 0.22f, gd = 0.15f;
+            const float gw = 0.16f, gd = 0.11f;
             gfx_blend(BLEND_ADD);
             flat(xc + gw, xc - gw, zc - gd, zc + gd, 0.013f, atlas_get(res.game, "glow"), 0, 1,
                  with_alpha(light, 0.28f), with_alpha(light, 0.28f));
