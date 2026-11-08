@@ -5421,7 +5421,7 @@ static void news_screen(void)
 {
     static const char * const lines[] = {
         "Holding a fret, its lane's light now comes out of the cup instead of from the bottom edge of the highway.",
-        "The streak lamps glow in their colour (gold, green, purple, blue) on a finer rope with a shadow under it.",
+        "Streak meter: the rope is a gold cord with body on the highway's edge; the lamps lie on the board, bigger and white-hot.",
         "GET READY: L and R change the song speed right there.",
         "The stage lights flash white on the drummer's crash cymbals, from the song's drum chart.",
         "Main menu: the time and the Vita's battery, top right.",

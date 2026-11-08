@@ -3260,35 +3260,47 @@ static void draw_cups(bool caps)
 // the streak meter, as World Tour has it: a gold strip lying on the board beside the right rail, five lamps on it filling
 // from the strikeline up, the multiplier at its top. On the board, so it takes the camera's perspective
 
-// a stretch of the rope lying on the board, za to zb, showing the art's va..vb (0 its near end, 1 its far), its ends'
-// colours ca and cb (alpha fades its tips)
-static void rope_piece(const Sprite * s, float x0, float x1, float za, float zb, float va, float vb, uint32_t ca,
-                       uint32_t cb)
-{
-    const float y = 0.015f, dv = s->v1 - s->v0;
-    float v_near = s->v1 - dv * va, v_far = s->v1 - dv * vb;
-    gfx_tex(s->tex);
-    const float p[4][3] = {{x0, y, za}, {x1, y, za}, {x1, y, zb}, {x0, y, zb}};
-    const float uv[4][2] = {{s->u0, v_near}, {s->u1, v_near}, {s->u1, v_far}, {s->u0, v_far}};
-    const uint32_t c[4] = {ca, ca, cb, cb};
-    gfx_quad(p, uv, c);
-}
-
-// the gold rope: the art end to end once (its own rounded tips are its ends), with a shadow under it on the board so it
-// reads as a cord lying there, not a sticker
-static void draw_rope(float x0, float x1, float z0, float z1)
+// the gold rope as a cord with body: a tube lying along the highway's edge, seen from the camera's side, each strip of
+// it lit by how it faces the light above (its top bright, the side towards you darker), with its shadow on the board
+static void draw_rope(float xc, float r, float z0, float z1)
 {
     const Sprite * s = atlas_get(res.hud, "hud_rope");
-    const float sh = (x1 > x0 ? 1 : -1) * 0.035f;
-    rope_piece(s, x0 + sh, x1 + sh * 2, z0 - 0.02f, z1 - 0.02f, 0, 1, RGBA(0, 0, 0, 150), RGBA(0, 0, 0, 150));
-    rope_piece(s, x0, x1, z0, z1, 0, 1, WHITE, WHITE);
+    gfx_tex(s->tex);
+    // the shadow: the rope's own shape in black lying on the board, off to the far side of the light
+    {
+        const float x0 = xc + r * 0.4f, x1 = xc - r * 1.9f, y = 0.011f;
+        const float p[4][3] = {{x0, y, z0 - 0.03f}, {x1, y, z0 - 0.03f}, {x1, y, z1 - 0.03f}, {x0, y, z1 - 0.03f}};
+        const float uv[4][2] = {{s->u0, s->v1}, {s->u1, s->v1}, {s->u1, s->v0}, {s->u0, s->v0}};
+        const uint32_t c = RGBA(0, 0, 0, 140), cs[4] = {c, c, c, c};
+        gfx_quad(p, uv, cs);
+    }
+    // the side you see: from its outer edge, over the top, round and down the side facing the highway's middle (where
+    // the camera is). The art's width wraps round it. Angle 0 points away from the highway, pi towards its middle
+    enum { STRIPS = 6 };
+    const float a0 = 0.25f, a1 = 3.45f, yc = r + 0.004f, lx = 0.3f, ly = 0.95f;
+    const float ll = sqrtf(lx * lx + ly * ly);
+    for (int k = 0; k < STRIPS; k++) {
+        float ta = a0 + (a1 - a0) * k / STRIPS, tb = a0 + (a1 - a0) * (k + 1) / STRIPS, tm = (ta + tb) / 2;
+        // the strip's normal against the light (from above, a little from the highway's side), plus some fill
+        float lit = (-cosf(tm) * lx + sinf(tm) * ly) / ll;
+        float b = 0.38f + 0.72f * (lit > 0 ? lit : 0);
+        int v = (int)(255 * (b > 1 ? 1 : b));
+        uint32_t c = RGBA(v, v, v, 255);
+        // +x is towards the highway's middle: the rope lies at the right rail, which the camera's mirror puts at -x
+        float xa = xc - r * cosf(ta), ya = yc + r * sinf(ta), xb = xc - r * cosf(tb), yb = yc + r * sinf(tb);
+        float ua = s->u0 + (s->u1 - s->u0) * k / STRIPS, ub = s->u0 + (s->u1 - s->u0) * (k + 1) / STRIPS;
+        const float p[4][3] = {{xa, ya, z0}, {xb, yb, z0}, {xb, yb, z1}, {xa, ya, z1}};
+        const float uv[4][2] = {{ua, s->v1}, {ub, s->v1}, {ub, s->v0}, {ua, s->v0}};
+        const uint32_t cs[4] = {c, c, c, c};
+        gfx_quad(p, uv, cs);
+    }
 }
 
 static void draw_rail_meter(void)
 {
-    // the gold rope lies along the outside of the rail with five glass lamps along it, stood straight out to the side;
-    // yellow up to x2, green to x3, purple on to the top, as the footage has them
-    const float rope0 = -HALF_W - 0.035f, rope1 = -HALF_W - 0.195f, z0 = 0.55f, z1 = 3.0f;   // just outside the chrome
+    // the gold rope lies along the right rail with five glass lamps on the board beside it, their feet under it, lit
+    // from the strikeline up: yellow up to x2, green to x3, purple on to the top, as the footage has them
+    const float xc = -HALF_W - 0.03f, rr = 0.075f, z0 = 0.55f, z1 = 3.0f;      // on the rail's chrome
     int m = multiplier(), base_m = 1 + G.streak / 10, max_m = G.part_id == PART_BASS ? 6 : 4;
     int lit = base_m >= max_m ? 5 : (G.streak % 10) / 2;
     bool half = base_m < max_m && G.streak % 2;
@@ -3296,52 +3308,36 @@ static void draw_rail_meter(void)
     const uint32_t light = G.sp_active ? RGBA(95, 225, 255, 255) : base_m >= 3 ? RGBA(255, 120, 225, 255)
                          : base_m == 2 ? RGBA(90, 245, 110, 255) : RGBA(255, 196, 70, 255);
     gfx_blend(BLEND_ALPHA);
-    gfx_2d();
+    // the lamps lie on the board, so the highway's tilt and perspective are theirs: each a glass capsule pointing out
+    // from the rope, its flat foot under the rope, side by side up the rail
+    const float lz = z0 + 0.5f, lg = (z1 - 0.4f - lz) / 5, reach = 0.4f, y = 0.016f;
     for (int i = 0; i < 5; i++) {
         char name[32];
         int state = i < lit ? 2 : half && i == lit ? 1 : 0;
         snprintf(name, sizeof(name), "lamp_%d%s", state, hue);
         const Sprite * s = atlas_get(res.game, name);
-        // its stretch of the rope, on the screen. The lamp's flat foot goes in under the rope's middle (the rope's drawn
-        // over it after), so every lamp comes out of the rope the same, near or far
-        const float lz = z0 + 0.5f, lg = (z1 - 0.4f - lz) / 5, fx = (rope0 + rope1) / 2;
-        const float a3[3] = {fx, 0.016f, lz + lg * i}, b3[3] = {fx, 0.016f, lz + lg * (i + 1)};
-        float a[2], b[2];
-        project(a3[0], a3[1], a3[2], &a[0], &a[1]);
-        project(b3[0], b3[1], b3[2], &b[0], &b[1]);
-        float seg = hypotf(b[0] - a[0], b[1] - a[1]);
-        if (seg < 0.5f)
-            continue;
-        // a glass capsule pointing straight out to the side of the screen, as in the footage. The art's capsule fills a
-        // little over half its square across: drawn this wide the lamps sit side by side, a sliver between them
-        const float tilt = -0.09f, ux = cosf(tilt), uy = sinf(tilt), wide = seg * 0.6f;
-        const float len = wide * 2.1f, mx0 = (a[0] + b[0]) / 2, my0 = (a[1] + b[1]) / 2, vx = -uy * wide, vy = ux * wide;
-        const float p[4][3] = {{mx0 + ux * len - vx, my0 + uy * len - vy, 0}, {mx0 - vx, my0 - vy, 0}, {mx0 + vx, my0 + vy, 0},
-                               {mx0 + ux * len + vx, my0 + uy * len + vy, 0}};
-        const float uv[4][2] = {{s->u0, s->v0}, {s->u1, s->v0}, {s->u1, s->v1}, {s->u0, s->v1}};
-        // unlit, the footage's domes are a dark red glass, not gold; lit, the art's nearly white glass takes the
-        // lamps' colour, its middle still the brightest
-        uint32_t lc = state == 0 ? RGBA(235, 120, 95, 255) : WHITE;
-        if (state == 2) {
-            int r8 = (int)(255 * 0.68f + ((light >> 0) & 255) * 0.32f), g8 = (int)(255 * 0.68f + ((light >> 8) & 255) * 0.32f);
-            int b8 = (int)(255 * 0.68f + ((light >> 16) & 255) * 0.32f);
-            lc = RGBA(r8, g8, b8, 255);
-        }
-        const uint32_t c[4] = {lc, lc, lc, lc};
+        // the art's capsule fills a little over half its square across: this deep, the lamps sit side by side with a
+        // sliver of board between
+        float zc = lz + lg * (i + 0.5f), d = lg * 1.42f, za = zc - d / 2, zb = zc + d / 2;
+        float xf = xc + 0.04f, xt = xf - reach;          // the foot at the rope, the round end out past it
+        const float p[4][3] = {{xf, y, za}, {xt, y, za}, {xt, y, zb}, {xf, y, zb}};
+        const float uv[4][2] = {{s->u1, s->v1}, {s->u0, s->v1}, {s->u0, s->v0}, {s->u1, s->v0}};
+        // unlit, the footage's domes are a dark red glass, not gold
+        const uint32_t lc = state == 0 ? RGBA(235, 120, 95, 255) : WHITE, c[4] = {lc, lc, lc, lc};
         gfx_tex(s->tex);
         gfx_quad(p, uv, c);
         if (state == 2) {
-            // and the light it throws round itself, centred on the part that shows
-            float mx = mx0 + ux * len * 0.68f, my = my0 + uy * len * 0.68f, r = wide * 2.0f;
+            // lit (the art's glass is white-hot already): its light spilling onto the board round it, kept tight so each
+            // lamp still reads on its own
+            float gx = xf - reach * 0.6f, gw = reach * 0.85f, gd = lg * 0.95f;
             gfx_blend(BLEND_ADD);
-            gfx_sprite(atlas_get(res.game, "glow"), mx - r, my - r, r * 2, r * 2, with_alpha(light, 0.7f));
+            flat(gx + gw, gx - gw, zc - gd, zc + gd, 0.013f, atlas_get(res.game, "glow"), 0, 1, with_alpha(light, 0.4f),
+                 with_alpha(light, 0.4f));
             gfx_blend(BLEND_ALPHA);
         }
     }
     // the rope over the lamps' feet
-    gfx_3d(G.proj, G.view);
-    gfx_blend(BLEND_ALPHA);
-    draw_rope(rope0, rope1, z0, z1);
+    draw_rope(xc, rr, z0, z1);
     if (m > 1) {
         char name[16];
         snprintf(name, sizeof(name), "mult_x%d", m);
