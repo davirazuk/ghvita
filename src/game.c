@@ -3310,9 +3310,9 @@ static void draw_rope(float xc, float r, float z0, float z1)
 
 static void draw_rail_meter(void)
 {
-    // the gold rope lies on the right rail with five glass lamps standing on it end to end: the GHWT HUD's own glass
-    // capsules drawn upright and camera-faced like the multiplier plate, so the bulbs keep their volume as they fall
-    // away down the rail; the cord then runs over each bulb's foot, the way the seat plants its lights. Yellow up to
+    // the gold rope lies on the right rail with five glass lamps lying along it end to end: the GHWT HUD's own glass
+    // capsules, camera-faced like the multiplier plate so the bulbs keep their volume as they fall away down the
+    // rail; the cord then runs over each bulb's foot, the way the seat plants its lights. Yellow up to
     // x2, green to x3, purple on to the top, as the footage has them
     const float z0 = 0.55f, z1 = 3.0f, xc = -HALF_W - 0.03f, rr = 0.055f, y = 0.016f;
     int m = multiplier(), base_m = 1 + G.streak / 10, max_m = G.part_id == PART_BASS ? 6 : 4;
@@ -3324,10 +3324,10 @@ static void draw_rail_meter(void)
     gfx_blend(BLEND_ALPHA);
     // five equal slots end to end over the rope, a little in from its tips: no bare stretch of rope
     const float lz = z0 + 0.07f, slot = (z1 - 0.07f - lz) / 5;
-    // each bulb stands upright on the cord, camera-faced like the multiplier plate: laid flat on the board the glass
-    // never held its own volume (the varied reach made only slants and smears), and the footage's lamps are upright
-    // glass on the seat too. 0.5 off the board, 0.44 wide with the crop's own shape, the cord over each foot
-    const float bw = 0.44f, bh = 0.50f, by = y + rr * 0.6f;
+    // each bulb leans on the cord and points its round dome up and to the right, but not standing up - the way the
+    // footage's lights lie across the rail (the crops carry the turn; tools/lampsrc mirrors the art and tips it 40
+    // degrees). A shade out from the cord's middle so the glass clears it, feet tucked under the rope drawn after
+    const float bw = 0.27f, bh = 0.30f, bx = rr * 0.6f, by = y + rr * 0.25f;
     for (int i = 4; i >= 0; i--) {                      // far to near
         char name[32];
         int state = i < lit ? 2 : half && i == lit ? 1 : 0;
@@ -3344,7 +3344,7 @@ static void draw_rail_meter(void)
             gfx_blend(BLEND_ALPHA);
         }
         // the crop's own colour in all states: the unlit glass is the dark hue, the lit one is white-hot already
-        board(xc, by, zc, bw, bh, s, 0, 0, 1, 1, WHITE);
+        board(xc + bx, by, zc, bw, bh, s, 0, 0, 1, 1, WHITE);
     }
     // the cord over the bulbs' feet, as the seat holds its own lights
     draw_rope(xc, rr, z0, z1);
