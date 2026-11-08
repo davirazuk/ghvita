@@ -100,6 +100,13 @@ static int fetch_once(const HttpReq * r, char ** body, size_t * len, char * err,
     curl_easy_setopt(c, CURLOPT_USERAGENT, "GHVita/1.0 (PS Vita)");
     curl_easy_setopt(c, CURLOPT_ACCEPT_ENCODING, "");
     curl_easy_setopt(c, CURLOPT_CAINFO, ca);
+    // rhythmverse (an RSA chain on its own nginx box) and the Vita's mbedTLS ring: enchor's ECDSA handshakes fine
+    // from the game yet RV does not, so its requests alone take the old plain roads the server itself offers -
+    // TLS 1.2 and RSA-key-exchange suites (no ECDHE curves, no TLS 1.3), which every mbedtls build ships
+    if (strstr(r->url, "rhythmverse.co/")) {
+        curl_easy_setopt(c, CURLOPT_SSLVERSION, (long)CURL_SSLVERSION_TLSv1_2);
+        curl_easy_setopt(c, CURLOPT_SSL_CIPHER_LIST, "AES128-GCM-SHA256:AES256-GCM-SHA384:AES128-SHA");
+    }
     curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT, 20L);
     curl_easy_setopt(c, CURLOPT_LOW_SPEED_LIMIT, 1L);
     curl_easy_setopt(c, CURLOPT_LOW_SPEED_TIME, (long)(r->stall_s > 0 ? r->stall_s : 30));
@@ -175,6 +182,11 @@ bool http_location(const char * url, char * out, size_t size, volatile bool * ca
     web_only(c);
     curl_easy_setopt(c, CURLOPT_USERAGENT, "GHVita/1.0 (PS Vita)");
     curl_easy_setopt(c, CURLOPT_CAINFO, ca);
+    // the same TLS roads for rhythmverse's short-link hops (net.c's note in fetch_once)
+    if (strstr(url, "rhythmverse.co/")) {
+        curl_easy_setopt(c, CURLOPT_SSLVERSION, (long)CURL_SSLVERSION_TLSv1_2);
+        curl_easy_setopt(c, CURLOPT_SSL_CIPHER_LIST, "AES128-GCM-SHA256:AES256-GCM-SHA384:AES128-SHA");
+    }
     curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT, 20L);
     curl_easy_setopt(c, CURLOPT_TIMEOUT, 30L);
     curl_easy_setopt(c, CURLOPT_NOSIGNAL, 1L);
