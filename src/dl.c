@@ -763,6 +763,8 @@ static bool rv_fetch(const char * text, int page, int records, DlHit ** out, int
         if (st == 429 || st >= 500) {
             // the site between two breaths (and Cloudflare's 500s come in bunches): ask again
             plat_log("rv: %s answered %d, asking again", systems[sys], st);
+            free(body);
+            body = NULL;
             st = http_fetch(&r, &body, &len, err, err_size);
         }
         if (st >= 200 && st < 300) {

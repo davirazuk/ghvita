@@ -5421,7 +5421,8 @@ static void news_screen(void)
 {
     static const char * const lines[] = {
         "Holding a fret, its lane's light now comes out of the cup instead of from the bottom edge of the highway.",
-        "Streak meter: the lamps lean on the gold cord at their footage's size, domes tipped right the way GHWT has them.",
+        "Streak lamps fixed: full-size gold bulbs on the rail again (the last builds shrank them to dots), domes tipped up-right.",
+        "Fixed: a RhythmVerse search that had to be asked twice leaked its first answer's memory.",
         "GET READY: L and R change the song speed right there.",
         "The stage lights flash white on the drummer's crash cymbals, from the song's drum chart.",
         "Main menu: the time and the Vita's battery, top right.",
