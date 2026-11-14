@@ -464,3 +464,4 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 - v236: dl.c tidy_thread on downloader start: tmp/covers trimmed to the newest 300 (card had 1922 = 121 MB), job-*
   folders >1 day old with no live job removed. Options help lookup guarded against table gaps. whammy log line
   reports underruns per song (the old number was the session total). Vita dumps Nov 2-4 = already-fixed bugs.
+- v237: rail meter redone: rope a thin trim drawn first, lamps on top, each square to the rail's screen direction (+0.22 tip), sized 0.72 of the spacing. Backup ~/.cache/ghv-work/game.c.prerail

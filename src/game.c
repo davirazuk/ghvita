@@ -3945,34 +3945,52 @@ static void rail_quad(const Sprite * s, float x0, float x1, float z0, float z1, 
 
 static void draw_rail_meter(void)
 {
-    // the gold rope hugs the outside of the rail with five glass domes along it, stood straight out from it and set
-    // apart; yellow up to x2, green to x3, purple on to the top, as the footage has them
-    const float rope0 = -HALF_W + 0.07f, rope1 = -HALF_W - 0.15f, z0 = 0.55f, z1 = 3.0f;    // flush on the rail
+    // the gold rope runs along the outside of the rail, a trim; five glass domes stand on it, set apart, each one
+    // square to the rail where it sits (the perspective turns them as it turns the rail) and tipped up a little.
+    // yellow up to x2, green to x3, purple on to the top
+    const float rope0 = -HALF_W + 0.02f, rope1 = -HALF_W - 0.09f, z0 = 0.55f, z1 = 3.0f;
     int m = multiplier(), base_m = 1 + G.streak / 10, max_m = G.part_id == PART_BASS ? 6 : 4;
     int lit = base_m >= max_m ? 5 : (G.streak % 10) / 2;
     bool half = base_m < max_m && G.streak % 2;
     const char * hue = G.sp_active ? "_blue" : base_m >= 3 ? "_purple" : base_m == 2 ? "_green" : "";
+    gfx_3d(G.proj, G.view);
     gfx_blend(BLEND_ALPHA);
+    rail_quad(atlas_get(res.hud, "hud_rope"), rope0, rope1, z0, z1, true, false, WHITE);
     gfx_2d();
+    const float lz = z0 + 0.5f, lg = (z1 - 0.35f - lz) / 5, fx = rope1 + 0.02f;
     for (int i = 0; i < 5; i++) {
         char name[32];
         int state = i < lit ? 2 : half && i == lit ? 1 : 0;
         snprintf(name, sizeof(name), "lamp_%d%s", state, hue);
         const Sprite * s = atlas_get(res.game, name);
-        // where its foot lies on the rope, on the screen; the dome stands square to that, as deep as it's wide
-        const float lz = z0 + 0.52f, lg = (z1 - 0.42f - lz) / 5, fx = rope1 + 0.08f;
-        const float a3[3] = {fx, 0.016f, lz + lg * (i - 0.02f)}, b3[3] = {fx, 0.016f, lz + lg * (i + 1.02f)};
-        float a[2], b[2];
-        project(a3[0], a3[1], a3[2], &a[0], &a[1]);
-        project(b3[0], b3[1], b3[2], &b[0], &b[1]);
-        // a stiff lamp pointing out to the side and tipped up, its dome 65 degrees off upright (the user's pick off the
-        // footage), not square to the slanted rope
-        const float tilt = -0.44f, ux = cosf(tilt), uy = sinf(tilt), wide = hypotf(b[0] - a[0], b[1] - a[1]) * 0.5f;
-        const float len = wide * 2.0f, mx0 = (a[0] + b[0]) / 2, my0 = (a[1] + b[1]) / 2, vx = -uy * wide, vy = ux * wide;
+        // its foot on the rope, and the rail's way on the screen there
+        float zc = lz + lg * (i + 0.5f), a[2], b[2], f[2], o[2];
+        project(fx, 0.016f, zc - lg * 0.3f, &a[0], &a[1]);
+        project(fx, 0.016f, zc + lg * 0.3f, &b[0], &b[1]);
+        project(fx, 0.016f, zc, &f[0], &f[1]);
+        project(fx - 0.5f, 0.016f, zc, &o[0], &o[1]);           // outward, away from the lanes
+        float tx = b[0] - a[0], ty = b[1] - a[1], tl = hypotf(tx, ty);
+        if (tl < 1)
+            continue;
+        tx /= tl;
+        ty /= tl;
+        float nx = -ty, ny = tx;
+        if (nx * (o[0] - f[0]) + ny * (o[1] - f[1]) < 0) {
+            nx = -nx;
+            ny = -ny;
+        }
+        // tipped up towards the top of the screen a little, as a lamp stood on a rail is seen from above it
+        const float tip = 0.22f;
+        float ux = nx * cosf(tip) - ny * sinf(tip) * (nx > 0 ? -1 : 1), uy = ny * cosf(tip) + nx * sinf(tip) * (nx > 0 ? -1 : 1);
+        float ul = hypotf(ux, uy);
+        ux /= ul;
+        uy /= ul;
+        const float wide = tl * 0.72f, len = wide * 1.9f, vx = -uy * wide, vy = ux * wide;
+        const float mx0 = f[0], my0 = f[1];
         const float p[4][3] = {{mx0 + ux * len - vx, my0 + uy * len - vy, 0}, {mx0 - vx, my0 - vy, 0}, {mx0 + vx, my0 + vy, 0},
                                {mx0 + ux * len + vx, my0 + uy * len + vy, 0}};
         const float uv[4][2] = {{s->u0, s->v0}, {s->u1, s->v0}, {s->u1, s->v1}, {s->u0, s->v1}};
-        // unlit, the footage's domes are a dark red glass, not gold
+        // unlit, a dark red glass, not gold
         const uint32_t lc = state == 0 ? RGBA(235, 120, 95, 255) : WHITE, c[4] = {lc, lc, lc, lc};
         gfx_tex(s->tex);
         gfx_quad(p, uv, c);
@@ -3980,15 +3998,14 @@ static void draw_rail_meter(void)
             // lit, it throws light round itself
             const uint32_t light = G.sp_active ? RGBA(95, 225, 255, 255) : base_m >= 3 ? RGBA(255, 130, 225, 255)
                                  : base_m == 2 ? RGBA(90, 245, 110, 255) : RGBA(255, 196, 70, 255);
-            float mx = mx0 + ux * len * 0.8f, my = my0 + uy * len * 0.8f, r = wide * 2.0f;
+            float mx = mx0 + ux * len * 0.7f, my = my0 + uy * len * 0.7f, r = wide * 2.2f;
             gfx_blend(BLEND_ADD);
-            gfx_sprite(atlas_get(res.game, "glow"), mx - r, my - r, r * 2, r * 2, with_alpha(light, 0.6f));
+            gfx_sprite(atlas_get(res.game, "glow"), mx - r, my - r, r * 2, r * 2, with_alpha(light, 0.55f));
             gfx_blend(BLEND_ALPHA);
         }
     }
     gfx_3d(G.proj, G.view);
     gfx_blend(BLEND_ALPHA);
-    rail_quad(atlas_get(res.hud, "hud_rope"), rope0, rope1, z0, z1, true, false, WHITE);
     if (m > 1) {
         char name[16];
         snprintf(name, sizeof(name), "mult_x%d", m);
