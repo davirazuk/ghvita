@@ -743,6 +743,21 @@ double audio_song_time(void)
     // the audio thread reports every buffer: past a few of them it has stalled, so the song has too
     if (from_output && t > af / (double)AUDIO_RATE + 0.08 * song_speed)
         t = af / (double)AUDIO_RATE + 0.08 * song_speed;
+    // The anchor is when the audio thread last handed a buffer over, and the Vita's output takes them with a few ms of
+    // wobble: notes would judder by it. So the clock runs on its own at the song's speed and leans a little toward what
+    // the audio says each frame (a third of a second to settle); a seek, a stall or a jump over 40 ms resets it
+    static double sm_t, sm_us;
+    static int sm_jump = -1;
+    double now_us = (double)plat_now_us();
+    double pred = sm_t + (now_us - sm_us) / 1e6 * song_speed;
+    if (sm_jump != jump || fabs(t - pred) > 0.04)
+        pred = t;
+    else
+        pred += (t - pred) * 0.06;
+    sm_jump = jump;
+    sm_t = pred;
+    sm_us = now_us;
+    t = pred;
     if (t < last)
         t = last;
     last_time = t;

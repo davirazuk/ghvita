@@ -231,8 +231,6 @@ static struct {
     bool armed[6];
     float sp_rate;                      // Star Power used a second
     double last_t;
-    float tz[64], tsy[64];              // this frame: the highway's z against the screen height of its middle
-    int tn;
 } GF;
 static void gf_setup(void);
 static void gf_flags(void);
@@ -1531,8 +1529,27 @@ static void board(float x, float y, float z, float w, float h, const Sprite * s,
 // where a point of the highway lands on the screen
 static const float * proj_now;          // the projection the highway is drawn with this frame (a battle may shake it)
 
+// Flash is flat: its highway a trapezoid on the screen, narrow and tall up the middle, the background either side.
+// The board's z runs straight up it (the far end at the top); a point's height lifts it, scaled like the lanes
+#define F2_CX (SCREEN_W / 2.0f)
+#define F2_TOP 118.0f                   // the far end's height on the screen
+#define F2_LINE 466.0f                  // the strikeline's
+#define F2_HW_TOP 60.0f                 // the highway's half-width there
+#define F2_HW_LINE 252.0f
+
+static float f2_hw(float y)
+{
+    return F2_HW_TOP + (y - F2_TOP) / (F2_LINE - F2_TOP) * (F2_HW_LINE - F2_HW_TOP);
+}
+
 static void project(float x, float y, float z, float * sx, float * sy)
 {
+    if (GF.look) {
+        float ys = F2_LINE - (F2_LINE - F2_TOP) * z / Z_FAR, hw = f2_hw(ys);
+        *sx = F2_CX - x / HALF_W * hw;     // the board's x runs right to left, as the camera sees it
+        *sy = ys - y / HALF_W * hw;
+        return;
+    }
     const float * v = G.view, * p = proj_now ? proj_now : G.proj;
     float ex = v[0] * x + v[4] * y + v[8] * z + v[12];
     float ey = v[1] * x + v[5] * y + v[9] * z + v[13];
@@ -2384,40 +2401,16 @@ static float gf_y(double n)
     return GF.y[i] + (GF.y[i + 1] - GF.y[i]) * (float)(n - i);
 }
 
-// this frame's highway, by height on the screen: Flash's notes go down the screen as its y says
-static void gf_frame(void)
-{
-    GF.tn = 0;
-    for (int k = 0; k < 64; k++) {
-        float z = -2.5f + (Z_FAR + 2.5f) * k / 63, sx;
-        project(0, 0, z, &sx, &GF.tsy[k]);
-        GF.tz[k] = z;
-    }
-    GF.tn = 64;
-}
-
-// where on the highway something due at time `when` is drawn now
+// where on the highway something due at time `when` is drawn now. Flash's notes come down its curve: the board's z
+// runs straight up its flat highway, so its y (0 at the top, y_hit on the targets) sets z directly
 static float time_z(double when)
 {
-    if (!GF.look || !GF.tn)
+    if (!GF.look)
         return (float)((when - G.t) * G.speed);
     double n = gf_ticks(when, G.t, GF.step);
     if (n < 0)
         return Z_FAR + 1 + (float)(-n) * 0.1f;  // not on screen yet
-    float f = gf_y(n) / GF.y_hit;               // 0 at the top, 1 on the targets
-    float far = GF.tsy[GF.tn - 1], line;
-    // the targets' height: z 0 in the table
-    float sx;
-    project(0, 0, 0, &sx, &line);
-    float want = far + (line - far) * f;
-    // the screen height falls as z grows
-    for (int k = GF.tn - 1; k > 0; k--)
-        if (GF.tsy[k - 1] >= want && GF.tsy[k] <= want) {
-            float d = GF.tsy[k - 1] - GF.tsy[k];
-            float u = d > 1e-4f ? (GF.tsy[k - 1] - want) / d : 0;
-            return GF.tz[k - 1] + (GF.tz[k] - GF.tz[k - 1]) * u;
-        }
-    return want > GF.tsy[0] ? GF.tz[0] : Z_FAR;
+    return Z_FAR * (1 - gf_y(n) / GF.y_hit);
 }
 
 // is a note at time nt on the highway yet
@@ -3345,6 +3338,16 @@ int game_update(const Pad * pad, uint32_t pressed)
     if (G.paused || !G.part)
         return GAME_PAUSE;
     G.t = audio_song_time() - cfg.offset_ms / 1000.0;
+#ifndef __vita__
+    if (getenv("GHV_CLOCKLOG")) {
+        static double lt, lw;
+        double w = plat_now_us() / 1e6;
+        if (lw > 0 && G.t > 0)
+            plat_log("CLK %.6f %.6f", G.t - lt, w - lw);
+        lt = G.t;
+        lw = w;
+    }
+#endif
     ghost_track();
 #ifndef __vita__
     {
@@ -3966,88 +3969,96 @@ static void flash_spot(int l, float z, float r, float * sx, float * sy, float * 
     project(x + r, 0, z, &ax, &ay);
     project(x, 0, z + r, &bx, &by);
     *rx = fabsf(ax - *sx);
-    *ry = fmaxf(fabsf(by - *sy), *rx * 0.28f);
+    *ry = GF.look ? *rx * 0.42f : fmaxf(fabsf(by - *sy), *rx * 0.28f);
 }
 
-// one Flash note, as Guitar Flash draws them: a white base disc rimmed in black, a glossy dome in the lane's colour
-// sitting on it, a white shine on the dome. A hammer-on's dome is white with a coloured rim (World Tour rules only), a
-// tap's dark; Star Power notes are blue-white
+// a four-pointed twinkle: two thin diamonds crossed
+static void f2_twinkle(float x, float y, float r, uint32_t c)
+{
+    gfx_tex(NULL);
+    const float uv[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+    uint32_t e = c & 0x00FFFFFF;
+    const float v[4][3] = {{x, y - r, 0}, {x + r * 0.22f, y, 0}, {x, y + r, 0}, {x - r * 0.22f, y, 0}};
+    const float h[4][3] = {{x - r, y, 0}, {x, y - r * 0.22f, 0}, {x + r, y, 0}, {x, y + r * 0.22f, 0}};
+    const uint32_t cv[4] = {e, c, e, c}, ch[4] = {e, c, e, c};
+    gfx_quad(v, uv, cv);
+    gfx_quad(h, uv, ch);
+}
+
+// one Flash note: a chunky round candy, outlined bold in black, its side a deep shade of the lane's colour, its top
+// bright with a darker inner ring and a twinkle of light. A hammer-on's top is pale (World Tour rules only), a tap's
+// dark with a coloured ring; Star Power notes are cyan
 static void flash_gem(int l, float z, int c, int kind, float a, float size)
 {
     float sx, sy, rx, ry;
-    flash_spot(l, z, 0.37f * size, &sx, &sy, &rx, &ry);
-    float base_h = rx * 0.12f, dome_h = rx * 0.26f;
-    // shadow on the board
-    flash_ell(sx, sy + ry * 0.25f, rx * 1.12f, ry * 1.2f, with_alpha(RGBA(0, 0, 0, 255), a * 0.5f), with_alpha(RGBA(0, 0, 0, 255), 0));
-    // the base: a black rim, then a white disc with some thickness
-    flash_ell(sx, sy, rx * 1.06f, ry * 1.08f, with_alpha(RGBA(10, 10, 12, 255), a), with_alpha(RGBA(10, 10, 12, 255), a));
-    for (int k = 0; k <= 3; k++) {
-        float y = sy - base_h * k / 3;
-        int g = 150 + 25 * k;
-        flash_ell(sx, y, rx, ry, with_alpha(RGBA(g, g, g + 4, 255), a), with_alpha(RGBA(g - 30, g - 30, g - 26, 255), a));
+    flash_spot(l, z, 0.38f * size, &sx, &sy, &rx, &ry);
+    float h = rx * 0.2f, ol = fmaxf(2, rx * 0.09f);
+    uint32_t black = with_alpha(RGBA(12, 10, 18, 255), a);
+    flash_ell(sx, sy + ry * 0.35f, rx * 1.1f, ry * 1.1f, with_alpha(RGBA(0, 0, 0, 255), a * 0.45f), with_alpha(RGBA(0, 0, 0, 255), 0));
+    // the outline: the whole puck's shape, a size bigger, in black
+    for (int k = 0; k <= 3; k++)
+        flash_ell(sx, sy - h * k / 3, rx + ol, ry + ol, black, black);
+    // the side
+    for (int k = 0; k <= 3; k++)
+        flash_ell(sx, sy - h * k / 3, rx, ry, kind == 2 ? with_alpha(RGBA(40, 38, 50, 255), a) : flash_col(c, 0.5f + 0.06f * k, a),
+                  kind == 2 ? with_alpha(RGBA(24, 22, 30, 255), a) : flash_col(c, 0.38f + 0.06f * k, a));
+    float ty = sy - h;
+    // the top
+    if (kind == 2) {
+        flash_ell(sx, ty, rx * 0.94f, ry * 0.94f, with_alpha(RGBA(60, 58, 72, 255), a), with_alpha(RGBA(30, 28, 38, 255), a));
+        flash_annulus(sx, ty, rx * 0.62f, ry * 0.62f, rx * 0.86f, ry * 0.86f, flash_col(c, 1.1f, a), flash_col(c, 0.9f, a));
+    } else if (kind == 1) {
+        flash_ell(sx, ty, rx * 0.94f, ry * 0.94f, flash_col(c, 1.0f, a), flash_col(c, 0.8f, a));
+        flash_ell(sx, ty, rx * 0.66f, ry * 0.66f, with_alpha(RGBA(255, 255, 255, 255), a), with_alpha(RGBA(225, 225, 235, 255), a));
+    } else {
+        flash_ell(sx, ty, rx * 0.94f, ry * 0.94f, flash_col(c, 1.3f, a), flash_col(c, 0.95f, a));
+        flash_annulus(sx, ty, rx * 0.56f, ry * 0.56f, rx * 0.68f, ry * 0.68f, flash_col(c, 0.7f, a * 0.8f), flash_col(c, 0.7f, a * 0.8f));
     }
-    float by = sy - base_h;
-    flash_ell(sx, by, rx * 0.98f, ry * 0.98f, with_alpha(RGBA(255, 255, 255, 255), a), with_alpha(RGBA(214, 214, 220, 255), a));
-    // the dome: rings up a quarter circle, darker at its foot, its top lit
-    int dc = kind == 1 ? -1 : c;                // a hammer-on: a white dome
-    float dr = 0.74f;
-    flash_ell(sx, by, rx * (dr + 0.05f), ry * (dr + 0.05f), with_alpha(RGBA(0, 0, 0, 255), a * 0.55f), with_alpha(RGBA(0, 0, 0, 255), a * 0.2f));
-    const int steps = 7;
-    for (int k = 0; k <= steps; k++) {
-        float u = (float)k / steps, r = dr * sqrtf(1 - u * u * 0.82f), y = by - dome_h * u;
-        float lit = 0.82f + 0.38f * u;
-        uint32_t ci, co;
-        if (kind == 2) {
-            ci = with_alpha(RGBA((int)(50 * lit), (int)(50 * lit), (int)(58 * lit), 255), a);
-            co = with_alpha(RGBA((int)(30 * lit), (int)(30 * lit), (int)(36 * lit), 255), a);
-        } else if (dc < 0) {
-            int g = (int)(200 * lit);
-            g = g > 255 ? 255 : g;
-            ci = with_alpha(RGBA(g, g, g, 255), a);
-            co = flash_col(c, 0.75f * lit, a);
-        } else {
-            ci = flash_col(dc, lit * 1.08f, a);
-            co = flash_col(dc, lit * 0.78f, a);
-        }
-        flash_ell(sx, y, rx * r, ry * r, ci, co);
-    }
-    // the shine: a soft white crescent up and to the left, a bright fleck in it
-    float ty = by - dome_h;
-    flash_ell(sx - rx * 0.2f, ty - ry * 0.05f, rx * 0.34f, ry * 0.3f, with_alpha(WHITE, a * (kind == 2 ? 0.25f : 0.55f)), with_alpha(WHITE, 0));
-    flash_ell(sx - rx * 0.24f, ty - ry * 0.1f, rx * 0.12f, ry * 0.1f, with_alpha(WHITE, a * 0.9f), with_alpha(WHITE, a * 0.2f));
+    // light on it: a soft glint up and to the left, a twinkle in it
+    flash_ell(sx - rx * 0.3f, ty - ry * 0.2f, rx * 0.36f, ry * 0.3f, with_alpha(WHITE, a * 0.5f), with_alpha(WHITE, 0));
+    f2_twinkle(sx - rx * 0.34f, ty - ry * 0.26f, rx * 0.3f, with_alpha(WHITE, a * 0.95f));
 }
 
-// the targets on the strikeline: a thick ring in the lane's colour, rimmed black inside and out, round a black middle.
-// Pressed, the middle lights in the lane's colour (its fret's frames 2 and 3); each hit throws a white ring off it
+// the targets on the strikeline: a bold black-outlined ring in the lane's colour round a dark well with a little lens
+// in it. Pressed, the ring pushes down and the lens lights up; a hit throws a white ring off it, a miss flashes it red
 static void flash_targets(void)
 {
     for (int l = 0; l < G.lanes; l++) {
         float sx, sy, rx, ry;
-        flash_spot(l, 0, 0.5f, &sx, &sy, &rx, &ry);
+        flash_spot(l, 0, 0.48f, &sx, &sy, &rx, &ry);
         int c = lane_art(l);
-        bool held = G.held & (1 << l);
-        // a little depth: the ring's underside
-        flash_annulus(sx, sy + ry * 0.12f, rx * 0.7f, ry * 0.7f, rx * 1.04f, ry * 1.04f, RGBA(0, 0, 0, 200), RGBA(0, 0, 0, 120));
-        flash_ell(sx, sy, rx * 1.04f, ry * 1.06f, RGBA(8, 8, 10, 255), RGBA(8, 8, 10, 255));
-        flash_annulus(sx, sy, rx * 0.74f, ry * 0.74f, rx, ry, flash_col(c, 0.82f, 1), flash_col(c, 1.0f, 1));
-        // the ring's top edge lit
-        flash_annulus(sx, sy - ry * 0.04f, rx * 0.86f, ry * 0.86f, rx * 0.96f, ry * 0.96f, with_alpha(flash_col(c, 1.25f, 1), 0.0f),
-                      with_alpha(flash_col(c, 1.3f, 1), 0.55f));
-        flash_ell(sx, sy, rx * 0.74f, ry * 0.74f, RGBA(8, 8, 10, 255), RGBA(8, 8, 10, 255));
         float since = (float)(G.t - G.press_t[l]);
-        if (held || (since >= 0 && since < 0.083f)) {
-            float k = held ? 1 : 1 - since / 0.083f;
-            flash_ell(sx, sy, rx * 0.66f, ry * 0.66f, flash_col(c, 1.1f, k), flash_col(c, 0.55f, k));
-            flash_ell(sx - rx * 0.12f, sy - ry * 0.2f, rx * 0.3f, ry * 0.22f, with_alpha(WHITE, 0.45f * k), with_alpha(WHITE, 0));
-        } else
-            flash_ell(sx, sy, rx * 0.66f, ry * 0.66f, RGBA(34, 34, 38, 255), RGBA(14, 14, 16, 255));
+        bool held = G.held & (1 << l);
+        float press = held ? 1 : since >= 0 && since < 0.083f ? 1 - since / 0.083f : 0;
+        float ol = fmaxf(2.5f, rx * 0.08f), drop = press * ry * 0.12f;
+        // its base, then the ring on it
+        flash_ell(sx, sy + ry * 0.16f, rx + ol, ry + ol, RGBA(10, 8, 16, 255), RGBA(10, 8, 16, 255));
+        flash_ell(sx, sy + ry * 0.16f, rx, ry, flash_col(c, 0.4f, 1), flash_col(c, 0.3f, 1));
+        float cy = sy + drop;
+        flash_ell(sx, cy, rx + ol, ry + ol, RGBA(10, 8, 16, 255), RGBA(10, 8, 16, 255));
+        flash_annulus(sx, cy, rx * 0.66f, ry * 0.66f, rx, ry, flash_col(c, 0.9f + 0.3f * press, 1), flash_col(c, 1.15f + 0.2f * press, 1));
+        flash_annulus(sx, cy, rx * 0.6f, ry * 0.6f, rx * 0.68f, ry * 0.68f, RGBA(10, 8, 16, 255), RGBA(10, 8, 16, 255));
+        flash_ell(sx, cy, rx * 0.6f, ry * 0.6f, RGBA(40, 36, 56, 255), RGBA(18, 16, 28, 255));
+        // the lens
+        flash_ell(sx, cy, rx * 0.3f, ry * 0.3f, flash_col(c, 0.35f + 0.95f * press, 1), flash_col(c, 0.25f + 0.6f * press, 1));
+        if (press > 0) {
+            gfx_blend(BLEND_ADD);
+            flash_ell(sx, cy, rx * 0.62f, ry * 0.62f, flash_col(c, 0.6f, 0.6f * press), flash_col(c, 0.4f, 0));
+            gfx_blend(BLEND_ALPHA);
+        }
+        // its top edge catching the light
+        flash_annulus(sx, cy - ry * 0.05f, rx * 0.8f, ry * 0.8f, rx * 0.93f, ry * 0.93f, with_alpha(WHITE, 0), with_alpha(WHITE, 0.3f));
         float hit = clamp01(1 - (float)(G.t - G.flame_t[l]) * 6);
         if (hit > 0) {
             gfx_blend(BLEND_ADD);
-            float g = 1 + (1 - hit) * 0.45f;
-            flash_annulus(sx, sy, rx * (g - 0.1f), ry * (g - 0.1f), rx * g, ry * g, with_alpha(WHITE, hit * 0.7f), with_alpha(WHITE, hit * 0.2f));
+            float g = 1 + (1 - hit) * 0.5f;
+            flash_annulus(sx, cy, rx * (g - 0.1f), ry * (g - 0.1f), rx * g, ry * g, with_alpha(WHITE, hit * 0.8f), with_alpha(WHITE, hit * 0.25f));
             gfx_blend(BLEND_ALPHA);
         }
+        float miss = clamp01(1 - (float)(G.t - G.miss_t[l]) * 5);
+        if (miss > 0 && cfg.flashes < 2)
+            flash_annulus(sx, cy, rx * 0.66f, ry * 0.66f, rx * 1.05f, ry * 1.05f, RGBA(255, 40, 40, (int)(200 * miss)),
+                          RGBA(255, 40, 40, (int)(120 * miss)));
     }
 }
 
@@ -4097,6 +4108,8 @@ static void flash_flames(void)
         uint32_t o0 = sp ? RGBA(40, 120, 230, 255) : RGBA(236, 84, 14, 255), o1 = sp ? RGBA(20, 80, 200, 230) : RGBA(210, 50, 10, 230);
         uint32_t m0 = sp ? RGBA(120, 200, 255, 255) : RGBA(255, 196, 30, 255), m1 = sp ? RGBA(80, 170, 255, 255) : RGBA(255, 150, 20, 255);
         uint32_t c0 = sp ? RGBA(235, 250, 255, 255) : RGBA(255, 250, 190, 255), c1 = sp ? RGBA(170, 225, 255, 255) : RGBA(255, 226, 90, 255);
+        // a bold outline round it all
+        flash_flame_shape(sx, sy + 2, w * 1.12f, h * 1.08f + 3, t, l * 7, RGBA(14, 8, 10, 235), RGBA(14, 8, 10, 235));
         flash_flame_shape(sx, sy, w, h, t, l * 7, o0, o1);
         flash_flame_shape(sx, sy, w * 0.78f, h * 0.8f, t + 0.05f, l * 7 + 3, m0, m1);
         flash_flame_shape(sx, sy, w * 0.5f, h * 0.52f, t + 0.1f, l * 7 + 5, c0, c1);
@@ -4167,64 +4180,169 @@ static void flash_board_quad(float x0, float x1, float z0, float z1, uint32_t c0
     gfx_quad(p, uv, c);
 }
 
-// Flash's meters: glass tubes in a dark frame beside the highway, filled from the bottom. The rock meter's fill is
-// one colour by how it stands (red under 19 of its 60, yellow under 41, green above); Star Power's blue
+// Flash's flat board: deep night blue, a few stars drifting down it, thin lines between the lanes, bold white rails
+// outlined in black; the held notes' tails on it. Star Power washes it blue, a miss flashes the rails red
+static void draw_flash_board(void)
+{
+    gfx_2d();
+    gfx_blend(BLEND_ALPHA);
+    gfx_tex(NULL);
+    const float hw = HALF_W, zb = Z_NEAR, zt = Z_FAR;
+    float spk = G.sp_active ? 0.6f + 0.15f * sinf((float)G.t * 6) : 0;
+    uint32_t ink = RGBA(10, 8, 16, 255);
+    // the outline, then the board
+    flash_board_quad(-hw - 0.32f, hw + 0.32f, zb, zt + 0.25f, ink, ink, ink, ink);
+    uint8_t r0 = (uint8_t)(36 + 10 * spk), g0 = (uint8_t)(32 + 40 * spk), b0 = (uint8_t)(62 + 80 * spk);
+    uint32_t near = RGBA(r0, g0, b0, 250), far = RGBA(14, 12, 28, 250);
+    flash_board_quad(-hw, hw, zb, zt, near, near, far, far);
+    // stars drifting down: the board scrolls under the notes
+    for (int k = 0; k < 26; k++) {
+        float x = (float)((k * 7919) % 1000) / 1000 * 2 - 1;
+        float zz = fmodf((float)((k * 104729) % 1000) / 1000 * (zt - zb) - (float)G.t * (float)G.speed * 0.5f, zt - zb);
+        if (zz < 0)
+            zz += zt - zb;
+        float z = zb + zz, sx, sy;
+        project(x * (hw - 0.3f), 0, z, &sx, &sy);
+        float sz = f2_hw(sy) / F2_HW_LINE * (k % 3 == 0 ? 4.5f : 2.5f);
+        float tw = 0.5f + 0.5f * sinf((float)G.t * 3 + k);
+        f2_twinkle(sx, sy, sz, RGBA(200, 210, 255, (int)(60 + 80 * tw)));
+    }
+    // the lines between the lanes
+    for (int l = 1; l < G.lanes; l++) {
+        float x = (lane_x(l - 1) + lane_x(l)) / 2;
+        uint32_t c0 = RGBA(110, 104, 150, 200), c1 = RGBA(60, 56, 90, 140);
+        flash_board_quad(x - 0.025f, x + 0.025f, zb, zt, c0, c0, c1, c1);
+    }
+    // the tails of held notes
+    const Part * p = G.part;
+    for (int i = G.first > 8 ? G.first - 8 : 0; i < p->note_count; i++) {
+        const Note * n = &p->notes[i];
+        float z0 = time_z(n->time / 1e6);
+        if (z0 > Z_FAR)
+            break;
+        if (!n->len)
+            continue;
+        float z1 = time_z((n->time + (double)n->len) / 1e6);
+        if (z1 < 0)
+            continue;
+        bool active = false;
+        for (int k = 0; k < MAX_SUS; k++)
+            active |= G.sus[k].note == i;
+        if (G.state[i] == HIT && !active)
+            continue;
+        if (z0 < 0)
+            z0 = 0;
+        if (z1 > Z_FAR)
+            z1 = Z_FAR;
+        bool dead = G.state[i] == MISSED, star = G.sp_active || (G.phrase[i] >= 0 && G.phrase_ok[G.phrase[i]]);
+        for (int l = 0; l < 6; l++) {
+            if (!(n->frets & (1 << l)))
+                continue;
+            bool open = l == LANE_OPEN;
+            float x = open ? 0 : lane_x(l), w = open ? hw - 0.3f : 0.13f;
+            int c = star ? 5 : lane_art(l);
+            uint32_t fc = dead ? RGBA(80, 78, 96, 255) : open ? RGBA(190, 70, 230, 255) : flash_col(c, active ? 1.25f : 1, 1);
+            uint32_t fc2 = dead ? RGBA(60, 58, 74, 255) : open ? RGBA(140, 50, 180, 255) : flash_col(c, active ? 0.95f : 0.7f, 1);
+            float wob = active && !cfg.no_wobble ? (0.02f + G.whammy * 0.06f) * sinf((float)G.t * 30) : 0;
+            flash_board_quad(x - w - 0.07f + wob, x + w + 0.07f + wob, z0, z1, ink, ink, ink, ink);
+            flash_board_quad(x - w + wob, x + w + wob, z0, z1, fc2, fc, fc, fc2);
+            uint32_t hl = with_alpha(WHITE, active ? 0.75f : 0.35f);
+            flash_board_quad(x - w * 0.25f + wob, x + w * 0.25f + wob, z0, z1, hl, hl, with_alpha(WHITE, 0.1f), with_alpha(WHITE, 0.1f));
+        }
+    }
+    // the rails
+    uint32_t rc = G.sp_active ? RGBA(120, 220, 255, 255) : G.sp >= 0.5f ? RGBA(200, 235, 255, 255) : RGBA(245, 245, 250, 255);
+    if (G.miss_flash > 0.05f && cfg.flashes < 2) {
+        int k = (int)(G.miss_flash * (cfg.flashes ? 90 : 220));
+        rc = RGBA(255, 245 - k, 250 - k, 255);
+    }
+    for (int side = -1; side <= 1; side += 2) {
+        float x = side * hw;
+        flash_board_quad(x - 0.17f, x + 0.17f, zb, zt + 0.2f, ink, ink, ink, ink);
+        flash_board_quad(x - 0.1f, x + 0.1f, zb, zt, rc, rc, with_alpha(rc, 0.7f), with_alpha(rc, 0.7f));
+    }
+    // the strikeline: a faint band behind the targets
+    uint32_t sl = RGBA(255, 255, 255, 40);
+    flash_board_quad(-hw, hw, -0.25f, 0.25f, sl, sl, sl, sl);
+}
+
+// a capsule standing up off to the side of the highway: a bold outline, dark glass, filled from the bottom
+static void f2_capsule(float x, float y0, float y1, float w, float level, uint32_t fill, uint32_t fill2, bool marks)
+{
+    uint32_t ink = RGBA(10, 8, 16, 255);
+    float r = w / 2, ol = 3;
+    flash_ell(x, y0, r + ol, r + ol, ink, ink);
+    flash_ell(x, y1, r + ol, r + ol, ink, ink);
+    gfx_rect(x - r - ol, y0, w + ol * 2, y1 - y0, ink);
+    flash_ell(x, y0, r, r, RGBA(30, 28, 44, 240), RGBA(30, 28, 44, 240));
+    flash_ell(x, y1, r, r, RGBA(30, 28, 44, 240), RGBA(30, 28, 44, 240));
+    gfx_rect(x - r, y0, w, y1 - y0, RGBA(30, 28, 44, 240));
+    level = clamp01(level);
+    if (level > 0.003f) {
+        float top = y1 - (y1 - y0) * level;
+        flash_ell(x, y1, r, r, fill2, fill2);
+        gfx_tex(NULL);
+        const float uv[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+        // shaded round: dark sides, bright down the middle
+        const float pl[4][3] = {{x - r, top, 0}, {x, top, 0}, {x, y1, 0}, {x - r, y1, 0}};
+        const float pr[4][3] = {{x, top, 0}, {x + r, top, 0}, {x + r, y1, 0}, {x, y1, 0}};
+        const uint32_t cl[4] = {fill2, fill, fill, fill2}, cr[4] = {fill, fill2, fill2, fill};
+        gfx_quad(pl, uv, cl);
+        gfx_quad(pr, uv, cr);
+        flash_ell(x, top, r, r * 0.4f, fill, fill2);
+    }
+    for (int i = 1; i < 4 && marks; i++)
+        gfx_rect(x - r, y1 - (y1 - y0) * i / 4 - 1, w, 2, RGBA(10, 8, 16, 200));
+    // the glass shine
+    gfx_rect(x - r * 0.55f, y0 + 2, r * 0.3f, y1 - y0 - 4, RGBA(255, 255, 255, 60));
+}
+
+// Flash's meters: the rock meter a capsule left of the highway (red, yellow or green by where it stands), Star Power
+// one on the right (blue, quartered; it pulses once there's enough to use)
 static void flash_bar(float side, float level, bool rock)
 {
-    gfx_tex(NULL);
-    level = clamp01(level);
-    float in = side * (HALF_W + 0.2f), out = side * (HALF_W + 0.66f), z0 = 0.2f, z1 = 6.2f;
-    float lo = fminf(in, out), hi = fmaxf(in, out), w = hi - lo;
-    // the frame, then the empty glass
-    uint32_t fr = RGBA(58, 58, 64, 255), fr2 = RGBA(26, 26, 30, 255);
-    flash_board_quad(lo - 0.07f, hi + 0.07f, z0 - 0.12f, z1 + 0.12f, fr, fr, fr2, fr2);
-    flash_board_quad(lo, hi, z0, z1, RGBA(12, 12, 16, 240), RGBA(12, 12, 16, 240), RGBA(8, 8, 10, 240), RGBA(8, 8, 10, 240));
-    uint8_t r, g, b;
+    float x = F2_CX + side * (F2_HW_LINE + 92), y0 = 150, y1 = 420;
+    uint32_t f, f2;
     if (rock) {
-        float n = level * 60;
-        if (n < 19) { r = 230; g = 36; b = 26; }
-        else if (n < 41) { r = 248; g = 210; b = 30; }
-        else { r = 60; g = 220; b = 60; }
+        float n = clamp01(level) * 60;
         if (n < 19) {
             float k = 0.75f + 0.25f * fabsf(sinf((float)G.t * 8));
-            r = (uint8_t)(r * k);
+            f = RGBA((int)(255 * k), 60, 50, 255);
+            f2 = RGBA((int)(150 * k), 20, 20, 255);
+        } else if (n < 41) {
+            f = RGBA(255, 222, 60, 255);
+            f2 = RGBA(170, 120, 10, 255);
+        } else {
+            f = RGBA(110, 240, 100, 255);
+            f2 = RGBA(30, 130, 40, 255);
         }
     } else {
         bool ready = G.sp >= 0.5f || G.sp_active;
         float k = ready ? 0.85f + 0.15f * sinf((float)G.t * 7) : 1;
-        r = (uint8_t)(40 * k); g = (uint8_t)(150 * k); b = (uint8_t)(255 * k);
+        f = RGBA((int)(110 * k), (int)(210 * k), 255, 255);
+        f2 = RGBA(20, (int)(80 * k), (int)(190 * k), 255);
     }
-    // the fill, shaded round like liquid in a tube: dark at its sides, bright down the middle
-    float zt = z0 + (z1 - z0) * level;
-    if (level > 0.002f) {
-        uint32_t edge = RGBA(r / 2, g / 2, b / 2, 255), mid = RGBA(r, g, b, 255);
-        uint32_t hl = RGBA(r + (255 - r) / 2, g + (255 - g) / 2, b + (255 - b) / 2, 255);
-        float xa = lo + w * 0.35f, xb = lo + w * 0.5f;
-        flash_board_quad(lo, xa, z0, zt, edge, mid, mid, edge);
-        flash_board_quad(xa, xb, z0, zt, mid, hl, hl, mid);
-        flash_board_quad(xb, hi, z0, zt, hl, edge, edge, hl);
-        // its top surface
-        flash_board_quad(lo, hi, zt - 0.06f, zt, hl, hl, WHITE, WHITE);
+    f2_capsule(x, y0, y1, 24, level, f, f2, !rock);
+    // a little icon over each
+    float iy = y0 - 30;
+    if (rock) {
+        flash_ell(x, iy, 13, 13, RGBA(10, 8, 16, 255), RGBA(10, 8, 16, 255));
+        flash_ell(x, iy, 10, 10, f, f2);
+    } else {
+        flash_ell(x, iy, 13, 13, RGBA(10, 8, 16, 255), RGBA(10, 8, 16, 255));
+        f2_twinkle(x, iy, 12, RGBA(150, 225, 255, 255));
     }
-    // the glass shine over it all
-    float s0 = lo + w * 0.18f, s1 = lo + w * 0.32f;
-    flash_board_quad(s0, s1, z0 + 0.1f, z1 - 0.1f, RGBA(255, 255, 255, 30), RGBA(255, 255, 255, 110), RGBA(255, 255, 255, 60),
-                     RGBA(255, 255, 255, 15));
-    // Star Power: the steps to half a bar marked (two phrases)
-    if (!rock)
-        for (int i = 1; i < 4; i++) {
-            float z = z0 + (z1 - z0) * i / 4;
-            flash_board_quad(lo, hi, z - 0.025f, z + 0.025f, RGBA(0, 0, 0, 150), RGBA(0, 0, 0, 150), RGBA(0, 0, 0, 150), RGBA(0, 0, 0, 150));
-        }
 }
 
 static void draw_flash_hud(void)
 {
     G.needle += (G.rock - G.needle) * ease(0.1f);
-    flash_bar(lane_x(0) > 0 ? 1 : -1, G.needle, true);
-    flash_bar(lane_x(0) > 0 ? -1 : 1, G.sp, false);
+    flash_bar(-1, G.needle, true);
+    flash_bar(1, G.sp, false);
     float sx, sy;
     project(0, 0, -0.9f, &sx, &sy);
+    if (GF.look)
+        sy = F2_LINE + 48;              // under the targets, clear of them
     sy = fminf(sy, SCREEN_H - 30);
     int m = multiplier();
     // Flash's badge: a light grey glossy disc, its number dark; blue in Star Power
@@ -4348,20 +4466,11 @@ static void draw_held_lanes(void)
 }
 
 static void draw_flash_hud(void);
+static void draw_flash_board(void);
 static void draw_flames(void)
 {
-    if (cfg.gem_style == 1 && !G.drums) {
-        // Flash: its fire is drawn flat with the notes (flash_flames); a miss still flashes the ring red
-        gfx_blend(BLEND_ADD);
-        const Sprite * dot = atlas_get(res.game, "glow");
-        for (int l = 0; l < G.lanes; l++) {
-            double since = G.t - G.miss_t[l];
-            if (since >= 0 && since < 0.2)
-                lay(lane_x(l), 0.07f, 0, 1.4f, 1.1f, dot, with_alpha(RGBA(255, 40, 30, 255), 0.7f * (1 - (float)since / 0.2f)));
-        }
-        gfx_blend(BLEND_ALPHA);
-        return;
-    }
+    if (GF.look)
+        return;                         // Flash: its fire and misses are drawn flat with the notes
     gfx_blend(BLEND_ADD);
     const Sprite * flame = atlas_get(res.game, "flame");
     const Sprite * glow = atlas_get(res.game, "cup_glow");
@@ -5278,15 +5387,17 @@ void game_draw(void)
         proj_now = battle_proj(shook) ? shook : G.proj;
         gfx_3d(proj_now, G.view);
         gf_flags();
-        if (GF.look)
-            gf_frame();
-        else
-            GF.tn = 0;
-        draw_highway();
-        if (G.roll_count || G.gap_count)
-            draw_zones();
-        draw_held_lanes();
-        draw_sustains();
+        if (GF.look) {
+            draw_flash_board();
+            gfx_3d(proj_now, G.view);
+        } else
+            draw_highway();
+        if (!GF.look) {
+            if (G.roll_count || G.gap_count)
+                draw_zones();
+            draw_held_lanes();
+            draw_sustains();
+        }
         if (cfg.gem_style == 1 && !G.drums) {
             draw_flash_notes();
             flash_flames();
@@ -5297,7 +5408,7 @@ void game_draw(void)
             draw_cups(true);
         }
         draw_flames();
-        if (cfg.hud_style != 1)
+        if (cfg.hud_style != 1 && !GF.look)
             draw_rail_meter();
     }
     draw_hud();

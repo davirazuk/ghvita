@@ -416,3 +416,14 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 - 30 fps never worked on the Vita: vglSwapBuffers queues the flip and returns, so only skipped frames waited a vblank and
   drawn frames still came every refresh. Now paced by sceDisplayGetVcount (drawn = last + 2, read-only frame between)
 - Flash look redone (v230): notes = black-rimmed white base + coloured dome + shine; targets thick ring, middle lights when pressed; 2D cartoon flames (flash_flames, 3 layers); board near black, thin grey lane lines, no beat lines, no sparks; meters = framed glass tubes filled by level (rock red <19/60, yellow <41, green); solid straight tails
+
+## Flash flat 2D, own art; smooth clock (v231, 2026-11-13)
+
+- Guitar Flash's sprites are its developers' art: not used or traced (only read for layout ideas). Flash note style is
+  our own look now, flat: project() maps the board to a screen trapezoid (F2_TOP 118, F2_LINE 466, half-widths 60/252),
+  z straight up it, so time_z is Z_FAR * (1 - gfy / y_hit). draw_flash_board: night-blue board with drifting twinkles,
+  thin lane lines, bold outlined rails and tails. Notes: black-outlined candy pucks with a twinkle; targets: outlined
+  rings with a lens that lights; capsule meters at x = centre +- 344
+- audio_song_time smoothed: free-running at song speed, 6% a frame toward the audio anchor, reset over 40 ms or on a
+  jump (per-frame clock wobble 0.30 -> 0.04 ms on PC)
+- humanbot with no deliberate faults: Plug In Baby guitar 687/687, bass 793/793 (judging is exact)
