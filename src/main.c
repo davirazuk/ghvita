@@ -5587,6 +5587,9 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "Streak lamps redone like World Tour's: short domes end to end on a gold strip flush against the rail.",
+        "Hit ratings (PERFECT, GREAT...) now show just under the strikeline, never over a note on its way in.",
+        "Bass at x6 gets a real nixie tube in the score amp, like x2 to x4, instead of a plain number.",
         "The multiplier lamps lie along the highway's rail in its own perspective, with the x4 plate at the end of the row.",
         "The downloader keeps its folder tidy: old search covers (they had piled up past 100 MB) and dead download folders go.",
         "Flash mode is now just its engine: GAME, Engine: Guitar Flash plays by Flash's rules on the normal highway.",

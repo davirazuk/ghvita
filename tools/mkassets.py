@@ -330,6 +330,9 @@ def hud_atlas():
         d.polygon(pts, fill=(235, 235, 235, 255))
         A.add('btn_' + name, im)
     A.save(os.path.join(OUT, 'hud.png'), os.path.join(OUT, 'hud.txt'))
+    # the normal-lit x6 and x8 tubes World Tour lacks, coloured from its own 4s
+    import subprocess
+    subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'nixie_orange.py'), OUT], check=True)
 
 
 def backgrounds():

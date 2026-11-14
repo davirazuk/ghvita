@@ -466,3 +466,11 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   reports underruns per song (the old number was the session total). Vita dumps Nov 2-4 = already-fixed bugs.
 - v237: rail meter redone: rope a thin trim drawn first, lamps on top, each square to the rail's screen direction (+0.22 tip), sized 0.72 of the spacing. Backup ~/.cache/ghv-work/game.c.prerail
 - v238: rail lamps laid flat in 3D (flat() on the board plane, outward from the rope, 0.78 of spacing), lit glow flat too; plate at z1+0.12, 0.95 wide. Backup game.c.prerail2
+
+## Rail strip, ratings, x6 nixie (v239, 2026-11-14)
+- draw_rail_meter: World Tour's layout from ~/.cache/ghv-work/lampref (cmp.png): hud_rope stretched into a 0.30-wide gold
+  strip flush outside the rail (x -HALF_W+0.03 .. -HALF_W-0.27, z 0.45..2.75) on a faint dark bed; five lamp domes end
+  to end on it (0.8 of spacing), round ends out; plate at z1+0.22. Backup ~/.cache/ghv-work/game.c.prerail3
+- Hit rating text projected at z -0.75 (under the strikeline, clamped to y 500), 25 px, rises 16 px
+- tools/nixie_orange.py: hud_score_nixie_6a/8a from World Tour's blue 6b/8b by an RGB map fitted 4b->4a (error 7/255);
+  mkassets.py runs it after the hud atlas. x5, x10, x12 still use the drawn fallback

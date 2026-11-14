@@ -3948,31 +3948,34 @@ static void draw_rail_meter(void)
     // the gold rope runs along the outside of the rail, a trim; five glass domes stand on it, set apart, each one
     // square to the rail where it sits (the perspective turns them as it turns the rail) and tipped up a little.
     // yellow up to x2, green to x3, purple on to the top
-    const float rope0 = -HALF_W + 0.02f, rope1 = -HALF_W - 0.09f, z0 = 0.55f, z1 = 3.0f;
+    // World Tour's: a ribbed gold strip lies flush against the outside of the rail, as wide as its lamps; five short
+    // domes sit on it end to end, filling it from the strikeline up, their round ends out
+    const float in = -HALF_W + 0.03f, out = -HALF_W - 0.27f, z0 = 0.45f, z1 = 2.75f;
     int m = multiplier(), base_m = 1 + G.streak / 10, max_m = G.part_id == PART_BASS ? 6 : 4;
     int lit = base_m >= max_m ? 5 : (G.streak % 10) / 2;
     bool half = base_m < max_m && G.streak % 2;
     const char * hue = G.sp_active ? "_blue" : base_m >= 3 ? "_purple" : base_m == 2 ? "_green" : "";
     gfx_3d(G.proj, G.view);
     gfx_blend(BLEND_ALPHA);
-    rail_quad(atlas_get(res.hud, "hud_rope"), rope0, rope1, z0, z1, true, false, WHITE);
-    // the lamps lie on the board's plane beside the rail, out from the rope, so the perspective turns them with it
-    const float lz = z0 + 0.35f, lg = (z1 - lz) / 5, foot = rope1 + 0.03f, reach = 0.42f;
+    // a dark bed under the strip so it reads on bright floors, then the gold
+    flat(out - 0.01f, in, z0 - 0.02f, z1 + 0.02f, 0.012f, NULL, 0, 1, RGBA(20, 12, 4, 130), RGBA(20, 12, 4, 80));
+    rail_quad(atlas_get(res.hud, "hud_rope"), in, out, z0, z1, true, false, RGBA(255, 236, 190, 255));
+    const float lg = (z1 - z0) / 5, d = lg * 0.8f;
     for (int i = 0; i < 5; i++) {
         char name[32];
         int state = i < lit ? 2 : half && i == lit ? 1 : 0;
         snprintf(name, sizeof(name), "lamp_%d%s", state, hue);
         const Sprite * s = atlas_get(res.game, name);
-        float zc = lz + lg * (i + 0.5f), d = lg * 0.78f;
+        float zc = z0 + lg * (i + 0.5f);
         // unlit, a dark red glass, not gold
         const uint32_t lc = state == 0 ? RGBA(235, 120, 95, 255) : WHITE;
-        flat(foot - reach, foot, zc - d / 2, zc + d / 2, 0.018f, s, 0, 1, lc, lc);
+        flat(out + 0.02f, in - 0.04f, zc - d / 2, zc + d / 2, 0.018f, s, 0, 1, lc, lc);
         if (state == 2) {
             const uint32_t light = G.sp_active ? RGBA(95, 225, 255, 255) : base_m >= 3 ? RGBA(255, 130, 225, 255)
                                  : base_m == 2 ? RGBA(90, 245, 110, 255) : RGBA(255, 196, 70, 255);
             gfx_blend(BLEND_ADD);
-            flat(foot - reach * 1.6f, foot + 0.1f, zc - d, zc + d, 0.02f, atlas_get(res.game, "glow"), 0, 1,
-                 with_alpha(light, 0.5f), with_alpha(light, 0.5f));
+            flat(out - 0.16f, in + 0.02f, zc - d * 0.9f, zc + d * 0.9f, 0.02f, atlas_get(res.game, "glow"), 0, 1,
+                 with_alpha(light, 0.42f), with_alpha(light, 0.42f));
             gfx_blend(BLEND_ALPHA);
         }
     }
@@ -3987,11 +3990,11 @@ static void draw_rail_meter(void)
             uint32_t bc = G.sp_active ? RGBA(95, 225, 255, 255) : m >= 3 ? RGBA(255, 130, 225, 255)
                         : RGBA(90, 245, 110, 255);
             gfx_blend(BLEND_ADD);
-            board(-HALF_W - 0.34f, 0.0f, z1 + 0.12f - 0.4f * G.mult_pop, 2.6f * G.mult_pop, 2.0f * G.mult_pop,
+            board(-HALF_W - 0.3f, 0.0f, z1 + 0.22f - 0.4f * G.mult_pop, 2.6f * G.mult_pop, 2.0f * G.mult_pop,
                   atlas_get(res.game, "glow"), 0, 0, 1, 1, with_alpha(bc, G.mult_pop));
             gfx_blend(BLEND_ALPHA);
         }
-        board(-HALF_W - 0.34f, 0.02f, z1 + 0.12f, 0.95f * pop, 0.475f * pop, atlas_get(res.game, name), 0, 0, 1, 1,
+        board(-HALF_W - 0.3f, 0.02f, z1 + 0.22f, 0.95f * pop, 0.475f * pop, atlas_get(res.game, name), 0, 0, 1, 1,
               G.sp_active ? RGBA(170, 225, 255, 255) : WHITE);
     }
 }
@@ -4766,13 +4769,13 @@ static void draw_hud(void)
     gfx_blend(BLEND_ALPHA);
     float t = (float)G.t;
     if (cfg.hit_ratings && !G.vocal && G.t - G.rate_t < 0.5 && G.t - G.rate_t >= 0) {
-        // the last hit's rating over the strikeline, rising and fading
+        // the last hit's rating just below the strikeline, where it never covers a note on its way in
         static const char * const rn[4] = {"PERFECT", "GREAT", "GOOD", "MISS"};
         static const uint32_t rc[4] = {RGBA(255, 214, 70, 255), RGBA(110, 235, 130, 255), RGBA(225, 225, 235, 255),
                                        RGBA(255, 80, 60, 255)};
         float age = (float)(G.t - G.rate_t), sx, sy;
-        project(0, 0, 2.2f, &sx, &sy);
-        float pop = age < 0.06f ? 1.25f - age * 4 : 1;
+        project(0, 0, -0.75f, &sx, &sy);
+        float pop = age < 0.06f ? 1.2f - age * 3.3f : 1;
         char t2[32];
         if (cfg.hit_ratings == 2 && G.rate_kind < 3)
             snprintf(t2, sizeof(t2), "%s %+d", rn[G.rate_kind], (int)lroundf(G.rate_off * 1000));
@@ -4780,7 +4783,7 @@ static void draw_hud(void)
             snprintf(t2, sizeof(t2), "PERFECT x%d", G.perfect_run);
         else
             snprintf(t2, sizeof(t2), "%s", rn[G.rate_kind]);
-        font_draw_shadow(res.title, t2, sx, sy - 34 - age * 30, 30 * pop, with_alpha(rc[G.rate_kind], clamp01((0.5f - age) / 0.2f)),
+        font_draw_shadow(res.title, t2, sx, (sy < 500 ? sy : 500) - age * 16, 25 * pop, with_alpha(rc[G.rate_kind], clamp01((0.5f - age) / 0.2f)),
                          ALIGN_CENTER);
     }
     {
@@ -4820,6 +4823,8 @@ static void draw_hud(void)
             nix = m == 2 ? "hud_score_nixie_2b" : m == 4 ? "hud_score_nixie_4b" : m == 6 ? "hud_score_nixie_6b" : m == 8 ? "hud_score_nixie_8b" : NULL;
         else if (m >= 1 && m <= 4)
             nix = nix_a[m];
+        else if (m == 6 || m == 8)
+            nix = m == 6 ? "hud_score_nixie_6a" : "hud_score_nixie_8a";   // made by tools/nixie_orange.py
         float rcx = ax + 136 * ak, rcy = ay + 150 * ak, rr = 56 * ak;
         gfx_rect(ax + 46 * ak, ay + 30 * ak, 176 * ak, 42 * ak, RGBA(2, 10, 4, 255));
         if (nix)
