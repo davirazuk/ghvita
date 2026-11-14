@@ -4768,7 +4768,7 @@ static void draw_hud(void)
     gfx_2d();
     gfx_blend(BLEND_ALPHA);
     float t = (float)G.t;
-    if (cfg.hit_ratings && !G.vocal && G.t - G.rate_t < 0.5 && G.t - G.rate_t >= 0) {
+    if (cfg.hit_ratings && !G.vocal && !G.paused && G.t - G.rate_t < 0.5 && G.t - G.rate_t >= 0) {
         // the last hit's rating just below the strikeline, where it never covers a note on its way in
         static const char * const rn[4] = {"PERFECT", "GREAT", "GOOD", "MISS"};
         static const uint32_t rc[4] = {RGBA(255, 214, 70, 255), RGBA(110, 235, 130, 255), RGBA(225, 225, 235, 255),

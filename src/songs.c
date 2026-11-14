@@ -275,6 +275,83 @@ static void lib_save(void)
         remove(fresh);
 }
 
+static bool lib_dirty;
+
+static int by_rate(const void * a, const void * b)
+{
+    float x = *(const float *)a, y = *(const float *)b;
+    return (x > y) - (x < y);
+}
+
+// notes a second through a part's busy stretches: 8 s windows a step of 4 s apart, the one 80% of the way up
+static float busyness(const Part * p)
+{
+    if (!p || p->note_count < 8)
+        return -1;
+    int first = p->notes[0].time, last = p->notes[p->note_count - 1].time;
+    int nw = (last - first) / 4000000 + 1;
+    float * w = calloc(nw, sizeof(float));
+    if (!w)
+        return -1;
+    for (int i = 0; i < p->note_count; i++) {
+        int k = (p->notes[i].time - first) / 4000000;
+        w[k] += 1;
+        if (k > 0)
+            w[k - 1] += 1;
+    }
+    int m = 0;
+    for (int i = 0; i < nw; i++)
+        if (w[i] > 0)
+            w[m++] = w[i] / 8;
+    qsort(w, m, sizeof(float), by_rate);
+    float r = m ? w[m * 8 / 10] : -1;
+    free(w);
+    return r;
+}
+
+void songs_guess_tiers(Song * s)
+{
+    if (!s || (s->guessed & 0x80))
+        return;
+    s->guessed = 0x80;
+    lib_dirty = true;
+    bool need = false;
+    for (int p = 0; p < PART_COUNT; p++)
+        need |= p != PART_VOCALS && (s->parts & (1 << p)) && s->diff[p] < 0;
+    if (!need)
+        return;
+    char path[300];
+    snprintf(path, sizeof(path), "%s/notes.vhc", s->folder);
+    Chart * c = chart_load(path);
+    if (!c)
+        return;
+    // matched by hand to Clone Hero charters' own tiers on the test songs (loosely: a tier is also about technique)
+    static const float steps[6] = {2.2f, 3.4f, 4.6f, 5.6f, 6.8f, 8.2f};
+    for (int p = 0; p < PART_COUNT; p++) {
+        if (p == PART_VOCALS || !(s->parts & (1 << p)) || s->diff[p] >= 0)
+            continue;
+        const Part * part = chart_part(c, p, DIFF_EXPERT);
+        float r = busyness(part ? part : chart_part(c, p, DIFF_HARD));
+        if (r < 0)
+            continue;
+        if (p == PART_DRUMS)
+            r -= 0.8f;          // a kit's gems come thicker for the same strain
+        int t = 0;
+        while (t < 6 && r >= steps[t])
+            t++;
+        s->diff[p] = (int8_t)t;
+        s->guessed |= 1 << p;
+    }
+    chart_free(c);
+}
+
+void songs_flush(void)
+{
+    if (lib_dirty)
+        lib_save();
+    lib_dirty = false;
+}
+
 void songs_forget(void)
 {
     char path[400];

@@ -474,3 +474,7 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 - Hit rating text projected at z -0.75 (under the strikeline, clamped to y 500), 25 px, rises 16 px
 - tools/nixie_orange.py: hud_score_nixie_6a/8a from World Tour's blue 6b/8b by an RGB map fitted 4b->4a (error 7/255);
   mkassets.py runs it after the hud atlas. x5, x10, x12 still use the drawn fallback
+- v240: songs_guess_tiers (songs.c): parts with no diff_ in the ini get a tier from the Expert chart's busyness (80th
+  percentile of 8 s windows, notes/s; steps 2.2/3.4/4.6/5.6/6.8/8.2, drums -0.8), Song.guessed bit per part + 0x80 done,
+  drawn paler; done lazily in the song list, saved by songs_flush() on every go(). Vocals not estimated.
+  Pause: progress plate moved under the patch (y 464); hit rating hidden while paused.

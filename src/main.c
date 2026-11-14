@@ -94,6 +94,7 @@ static void go(int s)
         menu_music_stop();
     if (s != S_PLAY)
         outro_t = -1;           // a song's closing moment never carries over
+    songs_flush();              // tier estimates made on the last screen go into the library file
     screen = s;
     screen_t = now_s;
     screen_frames = 0;
@@ -164,7 +165,7 @@ static void draw_stars(int stars, float x, float y, float size)
 }
 
 // what a chart has, four to the row, each with its difficulty as six bars; the y under it
-static float draw_parts(const int8_t * tier, float x, float y)
+static float draw_parts(const int8_t * tier, uint8_t guessed, float x, float y)
 {
     float px = x;
     for (int p = 0; p < PART_COUNT; p++) {
@@ -176,7 +177,8 @@ static float draw_parts(const int8_t * tier, float x, float y)
         }
         font_draw_fit(res.ui, part_name(p), px, y, 14, 72, RGBA(235, 235, 235, 255), ALIGN_LEFT);
         for (int d = 0; d < 6; d++)
-            gfx_rect(px + d * 11, y + 17, 8, 5, d < tier[p] ? RGBA(255, 190, 60, 255) : RGBA(70, 70, 70, 255));
+            gfx_rect(px + d * 11, y + 17, 8, 5, d >= tier[p] ? RGBA(70, 70, 70, 255)
+                     : guessed & (1 << p) ? RGBA(190, 150, 90, 255) : RGBA(255, 190, 60, 255));   // an estimate's paler
         px += 76;
     }
     return y + 27;
@@ -1819,7 +1821,7 @@ static void download_screen(void)
         }
         // what's in the chart, with how hard: known before it's downloaded
         if (cur.any_parts) {
-            y = draw_parts(cur.parts, 630, y);
+            y = draw_parts(cur.parts, 0, 630, y);
         }
         // why it failed, why it can't be had, or that there's one already
         char msg[120] = "";
@@ -2657,9 +2659,10 @@ static void song_list(void)
         }
         // the parts it has, with the chart's difficulty tier as bars
         int8_t tier[PART_COUNT];
+        songs_guess_tiers(s);
         for (int p = 0; p < PART_COUNT; p++)
             tier[p] = s->parts & (1 << p) ? (s->diff[p] < 0 ? 0 : s->diff[p]) : -1;
-        draw_parts(tier, 630, y + 4);
+        draw_parts(tier, s->guessed, 630, y + 4);
         const Score * b = &s->best[first_part(s)][cfg.last_diff];
         if (b->score) {
             snprintf(t, sizeof(t), "Best %d   %d%%%s", b->score, b->percent, b->fc ? "   FC" : "");
@@ -3472,12 +3475,12 @@ static void pause_screen(void)
         else
             font_draw_shadow(res.title, items[i], SCREEN_W / 2, y, size, col, ALIGN_CENTER);
     }
-    // where in the song: the section, and a bar, on a plate of their own so they read over the highway's cups
-    gfx_rect_grad(SCREEN_W / 2 - 200, 402, 400, 72, RGBA(12, 8, 18, 230), RGBA(4, 2, 8, 240));
-    gfx_rect(SCREEN_W / 2 - 200, 402, 400, 2, RGBA(210, 170, 90, 210));
-    gfx_rect(SCREEN_W / 2 - 200, 472, 400, 2, RGBA(210, 170, 90, 120));
+    // where in the song: the section, and a bar, on a plate of their own under the patch, clear of its stitching
+    gfx_rect_grad(SCREEN_W / 2 - 200, 464, 400, 70, RGBA(12, 8, 18, 230), RGBA(4, 2, 8, 240));
+    gfx_rect(SCREEN_W / 2 - 200, 464, 400, 2, RGBA(210, 170, 90, 210));
+    gfx_rect(SCREEN_W / 2 - 200, 532, 400, 2, RGBA(210, 170, 90, 120));
     if (part[0])
-        font_draw_fit(res.ui, part, SCREEN_W / 2, 408, 18, 360, RGBA(255, 215, 110, 255), ALIGN_CENTER);
+        font_draw_fit(res.ui, part, SCREEN_W / 2, 469, 18, 360, RGBA(255, 215, 110, 255), ALIGN_CENTER);
     int song_pct, notes_pct;
     game_status(&song_pct, &notes_pct);
     char line[64];
@@ -3492,10 +3495,10 @@ static void pause_screen(void)
         snprintf(more, sizeof(more), "   %d %s, best %d%%", pruns, pruns == 1 ? "run" : "runs", pbest);
         strncat(line, more, sizeof(line) - strlen(line) - 1);
     }
-    font_draw_fit(res.ui, line, SCREEN_W / 2, 429, 20, 380, RGBA(225, 215, 200, 255), ALIGN_CENTER);
-    gfx_rect(SCREEN_W / 2 - 171, 454, 342, 10, RGBA(70, 60, 50, 255));
-    gfx_rect(SCREEN_W / 2 - 170, 455, 340, 8, RGBA(0, 0, 0, 255));
-    gfx_rect_grad(SCREEN_W / 2 - 170, 455, 340 * song_pct / 100.0f, 8, RGBA(255, 220, 120, 255), RGBA(220, 140, 40, 255));
+    font_draw_fit(res.ui, line, SCREEN_W / 2, 489, 20, 380, RGBA(225, 215, 200, 255), ALIGN_CENTER);
+    gfx_rect(SCREEN_W / 2 - 171, 514, 342, 10, RGBA(70, 60, 50, 255));
+    gfx_rect(SCREEN_W / 2 - 170, 515, 340, 8, RGBA(0, 0, 0, 255));
+    gfx_rect_grad(SCREEN_W / 2 - 170, 515, 340 * song_pct / 100.0f, 8, RGBA(255, 220, 120, 255), RGBA(220, 140, 40, 255));
     gfx_end();
 }
 
@@ -5587,6 +5590,8 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "Songs whose charter gave no difficulty get one estimated from the chart (paler bars in the song list).",
+        "Pause menu: the song progress sits under the patch, and the last hit rating no longer hangs over it.",
         "Streak lamps redone like World Tour's: short domes end to end on a gold strip flush against the rail.",
         "Hit ratings (PERFECT, GREAT...) now show just under the strikeline, never over a note on its way in.",
         "Bass at x6 gets a real nixie tube in the score amp, like x2 to x4, instead of a plain number.",

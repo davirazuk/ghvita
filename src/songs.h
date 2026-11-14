@@ -21,6 +21,7 @@ typedef struct {
     int length_ms, preview_ms;
     uint8_t parts;                          // bit per PART_*
     int8_t diff[PART_COUNT];                // song.ini's difficulty tiers (-1 unknown)
+    uint8_t guessed;                        // bit per part: its tier was estimated from the chart; 0x80 done
     char stems[MAX_STEMS][24];
     int stem_count;
     int8_t part_stem[PART_COUNT];           // index into stems, -1 none
@@ -50,6 +51,10 @@ int songs_count(void);
 // off the card and out of the list
 void songs_delete(int index);
 Song * songs_get(int index);
+// tiers the song's ini didn't give, estimated from its Expert chart's busyness (once; kept in the library file)
+void songs_guess_tiers(Song * s);
+// writes the library file if estimates have changed it
+void songs_flush(void);
 void songs_sort(int mode);
 const char * sort_name(int mode);
 // what a song is listed under in a sort: its first letter, decade, genre...; L and R jump between these
