@@ -5590,6 +5590,7 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "Streak lamps are real 3D now, as in World Tour: glass bulbs on a twisted gold bar along the rail, lit by the stage.",
         "Streak lamps: a chunky gold seat on the rail with small glowing bulb tips, as World Tour has them.",
         "Left HUD: bigger chrome-rimmed ROCK dome, paler score digits, bar sized to match.",
         "Left HUD laid out as World Tour's: the ROCK dome on the score bar, the note streak counter under it.",

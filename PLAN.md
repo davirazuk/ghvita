@@ -491,3 +491,8 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   seat quad 3.0 x step wide (art's gold is 0.3 of it) at 0.35 step out, bulbs 0.8 x 0.64 step at 0.72 step out (tips
   on the gold's outer edge), glow 0.7. Left: bar 170x36 at 16,400, counter 158x31, dome k 0.66 (0.79 of the bar as
   footage), rim lifted by an additive warm pass, score digits tinted + additive pass (pale lime). Backup game.c.v241
+- v243 (user: "3d ish identical to ghwt"): lamps are real 3D geometry in game.c (lamp_seat: twisted gold bar,
+  24x10 quads, ridge sin(o + z*22); lamp_bulb: 6x12 dome + glass sleeve pointing -x, r 0.082; lit_quad: per-vertex
+  diffuse/ambient/Blinn highlight against cam_eye, convex back-face skip; lit bulbs white-hot core, hue rim, additive
+  glow board). z 0.75..2.15, seat x -HALF_W-0.05. ~600 quads a frame: watch Vita frame time. Compare tool:
+  ~/.cache/ghv-work/scripts/lampcmp.sh (footage | lit | unlit at the same scale). Backup game.c.v242

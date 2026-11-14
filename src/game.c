@@ -1735,6 +1735,8 @@ static void project(float x, float y, float z, float * sx, float * sy)
     *sy = (0.5f - cy / cw * 0.5f) * SCREEN_H;
 }
 
+static float cam_eye[3];     // where the camera stands, for the HUD's lit 3D pieces
+
 static void setup_camera(void)
 {
     // World Tour's, then lower and nearer for bigger gems, then high up to read further ahead
@@ -1745,6 +1747,7 @@ static void setup_camera(void)
     float fov = 40;
     mat_perspective(G.proj, fov, (float)SCREEN_W / SCREEN_H, 0.5f, 60);
     mat_lookat(G.view, eye, at, up);
+    memcpy(cam_eye, eye, sizeof(cam_eye));
     // the highway sits a little low on the screen, as in the games
     G.right[0] = G.view[0];
     G.right[1] = G.view[4];
@@ -3923,61 +3926,160 @@ static void draw_cups(bool caps)
     }
 }
 
+// ---- the streak lamps as World Tour builds them: real 3D pieces lit like the stage, not pictures
+// A light from above and in front; shading by hand per vertex (the renderer has no lighting): diffuse, a little ambient,
+// a tight highlight towards the camera
+
+static void norm3(float * v)
+{
+    float l = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+    if (l > 1e-6f) {
+        v[0] /= l;
+        v[1] /= l;
+        v[2] /= l;
+    }
+}
+
+// the colour of a surface point: base colour lit, plus white highlight; glow adds its own light (a lit bulb)
+static uint32_t shade(const float * p, const float * n, const float * base, float shine, float glow, const float * glow_c)
+{
+    float L[3] = {0.35f, 0.85f, -0.4f}, V[3] = {cam_eye[0] - p[0], cam_eye[1] - p[1], cam_eye[2] - p[2]};
+    norm3(L);
+    norm3(V);
+    float H[3] = {L[0] + V[0], L[1] + V[1], L[2] + V[2]};
+    norm3(H);
+    float d = n[0] * L[0] + n[1] * L[1] + n[2] * L[2], nh = n[0] * H[0] + n[1] * H[1] + n[2] * H[2];
+    float nv = n[0] * V[0] + n[1] * V[1] + n[2] * V[2];
+    d = d < 0 ? 0 : d;
+    nh = nh < 0 ? 0 : nh;
+    float sp = shine * powf(nh, 28), lum = 0.22f + 0.85f * d;
+    float c[3];
+    for (int k = 0; k < 3; k++) {
+        // a lit bulb: white hot where it faces you, its colour towards the edge
+        float g = glow * (glow_c[k] * (1 - nv * 0.6f) + 255 * nv * 0.6f);
+        c[k] = base[k] * lum + 255 * sp + g;
+        c[k] = c[k] > 255 ? 255 : c[k];
+    }
+    return RGBA((int)c[0], (int)c[1], (int)c[2], 255);
+}
+
+// one face of a mesh, skipped when it faces away (the pieces are convex, so that's all the sorting they need)
+static void lit_quad(const float p[4][3], const float n[4][3], const float * base, float shine, float glow,
+                     const float * glow_c)
+{
+    float mid[3] = {0, 0, 0}, mn[3] = {0, 0, 0};
+    for (int i = 0; i < 4; i++)
+        for (int k = 0; k < 3; k++) {
+            mid[k] += p[i][k] / 4;
+            mn[k] += n[i][k];
+        }
+    float V[3] = {cam_eye[0] - mid[0], cam_eye[1] - mid[1], cam_eye[2] - mid[2]};
+    if (mn[0] * V[0] + mn[1] * V[1] + mn[2] * V[2] <= 0)
+        return;
+    static const float uv[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+    uint32_t c[4];
+    for (int i = 0; i < 4; i++)
+        c[i] = shade(p[i], n[i], base, shine, glow, glow_c);
+    gfx_quad(p, uv, c);
+}
+
+// a bulb: a dome of radius r on (x, y, z) pointing along -x (out from the right rail), its glass a short way back
+static void lamp_bulb(float x, float y, float z, float r, const float * base, float glow, const float * glow_c)
+{
+    enum { LAT = 6, LON = 12 };
+    const float pi = 3.14159265f;
+    for (int i = 0; i < LAT; i++)
+        for (int j = 0; j < LON; j++) {
+            float p[4][3], n[4][3];
+            for (int c = 0; c < 4; c++) {
+                int ii = i + (c == 2 || c == 3), jj = j + (c == 1 || c == 2);
+                // ii 0: the dome's tip; LAT: its rim, then the glass runs straight back half a radius
+                float a = ii < LAT ? (float)ii / LAT * pi / 2 : pi / 2, o = (float)jj / LON * 2 * pi;
+                float back = ii < LAT ? 0 : 0.5f;
+                n[c][0] = -cosf(a);
+                n[c][1] = sinf(a) * sinf(o);
+                n[c][2] = sinf(a) * cosf(o);
+                p[c][0] = x + r * n[c][0] + r * back;
+                p[c][1] = y + r * n[c][1];
+                p[c][2] = z + r * n[c][2];
+            }
+            lit_quad(p, n, base, 0.9f, glow, glow_c);
+        }
+    // the straight glass behind the dome
+    for (int j = 0; j < LON; j++) {
+        float p[4][3], n[4][3];
+        for (int c = 0; c < 4; c++) {
+            float o = (float)(j + (c == 1 || c == 2)) / LON * 2 * pi;
+            n[c][0] = 0;
+            n[c][1] = sinf(o);
+            n[c][2] = cosf(o);
+            p[c][0] = x + (c >= 2 ? r * 0.9f : 0);
+            p[c][1] = y + r * n[c][1];
+            p[c][2] = z + r * n[c][2];
+        }
+        lit_quad(p, n, base, 0.9f, glow, glow_c);
+    }
+}
+
+// the seat: a twisted gold bar lying along the rail from z0 to z1, radius r, at (x, y)
+static void lamp_seat(float x, float y, float z0, float z1, float r)
+{
+    enum { SEG = 24, AROUND = 10 };
+    const float pi = 3.14159265f, none[3] = {0, 0, 0};
+    for (int i = 0; i < SEG; i++)
+        for (int j = 0; j < AROUND; j++) {
+            float p[4][3], n[4][3];
+            float zz[2] = {z0 + (z1 - z0) * i / SEG, z0 + (z1 - z0) * (i + 1) / SEG};
+            for (int c = 0; c < 4; c++) {
+                float z = zz[c == 2 || c == 3], o = (float)(j + (c == 1 || c == 2)) / AROUND * 2 * pi;
+                // twisted: ridges wind round it, three to a lamp
+                float ridge = 1 + 0.15f * sinf(o + z * 22);
+                n[c][0] = cosf(o);
+                n[c][1] = sinf(o);
+                n[c][2] = -0.25f * cosf(o + z * 22);
+                norm3(n[c]);
+                p[c][0] = x + r * ridge * cosf(o);
+                p[c][1] = y + r * ridge * sinf(o);
+                p[c][2] = z;
+            }
+            // the twist's ridges catch the light, its grooves are dark
+            float om = (j + 0.5f) / AROUND * 2 * pi, zm = (zz[0] + zz[1]) / 2, band = 0.5f + 0.5f * sinf(om + zm * 22);
+            const float gold[3] = {200 * (0.45f + 0.65f * band), 140 * (0.45f + 0.65f * band), 38 * (0.45f + 0.65f * band)};
+            lit_quad(p, n, gold, 0.4f + 0.6f * band, 0, none);
+        }
+}
+
 static void draw_rail_meter(void)
 {
-    // World Tour's streak lamps (footage: ~/.cache/ghv-work/lampref): its own gold seat hugging the outside of the rail
-    // and its five small round bulbs on it, end to end, round ends out, drawn on the screen along the rail's line;
-    // yellow up to x2, green to x3, purple on to the top, blue in Star Power
-    const float rail = -HALF_W + 0.01f, z0 = 0.62f, z1 = 2.25f;
+    // the streak lamps on the right rail, as World Tour has them: a twisted gold bar lying along the outside of the
+    // rail just under the multiplier, five glass bulbs on it pointing out, end to end; unlit they're dark red glass,
+    // lit yellow up to x2, green to x3, purple on to the top, blue in Star Power
+    const float z0 = 0.75f, z1 = 2.15f, rb = 0.082f, seat_x = -HALF_W - 0.05f, seat_r = 0.055f;
     int m = multiplier(), base_m = 1 + G.streak / 10, max_m = G.part_id == PART_BASS ? 6 : 4;
     int lit = base_m >= max_m ? 5 : (G.streak % 10) / 2;
     bool half = base_m < max_m && G.streak % 2;
-    const char * hue = G.sp_active ? "_blue" : base_m >= 3 ? "_purple" : base_m == 2 ? "_green" : "";
-    float a[2], b[2];
-    project(rail, 0.02f, z0, &a[0], &a[1]);
-    project(rail, 0.02f, z1, &b[0], &b[1]);
-    float dxl = b[0] - a[0], dyl = b[1] - a[1], len = hypotf(dxl, dyl);
-    if (len < 1)
-        return;
-    dxl /= len;
-    dyl /= len;
-    float nx = -dyl, ny = dxl;          // across the rail, outwards (to the right)
-    if (nx < 0) {
-        nx = -nx;
-        ny = -ny;
-    }
-    gfx_2d();
+    static const float hues[4][3] = {{255, 196, 70}, {90, 245, 110}, {255, 120, 225}, {95, 225, 255}};
+    const float * hue = hues[G.sp_active ? 3 : base_m >= 3 ? 2 : base_m == 2 ? 1 : 0];
+    gfx_3d(G.proj, G.view);
     gfx_blend(BLEND_ALPHA);
-    // the seat: a twisted gold strip, wider near you as the perspective has it
-    {
-        const Sprite * seat = atlas_get(res.hud, "multi_light_seat");
-        float step = len / 5, wa = step * 3.0f, wb = wa * 0.8f;   // the art's gold is 0.3 of its width
-        float ax = a[0] - dxl * step * 0.45f + nx * step * 0.38f, ay = a[1] - dyl * step * 0.45f + ny * step * 0.38f;
-        float bx = b[0] + dxl * step * 0.45f + nx * step * 0.32f, by = b[1] + dyl * step * 0.45f + ny * step * 0.32f;
-        const float p[4][3] = {{bx - nx * wb / 2, by - ny * wb / 2, 0}, {bx + nx * wb / 2, by + ny * wb / 2, 0},
-                               {ax + nx * wa / 2, ay + ny * wa / 2, 0}, {ax - nx * wa / 2, ay - ny * wa / 2, 0}};
-        const float uv[4][2] = {{seat->u0, seat->v0}, {seat->u1, seat->v0}, {seat->u1, seat->v1}, {seat->u0, seat->v1}};
-        const uint32_t c[4] = {WHITE, WHITE, WHITE, WHITE};
-        gfx_tex(seat->tex);
-        gfx_quad(p, uv, c);
-    }
-    // the bulbs, nearest first so the far ones' glow lies over them as the footage has it
-    for (int i = 0; i < 5; i++) {
-        char name[40];
+    gfx_tex(NULL);
+    float lg = (z1 - z0) / 5;
+    // far first: nearer pieces draw over them
+    for (int i = 4; i >= 0; i--) {
         int state = i < lit ? 2 : half && i == lit ? 1 : 0;
-        snprintf(name, sizeof(name), "hud_score_light_%d%s", state, hue);
-        const Sprite * s = atlas_get(res.hud, name);
-        float f = (i + 0.5f) / 5, step = len / 5 * (1.12f - 0.24f * f);
-        float px = a[0] + (b[0] - a[0]) * f + nx * step * 0.72f, py = a[1] + (b[1] - a[1]) * f + ny * step * 0.72f;
-        float w = step * 0.8f, h = step * 0.64f;
-        // the art's round end is on its left: flipped, it points out from the rail
-        gfx_sprite_uv(s, px - w / 2, py - h / 2, w, h, 1, 0, 0, 1, WHITE);
+        float zc = z0 + lg * (i + 0.5f);
+        static const float dark[3] = {120, 22, 14};
+        float base[3];
+        for (int k = 0; k < 3; k++)
+            base[k] = state == 0 ? dark[k] : hue[k] * (state == 1 ? 0.55f : 0.35f);
+        gfx_tex(NULL);
+        if (i == 4)
+            lamp_seat(seat_x, seat_r, z0 - 0.05f, z1 + 0.05f, seat_r);
+        lamp_bulb(seat_x - 0.07f, seat_r + rb * 0.55f, zc, rb, base, state == 2 ? 1.0f : state == 1 ? 0.3f : 0, hue);
         if (state == 2) {
-            const uint32_t light = G.sp_active ? RGBA(95, 225, 255, 255) : base_m >= 3 ? RGBA(255, 130, 225, 255)
-                                 : base_m == 2 ? RGBA(90, 245, 110, 255) : RGBA(255, 196, 70, 255);
             gfx_blend(BLEND_ADD);
-            float r = step * 0.95f;
-            gfx_sprite(atlas_get(res.game, "glow"), px + w * 0.25f - r, py - r, r * 2, r * 2, with_alpha(light, 0.7f));
+            board(seat_x - 0.12f, seat_r - 0.12f, zc, 0.7f, 0.55f, atlas_get(res.game, "glow"), 0, 0, 1, 1,
+                  RGBA((int)hue[0], (int)hue[1], (int)hue[2], 170));
             gfx_blend(BLEND_ALPHA);
         }
     }
@@ -3992,11 +4094,11 @@ static void draw_rail_meter(void)
             uint32_t bc = G.sp_active ? RGBA(95, 225, 255, 255) : m >= 3 ? RGBA(255, 130, 225, 255)
                         : RGBA(90, 245, 110, 255);
             gfx_blend(BLEND_ADD);
-            board(-HALF_W - 0.28f, 0.0f, z1 + 0.3f - 0.4f * G.mult_pop, 2.6f * G.mult_pop, 2.0f * G.mult_pop,
+            board(-HALF_W - 0.22f, 0.0f, z1 + 0.32f - 0.4f * G.mult_pop, 2.6f * G.mult_pop, 2.0f * G.mult_pop,
                   atlas_get(res.game, "glow"), 0, 0, 1, 1, with_alpha(bc, G.mult_pop));
             gfx_blend(BLEND_ALPHA);
         }
-        board(-HALF_W - 0.28f, 0.02f, z1 + 0.3f, 0.95f * pop, 0.475f * pop, atlas_get(res.game, name), 0, 0, 1, 1,
+        board(-HALF_W - 0.22f, 0.02f, z1 + 0.32f, 0.95f * pop, 0.475f * pop, atlas_get(res.game, name), 0, 0, 1, 1,
               G.sp_active ? RGBA(170, 225, 255, 255) : WHITE);
     }
 }
