@@ -2583,10 +2583,14 @@ static float gf_y(double n)
 
 // where on the highway something due at time `when` is drawn now. With 24 fps notes the highway moves on Guitar
 // Flash's clock, in 24ths of a second, whatever the frame rate
+static double draw_now(void)
+{
+    return GF.step ? floor(G.t * 24 + 0.5) / 24 : G.t;
+}
+
 static float time_z(double when)
 {
-    double now = GF.step ? floor(G.t * 24 + 0.5) / 24 : G.t;
-    return (float)((when - now) * G.speed);
+    return (float)((when - draw_now()) * G.speed);
 }
 
 static void rock_change(float d)
@@ -3748,7 +3752,7 @@ static uint32_t board_col(float z, float lift)
 static void draw_highway(void)
 {
     const Sprite hw = sprite_whole(G.highway);
-    float t = (float)G.t;
+    float t = (float)draw_now();     // on Flash's 24 fps clock when Note motion asks for it
     // the board, scrolling; 10.6 units per repeat keeps the picture's shape on a 5.24-wide board
     float rep = 10.6f, off = t * (float)G.speed / rep;
     // the art sits back so the notes read: brighter near the strikeline, deeper in the distance, a soft lift on each beat
@@ -3888,7 +3892,7 @@ static void draw_zones(void)
     float half = fabsf(lane_x(1) - lane_x(0)) * 0.46f;
     for (int i = 0; i < G.gap_count + G.roll_count; i++) {
         const Zone * s = i < G.gap_count ? &G.gaps[i] : &G.rolls[i - G.gap_count];
-        float z0 = (float)((s->from - G.t) * G.speed), z1 = (float)((s->to - G.t) * G.speed);
+        float z0 = time_z(s->from), z1 = time_z(s->to);
         z0 = z0 < 0 ? 0 : z0;
         z1 = z1 > Z_FAR ? Z_FAR : z1;
         if (z1 <= z0)
@@ -4139,7 +4143,7 @@ static void lay_gem(float x, float y, float z, float w, float d, const Sprite * 
 static void draw_gems(void)
 {
     const Part * p = G.part;
-    float t = (float)G.t;
+    double t = draw_now();          // the notes step on Flash's 24 fps clock when Note motion asks for it
     static const char * kinds[3] = {"normal", "hopo", "tap"};
     // the furthest visible note, then back towards the strikeline (far ones first)
     int last = G.first;

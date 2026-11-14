@@ -499,3 +499,6 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 - v244 ("better but not great"): close zoom vs 6Eb-bEcOjwk: chain slimmer/longer, bulbs inline with the gold.
   z 0.55..2.15, rb 0.072, seat r 0.045 at -HALF_W-0.045, bulbs 0.045 further out and on top; lit glow 0.95 + two
   glow boards (hue wide, white core)
+- v245: Note motion 24 fps was dead since v235 (the Flash-look removal took the stepped paths; only beats and
+  sustains still used time_z). draw_now() is the stepped clock: draw_gems, the board scroll (draw_highway), gap/roll
+  zones use it. Test: frame diffs on the highway, steps on = big change then ~0 on held frames
