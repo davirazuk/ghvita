@@ -5598,6 +5598,7 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "Flash redrawn to look like Guitar Flash: coloured domes on white bases, cartoon fire, near-black board, tube meters.",
         "Flash note style now plays like Guitar Flash: its timing per difficulty, chords note by note, frets held below a note count.",
         "In Flash, a press that takes no note is an error (it breaks your streak). Its meter, x4 multiplier and timed Star Power too.",
         "Flash's notes move like Flash's: 24 steps a second, speeding up as they fall, and a lower, closer camera. Smooth in GRAPHICS.",

@@ -415,3 +415,4 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 - humanbot Expert spread 20: Flash rules 672/687 and 0 errors with no stray presses; slips and bounces give errors
 - 30 fps never worked on the Vita: vglSwapBuffers queues the flip and returns, so only skipped frames waited a vblank and
   drawn frames still came every refresh. Now paced by sceDisplayGetVcount (drawn = last + 2, read-only frame between)
+- Flash look redone (v230): notes = black-rimmed white base + coloured dome + shine; targets thick ring, middle lights when pressed; 2D cartoon flames (flash_flames, 3 layers); board near black, thin grey lane lines, no beat lines, no sparks; meters = framed glass tubes filled by level (rock red <19/60, yellow <41, green); solid straight tails
