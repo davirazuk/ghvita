@@ -124,15 +124,13 @@ typedef struct {
     int sing_diff;          // the singing along is judged at: the instrument's would be Expert (MEDIUM as set)
     bool still_camera;      // the venue's wide shot only: no cuts to its other camera angles (and 7.5 MB less loaded)
     int frame_rate;         // in songs: 60, or 30 (every other frame drawn; buttons still read 60 times a second)
-    int gem_style;          // 0 World Tour's gems, 1 Flash: domed caps and ring targets, drawn flat on the screen
-    int hud_style;          // 0 World Tour's rock dome and counters, 1 Flash: bars beside the highway, a multiplier badge
     int backdrop;           // 0 the venue and band, 1 the song's cover art (Flash's band photo), 2 dark
     int hit_ratings;        // 0 off, 1 PERFECT / GREAT / GOOD over the strikeline, 2 the same with the milliseconds
     int hw_length;          // the highway's far end: 0 short, 1 normal, 2 long
     bool sudden_death;      // one missed note fails the song
     bool hard_rock;         // the rock meter falls twice as fast
-    int flash_rules;        // with Note style Flash: 1 Guitar Flash's own rules (its timing, misses, meter), 0 World Tour's
-    int flash_motion;       // Flash's notes: 0 in its 24 steps a second, speeding up as they come, 1 smooth
+    int engine;             // 0 World Tour's rules, 1 Guitar Flash's (its timing window, misses, meter, Star Power)
+    int note_steps;         // 1: the notes move in 24ths of a second (Guitar Flash's clock), 0 smooth
     int last_part, last_diff;
     int sort;
     char last_song[256];

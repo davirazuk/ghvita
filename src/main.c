@@ -4095,19 +4095,19 @@ static void set_graphics_preset(int p)
 enum { O_SPEED, O_HIGHWAY, O_VENUE, O_BAND, O_SING, O_SINGDIFF, O_OFFSET, O_LAYOUT, O_DRUMKEYS, O_DRUMHITS, O_TILT, O_NOFAIL, O_LEFTY, O_MUSIC, O_SFX, O_CROWD, O_FPS,
        O_CAMERA, O_HWALPHA, O_VLIGHT, O_FLASH, O_POPUPS, O_TIMING, O_LIVE, O_VANISH, O_MISSSND, O_REAR, O_BEND, O_COUNTDOWN,
        O_RESET, O_FIVEPADS, O_DOUBLEKICK, O_EASYSUS, O_COUNTIN, O_SCREENS, O_PROGRESS, O_CUPS, O_AUTOREPRESS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, O_CROWDHANDS, O_VIGNETTE, O_LYRICS, O_MENUMUSIC, O_SINGSP, O_SHRINKCHECK, O_GHOST, O_RIVAL, O_WINDOW, O_LIGHTFX, O_SONGSPEED,
-       O_FRAMERATE, O_STILLCAM, O_GEMSTYLE, O_PRESET,
-       O_HUDSTYLE, O_BACKDROP, O_RATINGS, O_HWLEN, O_SUDDEN, O_HARDROCK, O_FLASHRULES, O_FLASHMOTION, O_COUNT };
+       O_FRAMERATE, O_STILLCAM, O_PRESET,
+       O_BACKDROP, O_RATINGS, O_HWLEN, O_SUDDEN, O_HARDROCK, O_ENGINE, O_STEPS, O_COUNT };
 
 // the options by subject, L and R between them
 enum { OPT_TABS = 8, OPT_TAB_MAX = 18 };
 static const char * opt_tab_names[OPT_TABS] = {"GAME", "CONTROLS", "HIGHWAY", "STAGE", "SCREEN", "GRAPHICS", "SOUND", "LIBRARY"};
 static const int opt_tabs[OPT_TABS][OPT_TAB_MAX + 1] = {
-    {O_SPEED, O_SONGSPEED, O_OFFSET, O_WINDOW, O_FLASHRULES, O_SUDDEN, O_HARDROCK, O_NOFAIL, O_EASYSUS, O_AUTOREPRESS, O_VANISH, O_COUNTDOWN, O_SING, O_SINGDIFF, O_RIVAL, O_RESET, -1},
+    {O_SPEED, O_SONGSPEED, O_OFFSET, O_WINDOW, O_ENGINE, O_STEPS, O_SUDDEN, O_HARDROCK, O_NOFAIL, O_EASYSUS, O_AUTOREPRESS, O_VANISH, O_COUNTDOWN, O_SING, O_SINGDIFF, O_RIVAL, O_RESET, -1},
     {O_LAYOUT, O_DRUMKEYS, O_FIVEPADS, O_DOUBLEKICK, O_LEFTY, O_TILT, O_REAR, O_SINGSP, -1},
     {O_HIGHWAY, O_HWALPHA, O_CAMERA, O_CUPS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, -1},
     {O_VENUE, O_VLIGHT, O_BAND, O_CROWDHANDS, O_VIGNETTE, O_SCREENS, O_FLASH, -1},
     {O_LYRICS, O_POPUPS, O_PROGRESS, O_TIMING, O_LIVE, O_GHOST, O_LIGHTFX, O_FPS, -1},
-    {O_PRESET, O_FRAMERATE, O_FPS, O_GEMSTYLE, O_FLASHMOTION, O_HUDSTYLE, O_BACKDROP, O_RATINGS, O_HWLEN, O_STILLCAM, O_LIGHTFX, O_BAND, O_FIRE, O_FLASH, O_CROWDHANDS, O_VIGNETTE, -1},
+    {O_PRESET, O_FRAMERATE, O_FPS, O_BACKDROP, O_RATINGS, O_HWLEN, O_STILLCAM, O_LIGHTFX, O_BAND, O_FIRE, O_FLASH, O_CROWDHANDS, O_VIGNETTE, -1},
     {O_MUSIC, O_SFX, O_CROWD, O_MENUMUSIC, O_COUNTIN, O_DRUMHITS, O_MISSSND, O_BEND, -1},
     {O_SHRINKCHECK, -1},
 };
@@ -4232,8 +4232,6 @@ static void option_text(int i, char * name, char * value, size_t n)
     case O_LIGHTFX: strcpy(name, "Effects"); snprintf(value, n, "%s", cfg.light_fx ? "Light" : "Full"); break;
     case O_FRAMERATE: strcpy(name, "Frame rate"); snprintf(value, n, "%d fps", cfg.frame_rate == 30 ? 30 : 60); break;
     case O_STILLCAM: strcpy(name, "Venue camera"); snprintf(value, n, "%s", cfg.still_camera ? "Wide shot only" : "Cuts between shots"); break;
-    case O_GEMSTYLE: strcpy(name, "Note style"); snprintf(value, n, "%s", cfg.gem_style ? "Flash" : "World Tour"); break;
-    case O_HUDSTYLE: strcpy(name, "HUD"); snprintf(value, n, "%s", cfg.hud_style ? "Flash" : "World Tour"); break;
     case O_BACKDROP: {
         static const char * const bn[3] = {"Venue and band", "Song's cover art", "Dark"};
         strcpy(name, "Background");
@@ -4254,8 +4252,8 @@ static void option_text(int i, char * name, char * value, size_t n)
     }
     case O_SUDDEN: strcpy(name, "Sudden death"); snprintf(value, n, "%s", cfg.sudden_death ? "On" : "Off"); break;
     case O_HARDROCK: strcpy(name, "Hard rock meter"); snprintf(value, n, "%s", cfg.hard_rock ? "On" : "Off"); break;
-    case O_FLASHRULES: strcpy(name, "Flash note style plays"); snprintf(value, n, "%s", cfg.flash_rules ? "Like Guitar Flash" : "Like World Tour"); break;
-    case O_FLASHMOTION: strcpy(name, "Flash note motion"); snprintf(value, n, "%s", cfg.flash_motion ? "Smooth" : "Flash's 24 fps"); break;
+    case O_ENGINE: strcpy(name, "Engine"); snprintf(value, n, "%s", cfg.engine ? "Guitar Flash" : "World Tour"); break;
+    case O_STEPS: strcpy(name, "Note motion"); snprintf(value, n, "%s", cfg.note_steps ? "24 fps (Flash)" : "Smooth"); break;
     case O_PRESET: {
         static const char * const pn[] = {"Full", "Balanced", "Battery", "Custom"};
         strcpy(name, "Graphics preset");
@@ -4380,20 +4378,13 @@ static void change_option(int i, int d)
     case O_LIGHTFX: cfg.light_fx = !cfg.light_fx; break;
     case O_FRAMERATE: cfg.frame_rate = cfg.frame_rate == 30 ? 60 : 30; break;
     case O_STILLCAM: cfg.still_camera = !cfg.still_camera; break;
-    case O_GEMSTYLE:
-        // the whole look goes with it; the HUD and background can be set apart afterwards
-        cfg.gem_style = !cfg.gem_style;
-        cfg.hud_style = cfg.gem_style;
-        cfg.backdrop = cfg.gem_style ? 1 : 0;
-        break;
-    case O_HUDSTYLE: cfg.hud_style = !cfg.hud_style; break;
     case O_BACKDROP: cfg.backdrop = (cfg.backdrop + d + 3) % 3; break;
     case O_RATINGS: cfg.hit_ratings = (cfg.hit_ratings + d + 3) % 3; break;
     case O_HWLEN: cfg.hw_length = (cfg.hw_length + d + 3) % 3; break;
     case O_SUDDEN: cfg.sudden_death = !cfg.sudden_death; break;
     case O_HARDROCK: cfg.hard_rock = !cfg.hard_rock; break;
-    case O_FLASHRULES: cfg.flash_rules = !cfg.flash_rules; break;
-    case O_FLASHMOTION: cfg.flash_motion = !cfg.flash_motion; break;
+    case O_ENGINE: cfg.engine = !cfg.engine; break;
+    case O_STEPS: cfg.note_steps = !cfg.note_steps; break;
     case O_PRESET: {
         int p = graphics_preset();
         set_graphics_preset(((p > 2 ? (d > 0 ? -1 : 3) : p) + d + 3) % 3);
@@ -4635,16 +4626,14 @@ static void options_screen(void)
         "The song's speed. Below 100% the run isn't saved (scores, medals, the tour); practice has its own speed.",
         "30 fps draws every other frame and saves power; your buttons are still read 60 times a second, so timing stays exact.",
         "Cuts between each venue's four camera angles with the song, or keeps the wide shot (loads quicker, less memory).",
-        "World Tour's gems, or Flash: domed notes, ring targets, side bars and the song's art behind (all changeable after).",
         "Full: everything. Balanced: lighter effects at 60 fps. Battery: 30 fps, wide shot only, lighter effects.",
-        "World Tour's rock dome and counters, or Flash's: bars up the sides of the highway and a multiplier badge.",
-        "Behind the highway: the venue with the band, the song's cover art (like Flash's band photo), or plain dark.",
+        "Behind the highway: the venue with the band, the song's cover art, or plain dark.",
         "PERFECT (25 ms), GREAT (50 ms) or GOOD over the strikeline as you hit. With ms adds how early (-) or late (+).",
         "How far up the highway you can see the notes coming. Long gives more time to read fast songs.",
         "One missed note and the song's over. For the brave.",
         "The rock meter falls twice as fast when you miss: keep the crowd with you.",
-        "With Note style Flash, Guitar Flash's rules: its timing per difficulty, every press must take a note, chords note by note.",
-        "Flash's notes move in its own 24 steps a second, speeding up as they come. Smooth draws them every frame.",
+        "Guitar Flash's rules on guitar and bass: its timing per difficulty, every stray press is an error, chords note by note.",
+        "24 fps moves the notes in Guitar Flash's 24 steps a second, at any frame rate. Smooth moves them every frame.",
     };
     char line[160];
     const char * text = about[opt];
@@ -5598,6 +5587,8 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "Flash mode is now just its engine: GAME, Engine: Guitar Flash plays by Flash's rules on the normal highway.",
+        "GAME, Note motion: 24 fps steps the notes like Guitar Flash, at 30 or 60 fps. The flat Flash look is gone.",
         "The venue lights follow the song's own light show (Rock Band charts): verses, choruses, strobes, blackouts, silhouettes.",
         "Songs without a light show get one from their sections: verses cool, choruses slam in, builds strobe, bridges go dark.",
         "The guitarist and bassist really move now: they rock through GH's own groove animation, in time with the song.",

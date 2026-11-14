@@ -453,3 +453,11 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 - v234: charts without cues run the same looks from their section names (intro, verse/riff, prechorus/build ->
   verse then strobes on its last bar, chorus -> one stomp bar then chorus + lasers, breakdown stomp, bridge/break
   silhouettes, solo searchlights, outro frenzy, else warm/cool by big). The song's end adds a white flare.
+
+## Flash look removed, Flash is an engine (v235, 2026-11-14)
+
+- The flat 2D Flash look is gone (board, candy notes, rings, flames, capsule meters, Flash HUD, its camera; ~450
+  lines). settings: gem_style/hud_style dropped (old gem_style=1 + flash_rules -> engine=1 once).
+- GAME: Engine World Tour / Guitar Flash (cfg.engine; GF.on = engine && frets && !battle: gf_judge, its meter, x4,
+  timed SP) and Note motion Smooth / 24 fps (cfg.note_steps; time_z quantizes G.t to 1/24 s). Both on the normal
+  highway. Bot: clean input FCs 687/687 on both engines and both motions.

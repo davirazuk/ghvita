@@ -793,7 +793,6 @@ void config_defaults(void)
     cfg.frame_rate = 60;
     cfg.hit_ratings = 1;
     cfg.hw_length = 1;
-    cfg.flash_rules = 1;
     snprintf(cfg.highway, sizeof(cfg.highway), "judy");
     snprintf(cfg.venue, sizeof(cfg.venue), "song");
     cfg.tilt = true;
@@ -813,7 +812,7 @@ void config_defaults(void)
 void config_load(void)
 {
     config_defaults();
-    int look = 0, notes_look = 0;
+    int look = 0, notes_look = 0, old_flash = 0;
     bool flat = false;   // notes_look: settings saved since notes face you by default
     char path[400];
     snprintf(path, sizeof(path), "%ssettings.txt", player_dir());
@@ -863,9 +862,9 @@ void config_load(void)
         else if (strcmp(k, "frame_rate") == 0)
             cfg.frame_rate = n == 30 ? 30 : 60;
         else if (strcmp(k, "gem_style") == 0)
-            cfg.gem_style = n == 1 ? 1 : 0;
-        else if (strcmp(k, "hud_style") == 0)
-            cfg.hud_style = n == 1 ? 1 : 0;
+            old_flash |= (n == 1) << 0;     // the old Flash note style: its rules carry over as the engine
+        else if (strcmp(k, "flash_rules") == 0)
+            old_flash |= (n != 0) << 1;
         else if (strcmp(k, "backdrop") == 0)
             cfg.backdrop = n >= 0 && n <= 2 ? n : 0;
         else if (strcmp(k, "hit_ratings") == 0)
@@ -876,10 +875,12 @@ void config_load(void)
             cfg.sudden_death = n != 0;
         else if (strcmp(k, "hard_rock") == 0)
             cfg.hard_rock = n != 0;
-        else if (strcmp(k, "flash_rules") == 0)
-            cfg.flash_rules = n != 0;
-        else if (strcmp(k, "flash_motion") == 0)
-            cfg.flash_motion = n != 0;
+        else if (strcmp(k, "engine") == 0) {
+            cfg.engine = n == 1;
+            old_flash = -1;
+        }
+        else if (strcmp(k, "note_steps") == 0)
+            cfg.note_steps = n != 0;
         else if (strcmp(k, "metronome") == 0)
             cfg.metronome = n != 0;
         else if (strcmp(k, "song_speed") == 0)
@@ -969,6 +970,8 @@ void config_load(void)
         else if (strcmp(k, "last_song") == 0)
             snprintf(cfg.last_song, sizeof(cfg.last_song), "%s", v);
     }
+    if (old_flash == 3)
+        cfg.engine = 1;
     fclose(f);
     // notes lying on the neck were the default before: a file from then gets them facing you, once; after that it's
     // whatever the player picked
@@ -1004,10 +1007,10 @@ void config_save(void)
             cfg.no_count_in, cfg.stage_screens, cfg.no_progress, cfg.cup_skin);
     fprintf(f, "no_ghost = %d\nnotes_look = 1\nrival = %d\nhit_window = %d\nlight_fx = %d\nmetronome = %d\nsong_speed = %d\n", cfg.no_ghost, cfg.rival, cfg.hit_window,
             cfg.light_fx, cfg.metronome, cfg.song_speed);
-    fprintf(f, "still_camera = %d\nframe_rate = %d\ngem_style = %d\n", cfg.still_camera, cfg.frame_rate, cfg.gem_style);
-    fprintf(f, "hud_style = %d\nbackdrop = %d\nhit_ratings = %d\nhw_length = %d\nsudden_death = %d\nhard_rock = %d\n", cfg.hud_style,
+    fprintf(f, "still_camera = %d\nframe_rate = %d\n", cfg.still_camera, cfg.frame_rate);
+    fprintf(f, "backdrop = %d\nhit_ratings = %d\nhw_length = %d\nsudden_death = %d\nhard_rock = %d\n",
             cfg.backdrop, cfg.hit_ratings, cfg.hw_length, cfg.sudden_death, cfg.hard_rock);
-    fprintf(f, "flash_rules = %d\nflash_motion = %d\n", cfg.flash_rules, cfg.flash_motion);
+    fprintf(f, "engine = %d\nnote_steps = %d\n", cfg.engine, cfg.note_steps);
     fclose(f);
     remove(path);
     rename(tmp, path);
