@@ -34,6 +34,8 @@ void plat_quit(void);
 // reads the pad; false when the app should close (the desktop window was closed)
 bool plat_poll(Pad * pad);
 void plat_swap(void);
+// a frame not drawn (30 fps): its time passes as if it were shown, nothing new goes on the screen
+void plat_skip_frame(void);
 // in songs the Vita's clocks follow the load (plat_swap watches the frame times): trouble elsewhere (the audio
 // decoder falling behind) asks for full speed
 void plat_perf_trouble(void);

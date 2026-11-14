@@ -1,5 +1,7 @@
 // The app's own art and sounds (assets/), loaded once
 #pragma once
+
+enum { VENUE_SHOTS = 4 };   // a venue's camera shots: the wide one and three more
 #include <stdbool.h>
 #include "gfx.h"
 #include "font.h"
@@ -36,6 +38,9 @@ typedef struct {
     char venue_zones[48][16];
     char venue_titles[48][32];
     float venue_marks[48][4][3];        // drummer, vocalist, guitarist, bassist: x, y of the feet, pixels per metre
+    // the camera's other shots (<zone>_s1.jpg ..): how many each venue has, and where the band's marks land in them
+    int venue_shots[48];
+    float venue_shot_marks[48][VENUE_SHOTS - 1][4][3];
     // the band's sprite sheets (assets/band, made by tools/band.py)
     int band_count;
     char band_names[24][16];
@@ -57,6 +62,10 @@ Tex * res_highway_preview(const char * name);
 Tex * res_venue_preview(const char * zone);
 // a venue's two pictures, the stage and its lights alone (loaded on demand, one venue at a time); false: no such venue
 bool res_venue(const char * zone, Tex ** stage, Tex ** lights);
+// shot 1.. of a venue (0 is res_venue's); kept loaded with the venue
+bool res_venue_shot(const char * zone, int shot, Tex ** stage, Tex ** lights);
+int res_venue_shot_count(const char * zone);
+const float (*res_venue_shot_marks(const char * zone, int shot))[3];
 // "House of Blues" for "hob" (the zone itself when unknown)
 const char * res_venue_title(const char * zone);
 // where the band stands in this venue (NULL when unknown)

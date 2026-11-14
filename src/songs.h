@@ -121,6 +121,9 @@ typedef struct {
     bool sing_along;        // the mic and the lyrics on top of any instrument, when the song has vocals
     bool sing_sp;           // singing in tune starts Star Power, like YARG's voice-activated option
     int sing_diff;          // the singing along is judged at: the instrument's would be Expert (MEDIUM as set)
+    bool still_camera;      // the venue's wide shot only: no cuts to its other camera angles (and 7.5 MB less loaded)
+    int frame_rate;         // in songs: 60, or 30 (every other frame drawn; buttons still read 60 times a second)
+    int gem_style;          // 0 World Tour's gems, 1 Flash: round flat discs on a plain dark board
     int last_part, last_diff;
     int sort;
     char last_song[256];

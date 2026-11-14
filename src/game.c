@@ -147,6 +147,16 @@ static struct {
     const char * venue_title;
     Tex * band[4];                      // drummer, vocalist, guitarist, bassist
     const float (*marks)[3];
+    // the camera's shots of the venue (tools/venues.py SHOTS): 0 the wide one, then stage left, stage right, low front
+    Tex * shot_tex[VENUE_SHOTS], * shot_glow[VENUE_SHOTS];
+    const float (*shot_marks[VENUE_SHOTS])[3];
+    int shots, shot;
+    double shot_t;                      // the beat the camera cut to this shot on
+    int focus_solo;                     // the solo (index + 1) the camera last cut for
+    int shot_section;                   // the section the director last cut for
+    bool shot_sp;                       // Star Power was on at the last look
+    float fstep;                        // 60ths of a second this drawn frame stands for (2 at 30 fps)
+    unsigned updates, updates_drawn;    // game_update calls, and how many there had been at the last frame drawn
     float needle;                       // what the rock needle shows
     BandPart band_part[4];              // each member's own part of the chart
     float stage_col[3], light_col[3];   // what the stage and its lights are tinted now (they glide to the show's)
@@ -192,8 +202,12 @@ static struct {
 } practice;
 
 // a battle: a computer rival plays the same chart, each side's own rock meter; Star Power phrases earn attacks
-enum { ATK_LEFTY, ATK_BLACKOUT, ATK_DRAIN, ATK_SPEED, ATK_COUNT };
-static const char * const atk_names[ATK_COUNT] = {"LEFTY FLIP", "BLACKOUT", "AMP DRAIN", "SPEED UP"};
+// Guitar Hero III's own set joins them: a broken string (a fret dead till it's tapped back to life), double notes,
+// the whammy (the highway reels till you whammy it off) and amp overload (the highway shakes, the gems blink)
+enum { ATK_LEFTY, ATK_BLACKOUT, ATK_DRAIN, ATK_SPEED, ATK_BROKEN, ATK_DOUBLE, ATK_WHAMMY, ATK_AMP, ATK_COUNT };
+static const char * const atk_names[ATK_COUNT] = {"LEFTY FLIP", "BLACKOUT", "AMP DRAIN", "SPEED UP", "BROKEN STRING",
+                                                  "DOUBLE NOTES", "WHAMMY", "AMP OVERLOAD"};
+enum { BROKEN_TAPS = 5, DOUBLED_MAX = 160 };
 static struct {
     bool armed, on;
     float skill;                        // the rival's chance of hitting an easy note
@@ -211,6 +225,10 @@ static struct {
     int thrown, taken;                  // attacks the player threw, and took
     int hits, played;                   // the rival's notes hit, of those it played
     double lefty_until, blackout_until, speed_until;
+    int broken_lane, broken_left;       // the dead fret (-1 none) and the taps it still needs
+    float whammy_left;                  // how much whammying still shakes the Whammy attack off (1 .. 0)
+    double whammy_until, amp_until;
+    int doubled[DOUBLED_MAX], doubled_was[DOUBLED_MAX], doubled_n;  // notes Double Notes added a fret to, as they were
     double rival_hit_until;             // the player's attack still shaking the rival
     float rival_hit;                    // how much it's shaken (off its hit chance)
     float base_speed;
@@ -220,6 +238,10 @@ static struct {
     unsigned seed;
 } battle;
 static void battle_fire(void);
+static void battle_land(int a);
+static void battle_undouble(void);
+static int battle_pick(unsigned * seed);
+static bool battle_proj(float out[16]);
 static bool lefty_now(void);
 static void battle_reset(void);
 static void battle_update(void);
@@ -271,6 +293,12 @@ static int multiplier(void)
 // ------------------------------------------------------------------------------------------------------ the venue
 
 // the song's band: one of each role's members, the same ones every time you play the song (YargLook's Member)
+// a per-frame easing step k (at 60 fps) for this drawn frame, which may stand for more than one
+static float ease(float k)
+{
+    return G.fstep <= 1 ? k : 1 - powf(1 - k, G.fstep);
+}
+
 static void pick_band(const Song * song, uint32_t h)
 {
     static const char * roles[4] = {"drummer", "vocalist", "guitarist", "bassist"};
@@ -322,9 +350,28 @@ static void pick_venue(const Song * song)
         zone = res.venue_zones[rand() % res.venue_count];
     else
         zone = cfg.venue;
+    G.shots = 0;
+    G.shot = 0;
     if (res_venue(zone, &G.venue, &G.venue_lights)) {
         G.venue_title = res_venue_title(zone);
         G.marks = res_venue_marks(zone);
+        G.shot_tex[0] = G.venue;
+        G.shot_glow[0] = G.venue_lights;
+        G.shot_marks[0] = G.marks;
+        G.shots = 1;
+        // the other angles, all loaded now so a cut never waits on the card
+        int want = cfg.still_camera ? 1 : res_venue_shot_count(zone);
+        int64_t t0 = plat_now_us();
+        for (int k = 1; k < want; k++) {
+            if (!res_venue_shot(zone, k, &G.shot_tex[G.shots], &G.shot_glow[G.shots]))
+                break;
+            G.shot_marks[G.shots] = res_venue_shot_marks(zone, k);
+            if (!G.shot_marks[G.shots])
+                break;
+            G.shots++;
+        }
+        if (G.shots > 1)
+            plat_log("loaded: %d venue shots %d ms", G.shots - 1, (int)((plat_now_us() - t0) / 1000));
         if (cfg.no_band)
             memset(G.band, 0, sizeof(G.band));
         else
@@ -365,7 +412,13 @@ static void member_spot(int r, float m[3])
         return;
     m[0] = r == 3 ? fmaxf(m[0] + 34, 244) : fminf(m[0], 850);
     m[1] = fminf(m[1], 318);
-    m[2] = fminf(m[2], 118) * 1.1f;
+    {
+        // they keep their spots clear of the board in every shot; a shot only makes them nearer or further
+        const float (*wide)[3] = G.shot_marks[0] ? G.shot_marks[0] : G.marks;
+        float ratio = wide[r][2] > 1 ? G.marks[r][2] / wide[r][2] : 1;
+        ratio = ratio < 0.85f ? 0.85f : ratio > 1.3f ? 1.3f : ratio;
+        m[2] = fminf(wide[r][2], 118) * 1.1f * ratio;
+    }
     const BandPart * b = &G.band_part[r];
     m[0] += b->walk * m[2];
     m[1] += b->front * 26;
@@ -398,10 +451,10 @@ static void band_wander(double beat)
         uint32_t h = ((uint32_t)(beat / 16) + 1) * 2654435761u * (r * 2 + 1);
         float want = beat > 0 ? ((h >> 16 & 255) / 255.0f - 0.5f) * 1.3f : 0;
         float step = want - b->walk;
-        float speed = 0.018f;
+        float speed = 0.018f * G.fstep;
         b->walk += step > speed ? speed : step < -speed ? -speed : step;
         float out = band_soloing(r) ? 1 : 0;
-        b->front += (out - b->front) * 0.06f;
+        b->front += (out - b->front) * ease(0.06f);
     }
 }
 
@@ -479,7 +532,7 @@ static void draw_pyro(void)
     }
     // Star Power: fountains of sparks either side of the guitarists, as long as it lasts. Each spark is worked out from the
     // time alone (when it left the fountain, how fast, which way), so nothing is kept between frames
-    G.fountain += ((G.sp_active ? 1 : 0) - G.fountain) * 0.08f;
+    G.fountain += ((G.sp_active ? 1 : 0) - G.fountain) * ease(0.08f);
     if (G.fountain > 0.02f && G.marks && !cfg.light_fx) {
         const Sprite * dot = atlas_get(res.stage, "dot");
         enum { SPARKS_EACH = 40 };
@@ -623,7 +676,7 @@ static void draw_rig(double beat, float pulse)
 static void draw_lasers(double beat, float pulse)
 {
     bool on = (G.big_section && G.rock >= 0.5f) || G.sp_active;
-    G.laser += ((on ? 1 : 0) - G.laser) * 0.05f;
+    G.laser += ((on ? 1 : 0) - G.laser) * ease(0.05f);
     if (G.laser < 0.02f || cfg.light_fx || !G.marks)
         return;
     enum { BEAMS = 5 };
@@ -912,6 +965,49 @@ static void draw_stage(void)
     }
     for (int i = 0; i < 3; i++)
         G.key_col[i] += (key[i] - G.key_col[i]) * k;
+    // the director's cuts between the venue's shots (wide, stage left, stage right, low front): the count-in and the
+    // last chord wide; Star Power from low down; a solo from the soloist's side; each new section its own angle, the big
+    // ones low. A shot holds two bars at least, and between cuts the camera creeps in on it
+    if (G.shots > 1) {
+        int want = G.shot;
+        bool force = false;
+        int me = member_me();
+        if (G.t < G.intro_end || G.t > G.last_note_end) {
+            want = 0;
+            force = G.t < G.intro_end;
+        } else if (G.sp_active && !G.shot_sp) {
+            want = 3;
+            force = true;
+        } else if (solo && G.focus_solo != G.solo_index + 1) {
+            G.focus_solo = G.solo_index + 1;
+            want = me == 2 ? 2 : me == 3 ? 1 : me == 0 ? 3 : 0;
+            force = true;
+        } else if (named && G.section != G.shot_section) {
+            G.shot_section = G.section;
+            if (G.big_section)
+                want = 3;
+            else {
+                static const int pick[] = {1, 2, 0, 2, 1, 0};
+                want = pick[(G.section * 7 + 3) % 6];
+                if (want == G.shot)
+                    want = (want + 1) % 3;
+            }
+        } else if (!named && G.t > 0) {
+            static const int cycle[] = {0, 1, 0, 2, 0, 3};
+            want = cycle[((int)floor(beat / 16) % 6 + 6) % 6];
+        }
+        G.shot_sp = G.sp_active;
+        if (want >= G.shots)
+            want = 0;
+        if (want != G.shot && (force || beat - G.shot_t >= 8)) {
+            G.shot = want;
+            G.shot_t = beat;
+            G.venue = G.shot_tex[want];
+            G.venue_lights = G.shot_glow[want];
+            G.marks = G.shot_marks[want];
+            G.cam_snap = true;
+        }
+    }
     // the camera: the whole stage, and every other four bars closing in on one of the band as a director would, whoever
     // has the solo first. They stay where they are on the screen and grow, so nobody slides behind the highway
     static const int turns[4] = {2, 1, 3, 0};
@@ -941,6 +1037,11 @@ static void draw_stage(void)
         aim_x = aim_x > rx ? rx : aim_x < -rx ? -rx : aim_x;
         aim_y = aim_y > ry ? ry : aim_y < -ry ? -ry : aim_y;
     }
+    if (G.shots > 1 && G.t >= G.intro_end) {
+        // the slow push in on whatever shot it is (8 bars to its closest)
+        float in = (float)((beat - G.shot_t) / 32);
+        zoom *= 1 + 0.045f * (in < 0 ? 0 : in > 1 ? 1 : in);
+    }
     // pulling back from the count-in is slower: the stage is revealed rather than cut to
     float glide = 1 - expf((float)-dt * (G.t < G.intro_end + 2.5 ? 0.9f : 1.4f));
     if (G.cam_snap) {
@@ -955,7 +1056,7 @@ static void draw_stage(void)
     G.cam_z = G.cam_tz * (1 + 0.05f * kick);
     G.cam_x = G.cam_tx + sinf((float)G.t * 0.23f) * 13 + sinf((float)G.t * 61) * 9 * kick;
     G.cam_y = G.cam_ty + sinf((float)G.t * 0.17f + 1) * 6 + sinf((float)G.t * 47 + 2) * 6 * kick;
-    G.kick *= 0.9f;
+    G.kick *= powf(0.9f, G.fstep);
     if (G.t > G.last_note_end && G.t > 0 && !G.end_party) {
         G.end_party = true;
         party();
@@ -1148,7 +1249,7 @@ static void draw_band(double beat)
     float pi = 3.14159265f, on_beat = fabsf(sinf((float)(beat * speed) * pi));
     float loud = audio_level() * 1.6f;
     loud = loud > 1 ? 1 : loud;
-    G.band_loud += (loud - G.band_loud) * 0.12f;
+    G.band_loud += (loud - G.band_loud) * ease(0.12f);
     float mood = (G.rock < 0.33f ? 0.3f : 0.6f + G.rock * 0.9f) * (G.big_section ? 1.35f : 1);
     float bob = (1 - on_beat) * (1 - on_beat) * (0.04f + 0.14f * G.band_loud) * mood;   // down on the beat
     float sway = sinf((float)(beat * speed) * pi * 0.5f) * (0.05f + 0.13f * G.band_loud) * mood;
@@ -1217,7 +1318,7 @@ static void draw_band(double beat)
         if (r >= 2) {
             // walking: the weight goes foot to foot. In a solo they rock back with it
             float going = fabsf(bp->walk - (((((uint32_t)(beat / 16) + 1) * 2654435761u * (r * 2 + 1)) >> 16 & 255) / 255.0f - 0.5f) * 1.3f) > 0.03f ? 1 : 0;
-            bp->turn += (going - bp->turn) * 0.12f;
+            bp->turn += (going - bp->turn) * ease(0.12f);
             dip += going * fabsf(sinf((float)G.t * 9)) * 0.05f * m[2];
             lean += going * sinf((float)G.t * 9) * 0.035f * m[2];
             lean += bp->front * (i & 1 ? 0.14f : -0.14f) * m[2];
@@ -1230,7 +1331,7 @@ static void draw_band(double beat)
             if (G.miss_pulse > 0.15f)
                 tint = RGBA(255, 110, 90, 255);
         }
-        bp->pulse *= 0.82f;
+        bp->pulse *= powf(0.82f, G.fstep);
         if (r == 1) {
             // the singer keeps moving: 32 frames with the mic at the mouth for a line, 16 with it down for the rests,
             // one over the other for the moment it comes up
@@ -1652,6 +1753,17 @@ static void reset_play(void)
     G.hit_pulse = G.miss_pulse = G.cheer = 0;
     G.solo_index = -1;
     G.section = -1;
+    // back to the wide shot
+    if (G.shots > 0) {
+        G.shot = 0;
+        G.venue = G.shot_tex[0];
+        G.venue_lights = G.shot_glow[0];
+        G.marks = G.shot_marks[0];
+    }
+    G.shot_t = -1e9;
+    G.shot_section = -1;
+    G.shot_sp = false;
+    G.focus_solo = 0;
     for (int l = 0; l < 6; l++)
         G.pad_t[l] = G.judged_t[l] = -100;
     G.slip_t = -100;
@@ -1739,6 +1851,7 @@ static void reset_play(void)
 
 bool game_start(Song * song, int part, int diff)
 {
+    battle_undouble();         // the last song's doubled notes, back before its chart goes
     free_song();
     char path[400];
     res_wait_sounds();
@@ -1902,6 +2015,16 @@ void game_stop(void)
     audio_song_speed(1);
     memset(G.band, 0, sizeof(G.band));
     res_band_free();
+    battle_undouble();
+    // the venue's other shots go with the song (the wide one stays cached for the next)
+    if (G.shots > 1) {
+        Tex * a, * b;
+        res_venue_shot(NULL, 1, &a, &b);
+        G.venue = G.shot_tex[0];
+        G.venue_lights = G.shot_glow[0];
+        G.marks = G.shot_marks[0];
+    }
+    G.shots = 0;
     free_song();
     tex_free(G.art);
     G.art = NULL;
@@ -2243,7 +2366,7 @@ static void hit_note(int i)
     if (battle.on && ph >= 0 && (n->flags & NOTE_SP_END) && G.phrase_ok[ph]) {
         // a battle: the phrase is an attack, not Star Power
         if (battle.mine_n < 3)
-            battle.mine[battle.mine_n++] = (battle.seed = battle.seed * 1103515245u + 12345u) % ATK_COUNT;
+            battle.mine[battle.mine_n++] = battle_pick(&battle.seed);
         G.sp_hit++;
         popup("ATTACK READY!");
         sound_play(res.snd[SND_SP_READY], 0.7f, false);
@@ -2883,6 +3006,20 @@ int game_update(const Pad * pad, uint32_t pressed)
         return GAME_PAUSE;
     G.t = audio_song_time() - cfg.offset_ms / 1000.0;
     ghost_track();
+#ifndef __vita__
+    {
+        // tests: GHV_ATTACK=n lands attack n on the player four seconds in (a battle; GHV_BATTLE=1)
+        static const Part * tested;
+        const char * want = getenv("GHV_ATTACK");
+        if (want && battle.on && tested != G.part && G.t > 4) {
+            tested = G.part;
+            bool bot = G.autoplay;
+            G.autoplay = false;             // the broken string sticks even under the bot
+            battle_land(atoi(want) % ATK_COUNT);
+            G.autoplay = bot;
+        }
+    }
+#endif
     if (battle.on && !G.failed && !battle.result) {
         battle_update();
         if (battle.rock <= 0) {
@@ -2951,6 +3088,18 @@ int game_update(const Pad * pad, uint32_t pressed)
             activate_sp();
         if (battle.on && battle.mine_n)
             battle_fire();
+    }
+    if (battle.on && battle.broken_lane >= 0) {
+        // the broken string: its fret does nothing till it's tapped back to life
+        uint32_t bit = 1u << battle.broken_lane;
+        if ((lanes_pressed & bit) && --battle.broken_left <= 0) {
+            battle.broken_lane = -1;
+            popup_always("STRING FIXED!");
+            sound_play(res.snd[SND_SP_READY], 0.5f, false);
+        } else {
+            held &= ~bit;
+            lanes_pressed &= ~bit;
+        }
     }
     uint32_t let_go = G.held & ~held;
     G.held = held;
@@ -3022,14 +3171,7 @@ int game_update(const Pad * pad, uint32_t pressed)
     G.miss_pulse *= 0.9f;
     G.cheer *= 0.985f;
 
-    // fps
-    G.fps_frames++;
-    double now = plat_now_us() / 1e6;
-    if (now - G.fps_t >= 1) {
-        G.fps = G.fps_frames;
-        G.fps_frames = 0;
-        G.fps_t = now;
-    }
+    G.updates++;
 
     if (practice.on) {
         // the end of the stretch: how it went, and again
@@ -3088,7 +3230,26 @@ static void draw_highway(void)
     gfx_blend(BLEND_ALPHA);
     const float solid = cfg.highway_alpha / 10.0f;
     const int seg = 6;
-    for (int i = 0; i < seg; i++) {
+    for (int i = 0; i < seg && cfg.gem_style == 1; i++) {
+        // Flash: a plain dark board, a thin line between the lanes
+        float z0 = Z_NEAR + (Z_FAR - Z_NEAR) * i / seg, z1 = Z_NEAR + (Z_FAR - Z_NEAR) * (i + 1) / seg;
+        gfx_tex(NULL);
+        const float uv[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+        float f0 = fade(z0) * (0.55f + 0.45f * solid), f1 = fade(z1) * (0.55f + 0.45f * solid);
+        int lb = (int)(lift * 0.4f);
+        uint32_t b0 = with_alpha(RGBA(16 + lb, 16 + lb, 22 + lb, 255), f0), b1 = with_alpha(RGBA(16, 16, 22, 255), f1);
+        const float p[4][3] = {{-HALF_W, 0, z0}, {HALF_W, 0, z0}, {HALF_W, 0, z1}, {-HALF_W, 0, z1}};
+        const uint32_t c[4] = {b0, b0, b1, b1};
+        gfx_quad(p, uv, c);
+        for (int l = 1; l < G.lanes; l++) {
+            float x = (lane_x(l - 1) + lane_x(l)) / 2;
+            const float q[4][3] = {{x - 0.012f, 0.004f, z0}, {x + 0.012f, 0.004f, z0}, {x + 0.012f, 0.004f, z1}, {x - 0.012f, 0.004f, z1}};
+            const uint32_t lc[4] = {with_alpha(RGBA(90, 90, 105, 255), f0), with_alpha(RGBA(90, 90, 105, 255), f0),
+                                    with_alpha(RGBA(90, 90, 105, 255), f1), with_alpha(RGBA(90, 90, 105, 255), f1)};
+            gfx_quad(q, uv, lc);
+        }
+    }
+    for (int i = 0; i < seg && cfg.gem_style != 1; i++) {
         float z0 = Z_NEAR + (Z_FAR - Z_NEAR) * i / seg, z1 = Z_NEAR + (Z_FAR - Z_NEAR) * (i + 1) / seg;
         float v0 = -(z0 / rep + off), v1 = -(z1 / rep + off);
         gfx_tex(G.highway);
@@ -3234,8 +3395,15 @@ static void draw_zones(void)
 static void lay(float x, float y, float z, float w, float d, const Sprite * s, uint32_t c);
 static void lay_cup(float x, float y, float z, float w, float d, const Sprite * s, uint32_t c);
 
+static void flash_targets(void);
+
 static void draw_cups(bool caps)
 {
+    if (cfg.gem_style == 1 && !G.drums) {
+        if (!caps)
+            flash_targets();
+        return;
+    }
     const float cw = 1.02f, cup_d = 0.84f;        // 128x64 art lying on the neck: 2.9 to 1 on the screen, as World Tour's
     for (int l = 0; l < G.lanes; l++) {
         char name[16];
@@ -3371,6 +3539,75 @@ static void lay_gem(float x, float y, float z, float w, float d, const Sprite * 
     lay(x, y, z, w, d, s, c);
 }
 
+// ---- Flash, the other note style: round flat discs on a plain dark board, drawn as shapes (no art)
+static const uint8_t flash_cols[6][3] = {{38, 200, 78}, {232, 52, 46}, {246, 214, 40}, {48, 128, 240}, {246, 140, 30},
+                                         {110, 220, 255}};
+
+static uint32_t flash_col(int c, float k, float a)
+{
+    int r = (int)(flash_cols[c][0] * k), g = (int)(flash_cols[c][1] * k), b = (int)(flash_cols[c][2] * k);
+    return with_alpha(RGBA(r > 255 ? 255 : r, g > 255 ? 255 : g, b > 255 ? 255 : b, 255), a);
+}
+
+// a ring lying on the board round (x, z) at height y, r0 inside r1; r0 = 0 fills it. Inner and outer colours
+static void flash_ring(float x, float y, float z, float r0, float r1, uint32_t c0, uint32_t c1)
+{
+    enum { SEG = 18 };
+    static float cs[SEG + 1], sn[SEG + 1];
+    if (cs[0] == 0)
+        for (int i = 0; i <= SEG; i++) {
+            cs[i] = cosf(i * 6.2831853f / SEG);
+            sn[i] = sinf(i * 6.2831853f / SEG);
+        }
+    gfx_tex(NULL);
+    const float uv[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+    const uint32_t c[4] = {c0, c1, c1, c0};
+    for (int i = 0; i < SEG; i++) {
+        const float p[4][3] = {{x + cs[i] * r0, y, z + sn[i] * r0}, {x + cs[i] * r1, y, z + sn[i] * r1},
+                               {x + cs[i + 1] * r1, y, z + sn[i + 1] * r1}, {x + cs[i + 1] * r0, y, z + sn[i + 1] * r0}};
+        gfx_quad(p, uv, c);
+    }
+}
+
+// one Flash note: a puck's dark edge, its colour, a white rim, the middle (white for a hammer-on, dark for a tap)
+// and a shine
+static void flash_gem(float x, float z, int c, int kind, float a, float size)
+{
+    float r = 0.42f * size;
+    flash_ring(x, 0.01f, z - 0.07f, 0, r * 1.02f, with_alpha(RGBA(0, 0, 0, 255), a * 0.6f), with_alpha(RGBA(0, 0, 0, 255), a * 0.6f));
+    flash_ring(x, 0.03f, z, 0, r * 0.84f, flash_col(c, 1.15f, a), flash_col(c, 0.85f, a));
+    flash_ring(x, 0.03f, z, r * 0.84f, r, with_alpha(RGBA(250, 250, 250, 255), a), with_alpha(RGBA(200, 200, 205, 255), a));
+    if (kind == 1)
+        flash_ring(x, 0.035f, z, 0, r * 0.36f, with_alpha(WHITE, a), with_alpha(RGBA(235, 235, 240, 255), a));
+    else if (kind == 2)
+        flash_ring(x, 0.035f, z, 0, r * 0.4f, with_alpha(RGBA(20, 20, 26, 255), a), with_alpha(RGBA(40, 40, 48, 255), a));
+    else
+        flash_ring(x, 0.035f, z, 0, r * 0.3f, flash_col(c, 0.55f, a), flash_col(c, 0.75f, a));
+    // the shine, toward the far side
+    flash_ring(x - r * 0.25f, 0.04f, z + r * 0.3f, 0, r * 0.18f, with_alpha(WHITE, a * 0.75f), with_alpha(WHITE, 0));
+}
+
+// the strikeline's targets: rings in the lanes' colours, lit when held
+static void flash_targets(void)
+{
+    for (int l = 0; l < G.lanes; l++) {
+        float x = lane_x(l);
+        int c = lane_art(l);
+        bool held = G.held & (1 << l);
+        float hit = clamp01(1 - (float)(G.t - G.press_t[l]) * 6);
+        flash_ring(x, 0.012f, 0, 0, 0.46f, held ? flash_col(c, 0.9f, 0.9f) : with_alpha(RGBA(12, 12, 16, 255), 0.9f),
+                   held ? flash_col(c, 0.6f, 0.9f) : with_alpha(RGBA(24, 24, 30, 255), 0.9f));
+        flash_ring(x, 0.02f, 0, 0.36f, 0.46f, flash_col(c, 1, 1), flash_col(c, 0.8f, 1));
+        if (hit > 0) {
+            // the flash: a white ring thrown off the target
+            gfx_blend(BLEND_ADD);
+            float rr = 0.46f + (1 - hit) * 0.35f;
+            flash_ring(x, 0.03f, 0, rr - 0.08f, rr, with_alpha(WHITE, hit * 0.8f), with_alpha(WHITE, hit * 0.8f));
+            gfx_blend(BLEND_ALPHA);
+        }
+    }
+}
+
 static void draw_gems(void)
 {
     const Part * p = G.part;
@@ -3394,6 +3631,8 @@ static void draw_gems(void)
             a *= 0.55f;
         else if (cfg.vanish || (battle.on && G.t < battle.blackout_until))
             a *= clamp01((z - 2.2f) / 1.6f);    // gone before the strikeline: play it from memory
+        else if (battle.on && G.t < battle.amp_until && fmod(G.t + z * 0.05, 0.22) < 0.08)
+            a *= 0.15f;                         // the amp's overloaded: the gems flicker
         int kind = G.drums ? 0 : n->flags & NOTE_TAP ? 2 : n->flags & NOTE_HOPO ? 1 : 0;
         bool star = G.phrase[i] >= 0 && G.phrase_ok[G.phrase[i]];
         uint32_t col = with_alpha(WHITE, a);
@@ -3419,6 +3658,11 @@ static void draw_gems(void)
             if (accent || ghost) {
                 gw *= accent ? 1.24f : 0.76f;
                 gh *= accent ? 1.24f : 0.76f;
+            }
+            if (cfg.gem_style == 1) {
+                static const float fs[3] = {0.9f, 1, 1.14f};
+                flash_gem(lane_x(l), z, c, cym ? 1 : kind, ghost ? a * 0.7f : a, fs[cfg.note_size] * (accent ? 1.15f : ghost ? 0.8f : 1));
+                continue;
             }
             if (star)
                 snprintf(name, sizeof(name), "star_%s_%d_%d", look, c, star_frame);
@@ -3746,8 +3990,62 @@ static float battle_rand(void)
     return (battle.seed >> 8 & 0xffff) / 65536.0f;
 }
 
+// the notes Double Notes changed, back as charted
+static void battle_undouble(void)
+{
+    Note * notes = G.part ? (Note *)G.part->notes : NULL;
+    for (int k = 0; k < battle.doubled_n && notes; k++)
+        if (battle.doubled[k] < G.part->note_count)
+            notes[battle.doubled[k]].frets = (uint8_t)battle.doubled_was[k];
+    battle.doubled_n = 0;
+}
+
+// an attack that suits the part: drums get a dead pad for a broken string but no whammy or doubles; the mic gets only
+// the attacks on the eyes
+static int battle_pick(unsigned * seed)
+{
+    for (;;) {
+        *seed = *seed * 1103515245u + 12345u;
+        int a = (int)(*seed >> 8) % ATK_COUNT;
+        if (G.vocal && (a == ATK_BROKEN || a == ATK_DOUBLE || a == ATK_WHAMMY || a == ATK_LEFTY))
+            continue;
+        if (G.drums && (a == ATK_DOUBLE || a == ATK_WHAMMY))
+            continue;
+        return a;
+    }
+}
+
+// the GH3 attacks on the highway itself: the Whammy reels it, Amp Overload shakes it. False: it's as it is
+static bool battle_proj(float out[16])
+{
+    if (!battle.on)
+        return false;
+    float roll = 0, dx = 0, dy = 0;
+    if (battle.whammy_left > 0) {
+        float k = battle.whammy_left;
+        roll = sinf((float)G.t * 5.5f) * 0.15f * (0.4f + 0.6f * k);
+        dx = sinf((float)G.t * 3.1f) * 0.05f * k;
+    }
+    if (G.t < battle.amp_until) {
+        float left = (float)(battle.amp_until - G.t), k = left > 1 ? 1 : left;
+        dx += (sinf((float)G.t * 71) * 0.018f + sinf((float)G.t * 23) * 0.012f) * k;
+        dy += sinf((float)G.t * 57 + 1) * 0.02f * k;
+    }
+    if (roll == 0 && dx == 0 && dy == 0)
+        return false;
+    memcpy(out, G.proj, sizeof(float) * 16);
+    float c = cosf(roll), sn = sinf(roll);
+    for (int col = 0; col < 4; col++) {
+        float x = out[col * 4], y = out[col * 4 + 1], w = out[col * 4 + 3];
+        out[col * 4] = c * x - sn * y + dx * w;
+        out[col * 4 + 1] = sn * x + c * y + dy * w;
+    }
+    return true;
+}
+
 static void battle_reset(void)
 {
+    battle_undouble();
     static const float skill[DIFF_COUNT] = {0.9f, 0.93f, 0.95f, 0.97f};
     // the rival's own level on top of the difficulty's: easy, normal, hard, brutal
     static const float level[4] = {-0.1f, 0, 0.02f, 0.035f};
@@ -3766,6 +4064,7 @@ static void battle_reset(void)
     battle.base_speed = base;
     G.speed = base;
     battle.theirs_ready = 8;            // nothing thrown in the first seconds
+    battle.broken_lane = -1;
     snprintf(battle.name, sizeof(battle.name), "%s", names[(int)(battle_rand() * 12) % 12]);
 }
 
@@ -3812,8 +4111,8 @@ static void battle_fire(void)
         return;
     int a = battle.mine[0];
     memmove(battle.mine, battle.mine + 1, sizeof(int) * --battle.mine_n);
-    static const float shake[ATK_COUNT] = {0.12f, 0.16f, 0.06f, 0.1f};
-    static const float secs[ATK_COUNT] = {6, 5, 3, 7};
+    static const float shake[ATK_COUNT] = {0.12f, 0.16f, 0.06f, 0.1f, 0.14f, 0.12f, 0.1f, 0.1f};
+    static const float secs[ATK_COUNT] = {6, 5, 3, 7, 6, 7, 5, 6};
     battle.rival_hit = shake[a];
     battle.rival_hit_until = G.t + secs[a];
     if (a == ATK_DRAIN)
@@ -3834,6 +4133,38 @@ static void battle_land(int a)
         battle.blackout_until = G.t + 6;
     else if (a == ATK_SPEED)
         battle.speed_until = G.t + 7;
+    else if (a == ATK_BROKEN) {
+        // the fret the next six seconds lean on most
+        const Part * p = G.part;
+        int uses[LANES] = {0}, best = 0;
+        for (int k = G.first; k < p->note_count && p->notes[k].time / 1e6 < G.t + 6; k++)
+            for (int l = 0; l < LANES; l++)
+                uses[l] += (p->notes[k].frets >> l) & 1;
+        for (int l = 1; l < LANES && l < G.lanes; l++)
+            if (uses[l] > uses[best])
+                best = l;
+        battle.broken_lane = best;
+        battle.broken_left = G.autoplay ? 0 : BROKEN_TAPS;
+        if (G.autoplay)
+            battle.broken_lane = -1;
+    } else if (a == ATK_DOUBLE) {
+        // eight seconds of single notes become two-fret chords: the fret beside each joins it
+        Note * notes = (Note *)G.part->notes;
+        for (int k = G.first; k < G.part->note_count && notes[k].time / 1e6 < G.t + 8 && battle.doubled_n < DOUBLED_MAX; k++) {
+            uint8_t f = notes[k].frets;
+            if (G.state[k] != PENDING || notes[k].time / 1e6 < G.t + 0.4 || (f & FRET_OPEN) || frets_count(f) != 1 ||
+                G.lanes < 5)
+                continue;
+            int l = __builtin_ctz(f & 0x1f);
+            battle.doubled[battle.doubled_n] = k;
+            battle.doubled_was[battle.doubled_n++] = f;
+            notes[k].frets = (uint8_t)(f | (1 << (l == 4 ? 3 : l + 1)));
+        }
+    } else if (a == ATK_WHAMMY) {
+        battle.whammy_left = 1;
+        battle.whammy_until = G.t + 10;
+    } else if (a == ATK_AMP)
+        battle.amp_until = G.t + 6;
     else
         rock_change(-0.15f);
     battle.taken++;
@@ -3868,7 +4199,7 @@ static void battle_update(void)
             if (n->flags & NOTE_SP_END) {
                 // a phrase: an attack if it has room for one, else its own Star Power
                 if (battle.theirs_n < 2)
-                    battle.theirs[battle.theirs_n++] = (int)(battle_rand() * ATK_COUNT) % ATK_COUNT;
+                    battle.theirs[battle.theirs_n++] = battle_pick(&battle.seed);
                 else
                     battle.sp_until = G.t + 8;
             }
@@ -3880,6 +4211,13 @@ static void battle_update(void)
         }
     }
     battle.form *= 0.9995f;             // it settles back towards its level
+    if (battle.whammy_left > 0) {
+        battle.whammy_left -= G.whammy * 0.012f;
+        if (battle.whammy_left <= 0 || G.t > battle.whammy_until) {
+            battle.whammy_left = 0;
+            popup_always("SHOOK IT OFF!");
+        }
+    }
     // an attack on its way lands
     if (battle.warn_t > 0 && G.t >= battle.warn_t) {
         battle.warn_t = 0;
@@ -3933,6 +4271,20 @@ static void draw_battle(void)
         snprintf(w, sizeof(w), "INCOMING: %s", atk_names[battle.warn_atk]);
         font_draw_shadow(res.title, w, SCREEN_W / 2, 96, 30, RGBA(255, 110, 90, 255), ALIGN_CENTER);
     }
+    // the GH3 attacks on you: the dead fret marked on its cup, the whammy to shake off
+    if (battle.broken_lane >= 0 && !G.vocal) {
+        float sx, sy;
+        project(lane_x(battle.broken_lane), 0, 0, &sx, &sy);
+        float k = 0.75f + 0.25f * sinf((float)G.t * 12);
+        gfx_rect(sx - 30, sy - 40, 60, 46, RGBA(0, 0, 0, 150));
+        font_draw_shadow(res.title, "X", sx, sy - 44, 64, RGBA(255, 60, 40, (int)(255 * k)), ALIGN_CENTER);
+        char t[32];
+        snprintf(t, sizeof(t), "TAP IT x%d", battle.broken_left);
+        font_draw_shadow(res.ui, t, sx, sy + 14, 18, RGBA(255, 200, 190, 255), ALIGN_CENTER);
+    }
+    if (battle.whammy_left > 0)
+        font_draw_shadow(res.title, "WHAMMY TO SHAKE IT OFF!", SCREEN_W / 2, 130, 26,
+                         RGBA(255, 210, 90, (int)(170 + 85 * sinf((float)G.t * 10))), ALIGN_CENTER);
     // the attacks in hand, the next one lit
     if (battle.mine_n) {
         gfx_rect(8, 198, 196, 30 + battle.mine_n * 22, RGBA(0, 0, 0, 150));
@@ -4044,7 +4396,7 @@ static void draw_hud(void)
     const Sprite * needle = atlas_get(res.hud, "hud_rock_needle");
     // shorter than the sprite's own length and a narrower swing, so it stays inside the dome, and weighted: it eases to the
     // value instead of snapping with every note
-    G.needle += (G.rock - G.needle) * 0.1f;
+    G.needle += (G.rock - G.needle) * ease(0.1f);
     float swing = (G.needle - 0.5f) * 2 * 0.85f;
     if (h < 0.25f && !G.failed)
         swing += sinf(t * 47) * 0.04f * (0.25f - h) / 0.25f;   // in the red, the needle trembles
@@ -4204,6 +4556,17 @@ void game_draw(void)
 #endif
     if (G.camera != cfg.camera)
         setup_camera();         // changed from the pause menu
+    // the frame rate (the frames drawn), and how many updates this frame covers: what moves by the frame moves this much
+    G.fps_frames++;
+    double now = plat_now_us() / 1e6;
+    if (now - G.fps_t >= 1) {
+        G.fps = G.fps_frames;
+        G.fps_frames = 0;
+        G.fps_t = now;
+    }
+    unsigned du = G.updates - G.updates_drawn;
+    G.updates_drawn = G.updates;
+    G.fstep = du < 1 ? 1 : du > 4 ? 4 : (float)du;
     gfx_begin(0, 0, 0);
     gfx_2d();
     draw_stage();
@@ -4233,7 +4596,8 @@ void game_draw(void)
     if (G.sp_flash > 0.02f && cfg.flashes < 2)
         gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(80, 160, 255, (int)(G.sp_flash * (cfg.flashes ? 25 : 70))));
     if (!G.vocal) {
-        gfx_3d(G.proj, G.view);
+        float shook[16];
+        gfx_3d(battle_proj(shook) ? shook : G.proj, G.view);
         draw_highway();
         if (G.roll_count || G.gap_count)
             draw_zones();

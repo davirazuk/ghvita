@@ -248,6 +248,16 @@ bool plat_poll(Pad * pad)
     return true;
 }
 
+static void frame_passed(void);
+
+void plat_skip_frame(void)
+{
+    // a shot asked for now waits for the next frame drawn
+    if (!fixed_clock)
+        SDL_Delay(16);
+    frame_passed();
+}
+
 void plat_swap(void)
 {
     if (pending_shot[0]) {
@@ -255,6 +265,11 @@ void plat_swap(void)
         pending_shot[0] = 0;
     }
     SDL_GL_SwapWindow(window);
+    frame_passed();
+}
+
+static void frame_passed(void)
+{
     frame_number++;
     if (fixed_clock && getenv("GHV_PACE")) {
         // the sound card sets the speed: the fixed clock and the frames captured can't drift apart

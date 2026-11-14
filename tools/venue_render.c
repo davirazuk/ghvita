@@ -7,7 +7,7 @@
 // The parts are drawn the way YargLook's CharacterLoader draws them: opaque parts alpha-tested at 0.45 and self-lit,
 // soft-alpha "opaque" art (beams, haze) blended at 35%, mostly-clear art blended (or as light when bright and coloured),
 // GHWT's darkening passes left out.
-// usage: venue_render <textures dir> <zone> <out prefix> [back up look fov shift]  (camera: back/up metres from the drummer
+// usage: venue_render <textures dir> <zone> <out prefix> [back up look fov shift yaw side]  (camera: back/up metres from the drummer
 // toward the audience, look = height looked at above the drummer's mark, fov = vertical degrees, shift = lens shift up in half screens)
 // Build: gcc -O2 -o build-tools/venue_render tools/venue_render.c -Isrc -lSDL2 -lGL -lm ; run on any GL 2.1 display.
 #include <SDL2/SDL.h>
@@ -438,10 +438,19 @@ int main(int argc, char ** argv)
     float * dm = mark[0];
     float fl = sqrtf(facing[0] * facing[0] + facing[2] * facing[2]);
     float fx = facing[0] / fl, fz = facing[2] / fl;
+    // other shots: the camera swung round the drummer by yaw degrees, looking side metres along the stage
+    float yaw = argc > 9 ? atof(argv[9]) * (float)M_PI / 180 : 0, side = argc > 10 ? atof(argv[10]) : 0;
+    {
+        float c = cosf(yaw), sn = sinf(yaw), rx = fx * c - fz * sn, rz = fx * sn + fz * c;
+        fx = rx;
+        fz = rz;
+    }
+    // the stage's own right-hand direction (seen from the audience), for side
+    float srx = -facing[2] / fl, srz = facing[0] / fl;
     eye[0] = dm[0] + fx * back;
     eye[1] = dm[1] + up;
     eye[2] = dm[2] + fz * back;
-    float at[3] = {dm[0], dm[1] + look_h, dm[2]};
+    float at[3] = {dm[0] + srx * side, dm[1] + look_h, dm[2] + srz * side};
     float f[3] = {at[0] - eye[0], at[1] - eye[1], at[2] - eye[2]};
     float fn = sqrtf(f[0] * f[0] + f[1] * f[1] + f[2] * f[2]);
     for (int i = 0; i < 3; i++)

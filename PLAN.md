@@ -327,3 +327,34 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   (the list body, parse shape, picker keys, download_file route, cacert chain) answers healthy from the
   desk — the device's own status line ("Couldn't search: ...", the curl error string straight from curl)
   is still the one missing fact.
+
+## Camera shots, graphics options, Flash notes, GH3 attacks (2026-11-13)
+
+- Venues: `tools/venues.py --shots <textures> <work>` renders three more shots per venue with venue_render's new yaw/side
+  arguments: s1 stage left (yaw +32, 7 m back), s2 stage right (yaw -32), s3 low front (6 m, 0.9 m up); studios closer.
+  Each shot's lens shift is solved (three renders) so the drummer lands where the wide shot has them, at the highway's far
+  end. Files `<zone>_s<n>.jpg` + `_s<n>_glow.jpg`; venues.txt keeps "zone|title|wide marks" and adds "|marks" per shot
+  (old builds read only the first). About 13 MB more on the card, ~7.5 MB of textures while a song plays.
+- game.c director (draw_stage): wide for the count-in and after the last note; Star Power starts low (s3); a solo cuts
+  to the soloist's near side (guitar s2, bass s1, drums s3); a new named section gets its own angle (choruses/solos/outros
+  low); charts without sections cycle every 4 bars. A shot holds 2 bars at least; the camera pushes in 4.5% over 8 bars.
+  member_spot keeps every member in the wide shot's safe screen zones; a shot only scales them (0.85..1.3 of wide).
+  Shots load in pick_venue (log: "loaded: N venue shots M ms"); freed in game_stop. Options > GRAPHICS > Venue camera:
+  "Wide shot only" loads none.
+- 30 fps (cfg.frame_rate): play_screen skips game_draw on odd frames and the main loop calls plat_skip_frame (Vita:
+  sceDisplayWaitVblankStart, still governed; PC: frame clock advances). game_update still runs every frame, so input and
+  judging are unchanged. Draw-time animation steps use G.fstep (ease()/powf) so they keep their speed. The fps readout
+  counts drawn frames.
+- GRAPHICS tab: preset (Full / Balanced / Battery / Custom shown when nothing matches), frame rate, fps readout, camera,
+  note style, effects, band, fire, flashes, crowd, vignette.
+- Flash note style (cfg.gem_style 1): flat discs drawn as 18-segment rings (flash_ring), no atlas art: white centre =
+  hammer-on, dark = tap, cyan = Star Power; ring targets lit while held with a white ring thrown off on each press; plain
+  dark board with lane lines. Drums keep World Tour cups.
+- Battle attacks from GH3: BROKEN STRING (the most-used fret of the next 6 s is masked out of held/pressed lanes till
+  tapped 5 times), DOUBLE NOTES (single notes in the next 8 s get the neighbouring fret; originals kept in
+  battle.doubled and restored by battle_undouble on restart, quit and the next song's start), WHAMMY (highway rolls via
+  battle_proj till G.whammy wears battle.whammy_left down, max 10 s), AMP OVERLOAD (6 s shake + blinking gems).
+  battle_pick keeps doubles/whammy off drums and string/flip attacks off vocals. PC test hook: GHV_BATTLE=1
+  GHV_ATTACK=<n> lands attack n at 4 s (the bot repairs a broken string by pressing the lane).
+- Tested on PC only (bot full combos at 30 fps, Flash, still camera; battles with each attack under ASan; regress.sh
+  clean). Hardware unknowns: shot load time, texture memory with band + 4 shots, 30 fps frame pacing.

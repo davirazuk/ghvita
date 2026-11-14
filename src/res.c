@@ -226,7 +226,7 @@ void res_load(void)
     char path[512];
     snprintf(path, sizeof(path), "%svenues/venues.txt", dir);
     FILE * f = fopen(path, "r");
-    char line[256];
+    char line[640];
     while (f && fgets(line, sizeof(line), f) && res.venue_count < 48) {
         char * bar = strchr(line, '|');
         if (!bar || bar - line >= 16)
@@ -243,6 +243,28 @@ void res_load(void)
                     sscanf(m + strlen(roles[r]), "%f %f %f", &v[0], &v[1], &v[2]);
             }
         }
+        // "|<marks>" again for each of the camera's other shots
+        int shots = 1;
+        for (char * seg = end ? strchr(end + 1, '|') : NULL; seg && shots < VENUE_SHOTS; seg = strchr(seg + 1, '|')) {
+            static const char * roles[4] = {"drummer", "vocalist", "guitarist", "bassist"};
+            char * next = strchr(seg + 1, '|');
+            if (next)
+                *next = 0;
+            bool any = false;
+            for (int r = 0; r < 4; r++) {
+                char * m = strstr(seg + 1, roles[r]);
+                float * v = res.venue_shot_marks[res.venue_count][shots - 1][r];
+                memcpy(v, res.venue_marks[res.venue_count][r], sizeof(float) * 3);
+                if (m && sscanf(m + strlen(roles[r]), "%f %f %f", &v[0], &v[1], &v[2]) == 3)
+                    any = true;
+            }
+            if (next)
+                *next = '|';
+            if (!any)
+                break;
+            shots++;
+        }
+        res.venue_shots[res.venue_count] = shots;
         snprintf(res.venue_zones[res.venue_count], 16, "%s", line);
         snprintf(res.venue_titles[res.venue_count], 32, "%s", title);
         res.venue_count++;
@@ -326,6 +348,59 @@ bool res_venue(const char * zone, Tex ** stage, Tex ** lights)
     *stage = base;
     *lights = glow;
     return base != NULL;
+}
+
+// the other shots load with the song (a venue's whole set, about 7.5 MB more): never mid-song
+bool res_venue_shot(const char * zone, int shot, Tex ** stage, Tex ** lights)
+{
+    static Tex * base[VENUE_SHOTS], * glow[VENUE_SHOTS];
+    static char loaded[VENUE_SHOTS][16];
+    *stage = *lights = NULL;
+    if (shot < 1 || shot >= VENUE_SHOTS)
+        return false;
+    if (!zone) {
+        // let them all go (the songs are over)
+        for (int i = 1; i < VENUE_SHOTS; i++) {
+            tex_free(base[i]);
+            tex_free(glow[i]);
+            base[i] = glow[i] = NULL;
+            loaded[i][0] = 0;
+        }
+        return false;
+    }
+    if (!base[shot] || strcmp(loaded[shot], zone) != 0) {
+        tex_free(base[shot]);
+        tex_free(glow[shot]);
+        base[shot] = glow[shot] = NULL;
+        loaded[shot][0] = 0;
+        char path[64];
+        snprintf(path, sizeof(path), "venues/%s_s%d.jpg", zone, shot);
+        base[shot] = load_tex(path, 0);
+        snprintf(path, sizeof(path), "venues/%s_s%d_glow.jpg", zone, shot);
+        glow[shot] = base[shot] ? load_tex(path, 0) : NULL;
+        if (base[shot])
+            snprintf(loaded[shot], sizeof(loaded[shot]), "%s", zone);
+    }
+    *stage = base[shot];
+    *lights = glow[shot];
+    return base[shot] != NULL;
+}
+
+int res_venue_shot_count(const char * zone)
+{
+    for (int i = 0; i < res.venue_count; i++)
+        if (strcmp(res.venue_zones[i], zone) == 0)
+            return res.venue_shots[i];
+    return 1;
+}
+
+const float (*res_venue_shot_marks(const char * zone, int shot))[3]
+{
+    for (int i = 0; i < res.venue_count; i++)
+        if (strcmp(res.venue_zones[i], zone) == 0)
+            return shot <= 0 ? (const float (*)[3])res.venue_marks[i]
+                   : shot < res.venue_shots[i] ? (const float (*)[3])res.venue_shot_marks[i][shot - 1] : NULL;
+    return NULL;
 }
 
 const float (*res_venue_marks(const char * zone))[3]

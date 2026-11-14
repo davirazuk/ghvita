@@ -3245,6 +3245,8 @@ static void finish_song(int how)
     go(S_RESULTS);
 }
 
+static bool skip_draw;             // this frame wasn't drawn: the main loop lets it pass without a swap
+
 static void play_screen(void)
 {
     // the audio falling behind: full clocks
@@ -3275,6 +3277,11 @@ static void play_screen(void)
         finish_song(r);
         pressed = repeat = 0;
         results_screen();
+        return;
+    }
+    // 30 fps: every other frame isn't drawn (the buttons were still read and judged in it)
+    if (cfg.frame_rate == 30 && (screen_frames & 1) && outro_t < 0) {
+        skip_draw = true;
         return;
     }
     game_draw();
@@ -3982,19 +3989,41 @@ static void tour_screen(void)
 
 // ------------------------------------------------------------------------------------------------------- options
 
+// the graphics presets: 0 Full, 1 Balanced, 2 Battery; 3 when the settings match none of them
+static int graphics_preset(void)
+{
+    if (cfg.frame_rate != 30 && !cfg.still_camera && !cfg.light_fx && cfg.fire == 0)
+        return 0;
+    if (cfg.frame_rate != 30 && !cfg.still_camera && cfg.light_fx && cfg.fire == 1)
+        return 1;
+    if (cfg.frame_rate == 30 && cfg.still_camera && cfg.light_fx && cfg.fire == 1)
+        return 2;
+    return 3;
+}
+
+static void set_graphics_preset(int p)
+{
+    cfg.frame_rate = p == 2 ? 30 : 60;
+    cfg.still_camera = p == 2;
+    cfg.light_fx = p != 0;
+    cfg.fire = p == 0 ? 0 : 1;
+}
+
 enum { O_SPEED, O_HIGHWAY, O_VENUE, O_BAND, O_SING, O_SINGDIFF, O_OFFSET, O_LAYOUT, O_DRUMKEYS, O_DRUMHITS, O_TILT, O_NOFAIL, O_LEFTY, O_MUSIC, O_SFX, O_CROWD, O_FPS,
        O_CAMERA, O_HWALPHA, O_VLIGHT, O_FLASH, O_POPUPS, O_TIMING, O_LIVE, O_VANISH, O_MISSSND, O_REAR, O_BEND, O_COUNTDOWN,
-       O_RESET, O_FIVEPADS, O_DOUBLEKICK, O_EASYSUS, O_COUNTIN, O_SCREENS, O_PROGRESS, O_CUPS, O_AUTOREPRESS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, O_CROWDHANDS, O_VIGNETTE, O_LYRICS, O_MENUMUSIC, O_SINGSP, O_SHRINKCHECK, O_GHOST, O_RIVAL, O_WINDOW, O_LIGHTFX, O_SONGSPEED, O_COUNT };
+       O_RESET, O_FIVEPADS, O_DOUBLEKICK, O_EASYSUS, O_COUNTIN, O_SCREENS, O_PROGRESS, O_CUPS, O_AUTOREPRESS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, O_CROWDHANDS, O_VIGNETTE, O_LYRICS, O_MENUMUSIC, O_SINGSP, O_SHRINKCHECK, O_GHOST, O_RIVAL, O_WINDOW, O_LIGHTFX, O_SONGSPEED,
+       O_FRAMERATE, O_STILLCAM, O_GEMSTYLE, O_PRESET, O_COUNT };
 
 // the options by subject, L and R between them
-enum { OPT_TABS = 7, OPT_TAB_MAX = 14 };
-static const char * opt_tab_names[OPT_TABS] = {"GAME", "CONTROLS", "HIGHWAY", "STAGE", "SCREEN", "SOUND", "LIBRARY"};
+enum { OPT_TABS = 8, OPT_TAB_MAX = 14 };
+static const char * opt_tab_names[OPT_TABS] = {"GAME", "CONTROLS", "HIGHWAY", "STAGE", "SCREEN", "GRAPHICS", "SOUND", "LIBRARY"};
 static const int opt_tabs[OPT_TABS][OPT_TAB_MAX + 1] = {
     {O_SPEED, O_SONGSPEED, O_OFFSET, O_NOFAIL, O_EASYSUS, O_AUTOREPRESS, O_VANISH, O_COUNTDOWN, O_SING, O_SINGDIFF, O_RIVAL, O_WINDOW, O_RESET, -1},
     {O_LAYOUT, O_DRUMKEYS, O_FIVEPADS, O_DOUBLEKICK, O_LEFTY, O_TILT, O_REAR, O_SINGSP, -1},
     {O_HIGHWAY, O_HWALPHA, O_CAMERA, O_CUPS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, -1},
     {O_VENUE, O_VLIGHT, O_BAND, O_CROWDHANDS, O_VIGNETTE, O_SCREENS, O_FLASH, -1},
     {O_LYRICS, O_POPUPS, O_PROGRESS, O_TIMING, O_LIVE, O_GHOST, O_LIGHTFX, O_FPS, -1},
+    {O_PRESET, O_FRAMERATE, O_FPS, O_STILLCAM, O_GEMSTYLE, O_LIGHTFX, O_BAND, O_FIRE, O_FLASH, O_CROWDHANDS, O_VIGNETTE, -1},
     {O_MUSIC, O_SFX, O_CROWD, O_MENUMUSIC, O_COUNTIN, O_DRUMHITS, O_MISSSND, O_BEND, -1},
     {O_SHRINKCHECK, -1},
 };
@@ -4117,6 +4146,15 @@ static void option_text(int i, char * name, char * value, size_t n)
     case O_TIMING: strcpy(name, "Timing bar"); snprintf(value, n, "%s", cfg.timing_bar ? "On" : "Off"); break;
     case O_LIVE: strcpy(name, "Live percent"); snprintf(value, n, "%s", cfg.live_stats ? "On" : "Off"); break;
     case O_LIGHTFX: strcpy(name, "Effects"); snprintf(value, n, "%s", cfg.light_fx ? "Light" : "Full"); break;
+    case O_FRAMERATE: strcpy(name, "Frame rate"); snprintf(value, n, "%d fps", cfg.frame_rate == 30 ? 30 : 60); break;
+    case O_STILLCAM: strcpy(name, "Venue camera"); snprintf(value, n, "%s", cfg.still_camera ? "Wide shot only" : "Cuts between shots"); break;
+    case O_GEMSTYLE: strcpy(name, "Note style"); snprintf(value, n, "%s", cfg.gem_style ? "Flash" : "World Tour"); break;
+    case O_PRESET: {
+        static const char * const pn[] = {"Full", "Balanced", "Battery", "Custom"};
+        strcpy(name, "Graphics preset");
+        snprintf(value, n, "%s", pn[graphics_preset()]);
+        break;
+    }
     case O_SONGSPEED:
         strcpy(name, "Song speed");
         snprintf(value, n, cfg.song_speed < 100 ? "%d%%  (not saved)" : "%d%%", cfg.song_speed);
@@ -4233,6 +4271,14 @@ static void change_option(int i, int d)
     case O_RIVAL: cfg.rival = (cfg.rival + d + 4) % 4; break;
     case O_WINDOW: cfg.hit_window = (cfg.hit_window + d + 3) % 3; break;
     case O_LIGHTFX: cfg.light_fx = !cfg.light_fx; break;
+    case O_FRAMERATE: cfg.frame_rate = cfg.frame_rate == 30 ? 60 : 30; break;
+    case O_STILLCAM: cfg.still_camera = !cfg.still_camera; break;
+    case O_GEMSTYLE: cfg.gem_style = !cfg.gem_style; break;
+    case O_PRESET: {
+        int p = graphics_preset();
+        set_graphics_preset(((p > 2 ? (d > 0 ? -1 : 3) : p) + d + 3) % 3);
+        break;
+    }
     case O_SONGSPEED: cfg.song_speed = clampi(cfg.song_speed + 5 * d, 50, 150); break;
     case O_VANISH: cfg.vanish = !cfg.vanish; break;
     case O_MISSSND: cfg.no_miss_sound = !cfg.no_miss_sound; break;
@@ -4467,6 +4513,10 @@ static void options_screen(void)
         "How early or late a note can be hit: Strict 75 ms, Normal 95 ms, Lenient 115 ms either way.",
         "Light drops the hit rings, Star Power glitter, smoke, band backlight, lasers and sparks, for a steadier frame rate.",
         "The song's speed. Below 100% the run isn't saved (scores, medals, the tour); practice has its own speed.",
+        "30 fps draws every other frame and saves power; your buttons are still read 60 times a second, so timing stays exact.",
+        "Cuts between each venue's four camera angles with the song, or keeps the wide shot (loads quicker, less memory).",
+        "World Tour's gems, or Flash: round flat discs on a plain dark board, like the browser classic.",
+        "Full: everything. Balanced: lighter effects at 60 fps. Battery: 30 fps, wide shot only, lighter effects.",
     };
     char line[160];
     const char * text = about[opt];
@@ -5420,6 +5470,10 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "Venues have 4 camera angles from the real 3D stages: the camera cuts on sections, solos and Star Power.",
+        "New GRAPHICS tab: 60 or 30 fps (buttons still read at 60), venue camera, note style, Full/Balanced/Battery.",
+        "Note style Flash: round flat notes on a plain dark board, ring targets that flash when you hit.",
+        "Battles get GH3's attacks: Broken String (tap the fret 5x), Double Notes, Whammy and Amp Overload.",
         "Holding a fret, its lane's light now comes out of the cup instead of from the bottom edge of the highway.",
         "Streak lamps fixed: full-size gold bulbs on the rail again (the last builds shrank them to dots), domes tipped up-right.",
         "Fixed: a RhythmVerse search that had to be asked twice leaked its first answer's memory.",
@@ -5712,7 +5766,11 @@ int main(void)
                 plat_keep_awake();
         }
         screen_frames++;
-        plat_swap();
+        if (skip_draw) {
+            skip_draw = false;
+            plat_skip_frame();
+        } else
+            plat_swap();
     }
     plat_quit();
     return 0;

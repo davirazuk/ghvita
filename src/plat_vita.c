@@ -9,6 +9,7 @@
 #include <psp2/motion.h>
 #include <psp2/audioout.h>
 #include <psp2/power.h>
+#include <psp2/display.h>
 #include <psp2/rtc.h>
 #include <time.h>
 #include <psp2/apputil.h>
@@ -214,6 +215,20 @@ void plat_swap(void)
     int64_t after = sceKernelGetProcessTimeWide();
     if (perf_level == 1) {
         // during a song the screen mustn't dim (the buttons the game reads don't always count as activity)
+        sceKernelPowerTick(SCE_KERNEL_POWER_TICK_DEFAULT);
+        if (last_swap)
+            govern(after - last_swap, before - last_swap);
+    }
+    last_swap = after;
+}
+
+void plat_skip_frame(void)
+{
+    // the frame on the screen stays a second vblank
+    int64_t before = sceKernelGetProcessTimeWide();
+    sceDisplayWaitVblankStart();
+    int64_t after = sceKernelGetProcessTimeWide();
+    if (perf_level == 1) {
         sceKernelPowerTick(SCE_KERNEL_POWER_TICK_DEFAULT);
         if (last_swap)
             govern(after - last_swap, before - last_swap);
