@@ -5599,6 +5599,7 @@ static void news_screen(void)
 {
     static const char * const lines[] = {
         "The venue lights follow the song's own light show (Rock Band charts): verses, choruses, strobes, blackouts, silhouettes.",
+        "Songs without a light show get one from their sections: verses cool, choruses slam in, builds strobe, bridges go dark.",
         "The guitarist and bassist really move now: they rock through GH's own groove animation, in time with the song.",
         "World Tour's HUD as in the game: the ROCK dome on the score amp, your multiplier a glowing nixie tube (blue in Star Power).",
         "Star Power works like GH's: turning it on lifts the rock meter, and while it lasts hits fill it twice as fast, misses cost half.",

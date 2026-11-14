@@ -136,6 +136,8 @@ static struct {
     double wave_t;
     double strobe_t;                    // a chorus came in: the stage strobes
     int cue_i, cue_mode, cue_step;      // the chart's light show: the next cue, the look it's in, its keyframe
+    int auto_mode, show_mode;           // the look the section's name calls for (no light show in the chart); this frame's
+    double auto_t;
     double cue_t, flare_t, flare_len;   // when the look began; a flare's flash
     float kick;
     double shown_score;                 // what the counter shows, rolling up to the score
@@ -538,6 +540,28 @@ static bool update_section(void)
         low[k] = 0;
         bool big = strstr(low, "chorus") || strstr(low, "solo") || strstr(low, "outro");
         G.big_section = big;
+        // a chart without a light show of its own gets one from its sections' names, as GH's venues run theirs
+        int mode = CUE_NONE;
+        if (strstr(low, "intro"))
+            mode = CUE_INTRO;
+        else if (strstr(low, "prechorus") || strstr(low, "build") || strstr(low, "rise"))
+            mode = CUE_STROBE_SLOW;
+        else if (strstr(low, "chorus") || strstr(low, "refrain") || strstr(low, "hook"))
+            mode = CUE_CHORUS;
+        else if (strstr(low, "breakdown"))
+            mode = CUE_STOMP;
+        else if (strstr(low, "bridge") || strstr(low, "break") || strstr(low, "interlude") || strstr(low, "quiet"))
+            mode = CUE_SILHOUETTE;
+        else if (strstr(low, "solo"))
+            mode = CUE_SEARCH;
+        else if (strstr(low, "outro") || strstr(low, "ending") || strstr(low, "coda"))
+            mode = CUE_FRENZY;
+        else if (strstr(low, "verse") || strstr(low, "riff") || strstr(low, "main"))
+            mode = CUE_VERSE;
+        else
+            mode = big ? CUE_WARM : CUE_COOL;
+        G.auto_mode = mode;
+        G.auto_t = G.t;
         static const int cool[] = {1, 3, 4}, warm[] = {0, 2, 5};
         G.section_pal = (big ? warm : cool)[h % 3];
         if (strstr(low, "chorus") && G.rock >= 0.5f) {
@@ -726,9 +750,9 @@ static void draw_rig(double beat, float pulse)
 // and Star Power. They swing in from nothing and fade out the same way
 static void draw_lasers(double beat, float pulse)
 {
-    bool cued = G.chart->cue_count && G.cue_mode != CUE_NONE;
-    bool on = cued ? G.cue_mode == CUE_SEARCH || G.cue_mode == CUE_FRENZY || G.cue_mode == CUE_BRE || G.sp_active
-                   : (G.big_section && G.rock >= 0.5f) || G.sp_active;
+    int sm = G.show_mode;
+    bool on = sm != CUE_NONE ? sm == CUE_SEARCH || sm == CUE_FRENZY || sm == CUE_BRE || sm == CUE_CHORUS || G.sp_active
+                             : (G.big_section && G.rock >= 0.5f) || G.sp_active;
     G.laser += ((on ? 1 : 0) - G.laser) * ease(0.05f);
     if (G.laser < 0.02f || cfg.light_fx || !G.marks)
         return;
@@ -1045,16 +1069,32 @@ static void draw_stage(void)
     float lvl = (hot ? 0.64f : 0.5f) + 0.07f * pulse * (0.3f + energy);
     float t = (float)G.t;
     run_cues();
-    if (G.chart->cue_count && G.cue_mode != CUE_NONE) {
+    // the look: the chart's own light show's, or the one its section's name calls for
+    bool cued = G.chart->cue_count > 0;
+    int mode = cued ? G.cue_mode : named && G.t > 0 && G.t < G.last_note_end ? G.auto_mode : CUE_NONE;
+    double mode_t = cued ? G.cue_t : G.auto_t;
+    int mstep = cued ? G.cue_step : (int)floor((beat - chart_quarters(G.chart, G.auto_t)) / 8);
+    // a chorus slams in: its first bar stomps
+    if (!cued && mode == CUE_CHORUS && beat - chart_quarters(G.chart, G.auto_t) < 4)
+        mode = CUE_STOMP;
+    if (!cued && mode == CUE_STROBE_SLOW) {
+        // a build: the verse's look till its last bar, then the strobes into what comes next
+        const Chart * c = G.chart;
+        double next = G.section + 1 < c->section_count ? chart_quarters(c, c->sections[G.section + 1].time / 1e6) : 1e9;
+        if (beat < next - 4)
+            mode = CUE_VERSE;
+    }
+    G.show_mode = mode;
+    if (mode != CUE_NONE) {
         // the chart's own show: the look its lighting cue asks for, stepped on by its keyframes
-        int st = ((G.cue_step % 3) + 3) % 3;
-        float since = (float)(G.t - G.cue_t);
-        switch (G.cue_mode) {
+        int st = ((mstep % 3) + 3) % 3;
+        float since = (float)(G.t - mode_t);
+        switch (mode) {
         case CUE_VERSE: case CUE_INTRO:
             pal = cool[st];
             inten = 0.8f;
             gl = 0.3f + 0.4f * G.band_loud + 0.25f * pulse;
-            lvl = G.cue_mode == CUE_INTRO ? 0.38f : 0.5f;
+            lvl = mode == CUE_INTRO ? 0.38f : 0.5f;
             break;
         case CUE_CHORUS:
             pal = warm[st];
@@ -1062,7 +1102,7 @@ static void draw_stage(void)
             lvl = 0.64f + 0.08f * pulse;
             break;
         case CUE_COOL: case CUE_WARM:
-            pal = (G.cue_mode == CUE_COOL ? cool : warm)[st];
+            pal = (mode == CUE_COOL ? cool : warm)[st];
             break;
         case CUE_HARMONY:
             pal = cool[st];
@@ -1088,7 +1128,7 @@ static void draw_stage(void)
             break;
         case CUE_SILHOUETTE: case CUE_SILHOUETTE_SPOT:
             // the stage in the dark, the lights blazing behind: the band in black against them
-            pal = G.cue_mode == CUE_SILHOUETTE_SPOT ? warm[st] : cool[st];
+            pal = mode == CUE_SILHOUETTE_SPOT ? warm[st] : cool[st];
             gl = 1.1f;
             lvl = 0.24f;
             break;
@@ -1102,15 +1142,15 @@ static void draw_stage(void)
             lvl = 0.3f;
             break;
         case CUE_BLACK_SLOW: case CUE_BLACK_FAST: case CUE_BLACK_SPOT: {
-            float d = clamp01(since / (G.cue_mode == CUE_BLACK_SLOW ? 1.2f : 0.08f));
+            float d = clamp01(since / (mode == CUE_BLACK_SLOW ? 1.2f : 0.08f));
             gl *= 1 - 0.9f * d;
-            lvl *= 1 - (G.cue_mode == CUE_BLACK_SPOT ? 0.5f : 0.62f) * d;
+            lvl *= 1 - (mode == CUE_BLACK_SPOT ? 0.5f : 0.62f) * d;
             break;
         }
         default:
             break;
         }
-        if (G.cue_mode != CUE_HARMONY) {
+        if (mode != CUE_HARMONY) {
             memcpy(key, palettes[pal][0], sizeof(key));
             memcpy(wash, palettes[pal][1], sizeof(wash));
         }
@@ -1247,6 +1287,8 @@ static void draw_stage(void)
             // a song played well goes out with the jets and the lights hit white
             G.pyro_t = G.t;
             G.strobe_t = G.t;
+            G.flare_t = G.t;
+            G.flare_len = 0.8;
             G.kick = 0.6f;
             G.cheer = 1;
         }
@@ -2064,7 +2106,8 @@ static void reset_play(void)
     G.cue_i = 0;
     G.cue_mode = CUE_NONE;
     G.cue_step = 0;
-    G.cue_t = G.flare_t = -100;
+    G.cue_t = G.flare_t = G.auto_t = -100;
+    G.auto_mode = G.show_mode = CUE_NONE;
     G.held = 0;
     G.touch_count = 0;
     double first = p->note_count ? p->notes[0].time / 1e6 : 0;
@@ -5559,8 +5602,8 @@ void game_draw(void)
         if (since >= 0 && since < 0.36 && fmod(since, 0.12) < 0.05 && cfg.flashes == 0)
             gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(255, 250, 240, 90));
         // the chart's strobes: on the quarters, or the sixteenths; gentler with Flashes reduced, none with them off
-        int m = G.cue_mode;
-        if (G.chart->cue_count && (m == CUE_STROBE_SLOW || m == CUE_STROBE_FAST || m == CUE_BRE) && cfg.flashes < 2 &&
+        int m = G.show_mode;
+        if ((m == CUE_STROBE_SLOW || m == CUE_STROBE_FAST || m == CUE_BRE) && cfg.flashes < 2 &&
             G.t > 0 && !G.sp_active) {
             double q = chart_quarters(G.chart, G.t) * (m == CUE_STROBE_SLOW || cfg.flashes ? 1 : 4);
             if (q - floor(q) < 0.22)

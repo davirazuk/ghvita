@@ -450,3 +450,6 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   frenzy, silhouettes(_spot), searchlights/sweep (lasers), strobe slow/fast (quarters/16ths, Flashes setting
   respected), blackout slow/fast/spot (venue to ~40%, band readable), flare (white flash), bonusfx (pyro), bre.
   SP and the failing red still win. Charts with no cues keep the section-based show
+- v234: charts without cues run the same looks from their section names (intro, verse/riff, prechorus/build ->
+  verse then strobes on its last bar, chorus -> one stomp bar then chorus + lasers, breakdown stomp, bridge/break
+  silhouettes, solo searchlights, outro frenzy, else warm/cool by big). The song's end adds a white flare.
