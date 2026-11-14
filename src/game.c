@@ -15,7 +15,11 @@
 
 // seconds early or late a note can still be hit: Normal is Warriors of Rock-ish lenient; Options can widen or narrow it
 // the hit window either way: Normal 85 ms, Strict 70, Lenient 110, Pro 55
-#define WINDOW (cfg.hit_window == 1 ? 0.070 : cfg.hit_window == 2 ? 0.110 : cfg.hit_window == 3 ? 0.055 : 0.085)
+#define WINDOW (cfg.hit_window == 1 ? 0.070 : cfg.hit_window == 2 ? 0.110 : cfg.hit_window == 3 ? 0.055 : cfg.hit_window == 4 ? 0.100 : 0.085)
+// Guitar Hero 3's own (read from GH3.exe): 116 ms early, 100 late, hammer-ons and pull-offs 83 either way. Every window
+// ends late at half the way to the next note, as in GH: a late press on a fast run is that run's next note, not this one
+#define WIN_EARLY (cfg.hit_window == 4 ? 0.116 : WINDOW)
+#define HOPO_WIN (cfg.hit_window == 4 ? 0.083 : WINDOW)
 #define CHORD_SPREAD 0.08               // a chord's keys pressed this close together count as one hit
 #define RATE_PERFECT 0.025              // a hit this close to its note is Perfect, then Great, then Good
 #define RATE_GREAT 0.050
@@ -204,6 +208,35 @@ static struct {
     float song_speed;                   // the music's speed: practice's, or the Options' Song speed
 } G;
 
+// Guitar Flash's own rules, as its HTML5 engine has them (guitarflash.com's mainGame.js, read 2026-11-13). Its clock
+// runs in 24ths of a second. A note comes on screen Y seconds early at the top and falls faster every tick: its speed
+// grows by Z each 24th (y += speed; speed += Z, y kept to 0.05). Past y 270 it can be taken, past 350 it's missed: for
+// Easy/Medium that's 125 ms early to 83 late, Hard 125/125, Expert 167/125. A key press arms its fret for two frames of
+// a 24 fps animation (83 ms): a note in the zone meanwhile is taken, and a press that takes nothing is an error (the
+// combo goes, the meter drops as for a miss). Each lane of a chord is its own note. A single note takes the frets held
+// below it with it (anchoring); none above. The meter: 60 steps from 29, +1 a hit, -2 a miss or error, out at 0. The
+// multiplier steps every 10 hits to x4 (x8 in Star Power), and Star Power lasts 7.4 s on half a bar, 11.5 on three
+// quarters, 15.6 full, whatever the tempo
+#define GF_TICK (1.0 / 24)
+#define GF_ZONE 270.0f
+#define GF_GONE 350.0f
+#define GF_YN 200
+static struct {
+    bool on;                            // its rules (Note style Flash and Flash rules on, a fretted part)
+    bool look;                          // its note motion (Note style Flash, a fretted part)
+    bool step;                          // drawn in its 24 steps a second
+    int diff;
+    float Y, Z, y[GF_YN], y_hit;        // seconds on screen, speed added a tick, y after n ticks, y at the note's time
+    double arm[6];                      // when each fret was pressed, while it's armed
+    bool armed[6];
+    float sp_rate;                      // Star Power used a second
+    double last_t;
+    float tz[64], tsy[64];              // this frame: the highway's z against the screen height of its middle
+    int tn;
+} GF;
+static void gf_setup(void);
+static void gf_flags(void);
+
 static struct {
     bool on;
     double from, to;
@@ -295,7 +328,7 @@ static float lane_x(int lane)
 
 static int multiplier(void)
 {
-    int max = G.part_id == PART_BASS ? 6 : 4;
+    int max = G.part_id == PART_BASS && !GF.on ? 6 : 4;
     int m = 1 + G.streak / 10;
     if (m > max)
         m = max;
@@ -1518,13 +1551,16 @@ static void setup_camera(void)
     G.cam_flash = cfg.gem_style == 1 && cfg.camera == 0;
     const float * eye = eyes[cfg.camera], at[3] = {0, 0, ats[cfg.camera]}, up[3] = {0, 1, 0};
     // Flash's own: low and close, the highway wide across the screen and the targets near its foot
-    static const float flash_eye[3] = {0, 3.35f, -4.6f};
-    float fat[3] = {0, 0, 4.4f};
+    // its highway narrows to a fifth across its length (lanes 18 px apart at the top, 102 at the targets): low and close
+    static const float flash_eye[3] = {0, 2.3f, -2.4f};
+    float fat[3] = {0, 0, 4.2f};
+    float fov = 40;
     if (G.cam_flash) {
         eye = flash_eye;
         memcpy((float *)at, fat, sizeof(fat));
+        fov = 64;
     }
-    mat_perspective(G.proj, G.cam_flash ? 46 : 40, (float)SCREEN_W / SCREEN_H, 0.5f, 60);
+    mat_perspective(G.proj, fov, (float)SCREEN_W / SCREEN_H, 0.5f, 60);
     mat_lookat(G.view, eye, at, up);
     // the highway sits a little low on the screen, as in the games
     G.right[0] = G.view[0];
@@ -1802,7 +1838,9 @@ static void reset_play(void)
         G.press_t[i] = -100;
     G.act_t = -100;
     G.sp = 0;
-    G.rock = G.needle = 0.5f;
+    gf_setup();
+    gf_flags();
+    G.rock = G.needle = GF.on ? 29 / 60.0f : 0.5f;     // Flash's meter starts at 29 of its 60
     G.sp_active = G.sp_ready_told = false;
     G.sp_last_q = -1;
     G.failed = G.done = G.paused = false;
@@ -1854,7 +1892,7 @@ static void reset_play(void)
     G.held = 0;
     G.touch_count = 0;
     double first = p->note_count ? p->notes[0].time / 1e6 : 0;
-    G.lead_in = Z_FAR / G.speed + 0.6 - first;
+    G.lead_in = (GF.look ? GF.Y : Z_FAR / G.speed) + 0.6 - first;
     if (G.lead_in < 1.2)
         G.lead_in = 1.2;
     G.t = -G.lead_in;
@@ -2296,6 +2334,100 @@ static void set_crowd(void)
     G.crowd_voice = sound_play(res.snd[mood], cfg.crowd_vol * 0.04f, true);
 }
 
+// Flash's numbers for a difficulty (its levels d c b a are Easy to Expert)
+static void gf_setup(void)
+{
+    static const float Ys[4] = {1.666667f, 1.666667f, 1.9583f, 2.25f}, Zs[4] = {0.36f, 0.36f, 0.26f, 0.2f};
+    int d = G.diff < 0 ? 0 : G.diff > 3 ? 3 : G.diff;
+    GF.diff = d;
+    GF.Y = Ys[d];
+    GF.Z = Zs[d];
+    float speed = GF.Z, y = 0;
+    for (int n = 0; n < GF_YN; n++) {
+        speed += GF.Z;
+        y += speed;
+        float j = floorf(y * 10) / 10;  // its fixFlash: y kept to 0.05
+        y = y - j > 0.05f ? j + 0.05f : j;
+        GF.y[n] = y;
+    }
+    GF.y_hit = GF.y[(int)lrintf(GF.Y * 24)];
+    for (int l = 0; l < 6; l++)
+        GF.armed[l] = false;
+    GF.sp_rate = 0;
+    GF.last_t = G.t;
+}
+
+static void gf_flags(void)
+{
+    bool frets = !G.drums && !G.vocal;
+    GF.look = cfg.gem_style == 1 && frets;
+    GF.on = GF.look && cfg.flash_rules && !battle.on;
+    GF.step = !cfg.flash_motion;
+}
+
+// ticks since a note at time nt came on screen, at time t: on its clock (24ths, rounded) or smooth
+static double gf_ticks(double nt, double t, bool step)
+{
+    double start = nt - GF.Y;
+    if (step)
+        return floor((floor(t * 24 + 0.5) / 24 - start) * 24 + 0.5);
+    return (t - start) * 24;
+}
+
+static float gf_y(double n)
+{
+    if (n < 0)
+        return -1;
+    int i = (int)n;
+    if (i >= GF_YN - 1)
+        return GF.y[GF_YN - 1];
+    return GF.y[i] + (GF.y[i + 1] - GF.y[i]) * (float)(n - i);
+}
+
+// this frame's highway, by height on the screen: Flash's notes go down the screen as its y says
+static void gf_frame(void)
+{
+    GF.tn = 0;
+    for (int k = 0; k < 64; k++) {
+        float z = -2.5f + (Z_FAR + 2.5f) * k / 63, sx;
+        project(0, 0, z, &sx, &GF.tsy[k]);
+        GF.tz[k] = z;
+    }
+    GF.tn = 64;
+}
+
+// where on the highway something due at time `when` is drawn now
+static float time_z(double when)
+{
+    if (!GF.look || !GF.tn)
+        return (float)((when - G.t) * G.speed);
+    double n = gf_ticks(when, G.t, GF.step);
+    if (n < 0)
+        return Z_FAR + 1 + (float)(-n) * 0.1f;  // not on screen yet
+    float f = gf_y(n) / GF.y_hit;               // 0 at the top, 1 on the targets
+    float far = GF.tsy[GF.tn - 1], line;
+    // the targets' height: z 0 in the table
+    float sx;
+    project(0, 0, 0, &sx, &line);
+    float want = far + (line - far) * f;
+    // the screen height falls as z grows
+    for (int k = GF.tn - 1; k > 0; k--)
+        if (GF.tsy[k - 1] >= want && GF.tsy[k] <= want) {
+            float d = GF.tsy[k - 1] - GF.tsy[k];
+            float u = d > 1e-4f ? (GF.tsy[k - 1] - want) / d : 0;
+            return GF.tz[k - 1] + (GF.tz[k] - GF.tz[k - 1]) * u;
+        }
+    return want > GF.tsy[0] ? GF.tz[0] : Z_FAR;
+}
+
+// is a note at time nt on the highway yet
+static bool on_highway(double nt)
+{
+    if (GF.look)
+        return nt - G.t <= GF.Y + GF_TICK;
+    return (nt - G.t) * G.speed <= Z_FAR;
+}
+
 static void rock_change(float d)
 {
     if (d < 0 && cfg.hard_rock)
@@ -2375,7 +2507,10 @@ static void miss_note(int i)
     G.miss_pulse = 1;
     static const float loss[4] = {0.025f, 0.03f, 0.04f, 0.05f};
     // drums have many more gems to the bar, and a tremolo a dozen to the second
-    rock_change(-loss[G.diff] * (G.roll && G.roll[i] ? 0.25f : G.drums ? 0.5f : 1));
+    if (GF.on)
+        rock_change(-2 / 60.0f);
+    else
+        rock_change(-loss[G.diff] * (G.roll && G.roll[i] ? 0.25f : G.drums ? 0.5f : 1));
     if (G.phrase[i] >= 0 && G.phrase_ok[G.phrase[i]]) {
         G.phrase_ok[G.phrase[i]] = false;
     }
@@ -2434,7 +2569,7 @@ static void hit_note(int i)
         G.cheer = 1;
         sound_play(res.snd[SND_CHEER1 + rand() % 3], cfg.crowd_vol * 0.08f, false);
     }
-    rock_change(0.018f);
+    rock_change(GF.on ? 1 / 60.0f : 0.018f);
     for (int l = 0; l < 6 && struck; l++)
         if (n->frets & (1 << l))
             G.flame_t[l] = G.t;
@@ -2604,6 +2739,22 @@ static void pad_sound(int lane, const Note * n, float volume)
     sound_play(res.snd[snd + turn++ % takes], volume, false);
 }
 
+// how late note i can still be hit: the window, but no further than halfway to the next note (a chord's notes are one;
+// a tremolo's and drums' gems keep the whole window, their own rules see to them)
+static double win_late(int i)
+{
+    const Part * p = G.part;
+    double w = WINDOW, nt = p->notes[i].time;
+    if (G.drums || (G.roll && G.roll[i]))
+        return w;
+    for (int k = i + 1; k < p->note_count; k++)
+        if (p->notes[k].time > nt) {
+            double half = (p->notes[k].time - nt) / 2e6;
+            return half < 0.035 ? (w < 0.035 ? w : 0.035) : half < w ? half : w;
+        }
+    return w;
+}
+
 // the note a press plays, if there's one in reach
 static bool press_note(int lane)
 {
@@ -2612,9 +2763,9 @@ static bool press_note(int lane)
     for (int i = G.first; i < p->note_count; i++) {
         const Note * n = &p->notes[i];
         double nt = n->time / 1e6;
-        if (nt > G.t + WINDOW)
+        if (nt > G.t + WIN_EARLY)
             break;
-        if (G.state[i] != PENDING || nt < G.t - WINDOW || !(n->frets & bit) || (G.got[i] & bit))
+        if (G.state[i] != PENDING || nt < G.t - win_late(i) || !(n->frets & bit) || (G.got[i] & bit))
             continue;
         // on a fast run a hit nearer the next gem on this pad is that gem: the one skipped goes as the miss it was, not
         // one further down the run, and the flame and the sound land on what was played
@@ -2717,9 +2868,9 @@ static void pull_off(void)
     for (int i = G.first; i < p->note_count; i++) {
         const Note * n = &p->notes[i];
         double nt = n->time / 1e6;
-        if (nt > G.t + WINDOW)
+        if (nt > G.t + HOPO_WIN)
             return;
-        if (G.state[i] != PENDING || nt < G.t - WINDOW)
+        if (G.state[i] != PENDING || nt < G.t - fmin(HOPO_WIN, win_late(i)))
             continue;
         if (n->frets & FRET_OPEN)
             return;
@@ -2772,6 +2923,11 @@ static void activate_sp(void)
     if (G.sp_active || G.sp < 0.5f)
         return;
     G.sp_active = true;
+    if (GF.on) {
+        // Flash's Star Power lasts by the clock: 7.4 s on half a bar, 11.5 on three quarters, 15.6 on a full one
+        float s = G.sp, secs = s <= 0.75f ? 7.375f + (s - 0.5f) / 0.25f * 4.0833f : 11.4583f + (s - 0.75f) / 0.25f * 4.125f;
+        GF.sp_rate = s / secs;
+    }
     G.kick = 1;
     G.sp_on_t = G.t;
     G.sp_last_q = chart_quarters(G.chart, G.t);
@@ -2800,7 +2956,7 @@ static void anchored_note(void)
         return;
     const Note * n = &p->notes[i], * prev = &p->notes[i - 1];
     double nt = n->time / 1e6;
-    if (G.t < nt || G.t > nt + WINDOW || (n->frets & FRET_OPEN) || G.state[i - 1] != HIT)
+    if (G.t < nt || G.t > nt + fmin(HOPO_WIN, win_late(i)) || (n->frets & FRET_OPEN) || G.state[i - 1] != HIT)
         return;
     // a finger must have moved since the note before (pressed for it, or lifted after it): frets held through
     // the song never chain a run on their own, however early the hand let go of the last chord
@@ -2820,6 +2976,108 @@ static void anchored_note(void)
         if ((n->frets & (1 << l)) && prev->frets == n->frets && G.press_t[l] <= prev->time / 1e6 + WINDOW * 0.5)
             return;
     hit_note(i);
+}
+
+static void solo_ends(void)
+{
+    const Part * p = G.part;
+    for (int k = 0; k < p->solo_count; k++) {
+        double end = p->solos[k].end / 1e6;
+        if (G.solo_index < k && G.t >= end) {
+            G.solo_index = k;
+            int total = 0;
+            for (int i = 0; i < p->note_count; i++)
+                total += G.solo[i] == k;
+            if (total > 0) {
+                int pct = G.solo_hit[k] * 100 / total;
+                char t[48];
+                if (pct >= 90)
+                    sound_play(res.snd[SND_CHEER1 + rand() % 3], cfg.crowd_vol * 0.08f, false);
+                if (pct == 100)
+                    snprintf(t, sizeof(t), "PERFECT SOLO! +%d", G.solo_hit[k] * 100);
+                else
+                    snprintf(t, sizeof(t), "%d%% SOLO  +%d", pct, pct >= 50 ? G.solo_hit[k] * 50 : 0);
+                G.score += pct == 100 ? G.solo_hit[k] * 100 : pct >= 50 ? G.solo_hit[k] * 50 : 0;
+                popup(t);
+            }
+        }
+    }
+}
+
+// a press that took nothing: Flash's error, a miss of its own
+static void gf_error(void)
+{
+    G.overhits++;
+    break_streak();
+    rock_change(-2 / 60.0f);
+    G.miss_flash = 0.7f;
+    if (!cfg.no_miss_sound)
+        sound_play(res.snd[SND_OVERSTRUM1 + rand() % 4], 0.5f, false);
+}
+
+// Guitar Flash's judging (see GF): presses arm frets, notes in the zone take them, each tick of its clock
+static void gf_judge(uint32_t pressed_lanes)
+{
+    const Part * p = G.part;
+    if (pressed_lanes)
+        G.act_t = G.t;
+    for (int l = 0; l < 6; l++)
+        if (pressed_lanes & (1 << l)) {
+            G.press_t[l] = G.t;
+            GF.arm[l] = G.t;
+            GF.armed[l] = true;
+        }
+    for (int i = G.first; i < p->note_count; i++) {
+        const Note * n = &p->notes[i];
+        double nt = n->time / 1e6;
+        float y = gf_y(gf_ticks(nt, G.t, true));
+        if (y <= GF_ZONE)
+            break;                      // this one and all after it are still above the zone
+        if (G.state[i] != PENDING)
+            continue;
+        bool single = __builtin_popcount(n->frets) == 1;
+        for (int l = 0; l < 6; l++) {
+            uint8_t bit = l == LANE_OPEN ? FRET_OPEN : 1 << l;
+            if (!(n->frets & bit) || (G.got[i] & bit) || !GF.armed[l])
+                continue;
+            G.got[i] |= bit;
+            GF.armed[l] = false;
+            // a single note takes the frets held below it along (anchoring), without an error
+            for (int k = 0; single && l != LANE_OPEN && k < l; k++)
+                GF.armed[k] = false;
+        }
+        if (G.got[i] == n->frets) {
+            hit_note(i);
+            double off = G.t - nt;
+            G.hit_log[G.hit_log_n++ % HIT_LOG] = (float)off;
+            G.off_sum += off;
+            G.off_sq += off * off;
+            if (off < -0.03) G.early++; else if (off > 0.03) G.late++; else G.on_time++;
+            G.off_n++;
+        }
+    }
+    // a press whose two frames ran out with nothing taken
+    for (int l = 0; l < 6; l++)
+        if (GF.armed[l] && G.t - GF.arm[l] >= 2 * GF_TICK - 1e-6) {
+            GF.armed[l] = false;
+#ifndef __vita__
+            if (getenv("GHV_MISSLOG"))
+                plat_log("GFERR t=%.3f lane=%d armed_at=%.3f held=%02x", G.t, l, GF.arm[l], G.held);
+#endif
+            if (!G.autoplay)
+                gf_error();
+        }
+    // past the zone: missed
+    while (G.first < p->note_count) {
+        int i = G.first;
+        if (G.state[i] == PENDING) {
+            if (gf_y(gf_ticks(p->notes[i].time / 1e6, G.t, true)) <= GF_GONE)
+                break;
+            miss_note(i);
+        }
+        G.first++;
+    }
+    solo_ends();
 }
 
 static void judge(uint32_t pressed_lanes, uint32_t let_go)
@@ -2852,7 +3110,7 @@ static void judge(uint32_t pressed_lanes, uint32_t let_go)
         int i = G.first;
         double nt = p->notes[i].time / 1e6;
         if (G.state[i] == PENDING) {
-            if (G.t <= nt + WINDOW)
+            if (G.t <= nt + win_late(i))
                 break;
             if (G.roll && G.roll[i] && run_going(i))
                 hit_note(i);
@@ -2872,28 +3130,7 @@ static void judge(uint32_t pressed_lanes, uint32_t let_go)
             G.cheer = 1;
         G.free_hits = 0;
     }
-    // a solo's end
-    for (int k = 0; k < p->solo_count; k++) {
-        double end = p->solos[k].end / 1e6;
-        if (G.solo_index < k && G.t >= end) {
-            G.solo_index = k;
-            int total = 0;
-            for (int i = 0; i < p->note_count; i++)
-                total += G.solo[i] == k;
-            if (total > 0) {
-                int pct = G.solo_hit[k] * 100 / total;
-                char t[48];
-                if (pct >= 90)
-                    sound_play(res.snd[SND_CHEER1 + rand() % 3], cfg.crowd_vol * 0.08f, false);
-                if (pct == 100)
-                    snprintf(t, sizeof(t), "PERFECT SOLO! +%d", G.solo_hit[k] * 100);
-                else
-                    snprintf(t, sizeof(t), "%d%% SOLO  +%d", pct, pct >= 50 ? G.solo_hit[k] * 50 : 0);
-                G.score += pct == 100 ? G.solo_hit[k] * 100 : pct >= 50 ? G.solo_hit[k] * 50 : 0;
-                popup(t);
-            }
-        }
-    }
+    solo_ends();
 }
 
 static void update_sustains(void)
@@ -3236,13 +3473,25 @@ int game_update(const Pad * pad, uint32_t pressed)
 
     if (G.sing)
         update_vocals();
+    gf_flags();
     if (!G.vocal) {
-        judge(lanes_pressed, let_go);
+        if (GF.on)
+            gf_judge(lanes_pressed);
+        else
+            judge(lanes_pressed, let_go);
         update_sustains();
     }
 
-    // Star Power drains a meter in 32 quarter notes
-    if (G.sp_active) {
+    // Star Power drains a meter in 32 quarter notes (Flash's by the clock)
+    if (G.sp_active && GF.on) {
+        G.sp -= GF.sp_rate * (float)fmax(0, G.t - GF.last_t);
+        G.sp_last_q = chart_quarters(G.chart, G.t);
+        if (G.sp <= 0) {
+            G.sp = 0;
+            G.sp_active = false;
+            sound_play(res.snd[SND_SP_RELEASE], 0.7f, false);
+        }
+    } else if (G.sp_active) {
         double q = chart_quarters(G.chart, G.t);
         if (q > G.sp_last_q)
             G.sp -= (float)(q - G.sp_last_q) * SP_PER_QUARTER;
@@ -3253,6 +3502,7 @@ int game_update(const Pad * pad, uint32_t pressed)
             sound_play(res.snd[SND_SP_RELEASE], 0.7f, false);
         }
     }
+    GF.last_t = G.t;
     G.miss_flash *= 0.9f;
     for (int i = 0; i < SPARKS; i++)
         if (G.spark[i].life > 0) {
@@ -3377,7 +3627,7 @@ static void draw_highway(void)
             hi = mid;
     }
     for (int i = lo; i < c->beat_count; i++) {
-        float z = (float)((c->beats[i].time / 1e6 - t) * G.speed);
+        float z = time_z(c->beats[i].time / 1e6);
         if (z > Z_FAR)
             break;
         bool measure = c->beats[i].kind == 0;
@@ -3433,12 +3683,12 @@ static void draw_sustains(void)
     float t = (float)G.t;
     for (int i = G.first > 8 ? G.first - 8 : 0; i < p->note_count; i++) {
         const Note * n = &p->notes[i];
-        float z_start = (float)((n->time / 1e6 - t) * G.speed);
+        float z_start = time_z(n->time / 1e6);
         if (z_start > Z_FAR)
             break;
         if (!n->len)
             continue;
-        float z_end = (float)(((n->time + (double)n->len) / 1e6 - t) * G.speed);
+        float z_end = time_z((n->time + (double)n->len) / 1e6);
         if (z_end < 0)
             continue;
         bool active = false;
@@ -3753,12 +4003,11 @@ static void flash_targets(void)
 static void draw_flash_notes(void)
 {
     const Part * p = G.part;
-    float t = (float)G.t;
     gfx_2d();
     gfx_blend(BLEND_ALPHA);
     flash_targets();
     int last = G.first;
-    while (last < p->note_count && (p->notes[last].time / 1e6 - t) * G.speed <= Z_FAR)
+    while (last < p->note_count && on_highway(p->notes[last].time / 1e6))
         last++;
     int start = G.first > 16 ? G.first - 16 : 0;
     static const float fs[3] = {0.9f, 1, 1.14f};
@@ -3766,10 +4015,10 @@ static void draw_flash_notes(void)
         const Note * n = &p->notes[i];
         if (G.state[i] == HIT)
             continue;
-        float z = (float)((n->time / 1e6 - t) * G.speed);
-        if (z < Z_NEAR + 0.3f)
+        float z = time_z(n->time / 1e6);
+        if (z < Z_NEAR + 0.3f || z > Z_FAR)
             continue;
-        float a = fade(z);
+        float a = GF.look ? 1 : fade(z);       // Flash's notes come in whole at the top
         if (G.state[i] == MISSED)
             a *= 0.5f;
         else if (cfg.vanish || (battle.on && G.t < battle.blackout_until))
@@ -3778,7 +4027,8 @@ static void draw_flash_notes(void)
             a *= 0.15f;
         if (a <= 0.01f)
             continue;
-        int kind = n->flags & NOTE_TAP ? 2 : n->flags & NOTE_HOPO ? 1 : 0;
+        // Flash has no hammer-ons: under its rules every note looks (and plays) the same
+        int kind = GF.on ? 0 : n->flags & NOTE_TAP ? 2 : n->flags & NOTE_HOPO ? 1 : 0;
         bool star = G.phrase[i] >= 0 && G.phrase_ok[G.phrase[i]];
         if (n->frets & FRET_OPEN) {
             // an open note: a bar across the board, white-rimmed purple
@@ -4900,6 +5150,11 @@ void game_draw(void)
         static float shook[16];
         proj_now = battle_proj(shook) ? shook : G.proj;
         gfx_3d(proj_now, G.view);
+        gf_flags();
+        if (GF.look)
+            gf_frame();
+        else
+            GF.tn = 0;
         draw_highway();
         if (G.roll_count || G.gap_count)
             draw_zones();

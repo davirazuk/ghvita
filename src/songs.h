@@ -96,7 +96,7 @@ typedef struct {
     bool metronome;         // practice ticks along with the beat
     int song_speed;         // the song's speed in %, outside practice (below 100 the run isn't saved)
     bool light_fx;          // the lighter look: no ring, glitter, smoke, backlight or crowd flashes (for a steady frame rate)
-    int hit_window;         // 0 normal (85 ms), 1 strict (70), 2 lenient (110), 3 pro (55)
+    int hit_window;         // 0 normal (85 ms), 1 strict (70), 2 lenient (110), 3 pro (55), 4 GH3 (116 early, 100 late)
     int rival;              // battle: the rival's skill, 0 easy 1 normal 2 hard 3 brutal
     bool vanish;            // notes vanish before they reach the strikeline
     bool no_miss_sound;
@@ -131,6 +131,8 @@ typedef struct {
     int hw_length;          // the highway's far end: 0 short, 1 normal, 2 long
     bool sudden_death;      // one missed note fails the song
     bool hard_rock;         // the rock meter falls twice as fast
+    int flash_rules;        // with Note style Flash: 1 Guitar Flash's own rules (its timing, misses, meter), 0 World Tour's
+    int flash_motion;       // Flash's notes: 0 in its 24 steps a second, speeding up as they come, 1 smooth
     int last_part, last_diff;
     int sort;
     char last_song[256];

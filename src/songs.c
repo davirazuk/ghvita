@@ -793,6 +793,7 @@ void config_defaults(void)
     cfg.frame_rate = 60;
     cfg.hit_ratings = 1;
     cfg.hw_length = 1;
+    cfg.flash_rules = 1;
     snprintf(cfg.highway, sizeof(cfg.highway), "judy");
     snprintf(cfg.venue, sizeof(cfg.venue), "song");
     cfg.tilt = true;
@@ -875,12 +876,16 @@ void config_load(void)
             cfg.sudden_death = n != 0;
         else if (strcmp(k, "hard_rock") == 0)
             cfg.hard_rock = n != 0;
+        else if (strcmp(k, "flash_rules") == 0)
+            cfg.flash_rules = n != 0;
+        else if (strcmp(k, "flash_motion") == 0)
+            cfg.flash_motion = n != 0;
         else if (strcmp(k, "metronome") == 0)
             cfg.metronome = n != 0;
         else if (strcmp(k, "song_speed") == 0)
             cfg.song_speed = n < 50 ? 50 : n > 150 ? 150 : n / 5 * 5;
         else if (strcmp(k, "hit_window") == 0)
-            cfg.hit_window = n < 0 ? 0 : n > 3 ? 3 : n;
+            cfg.hit_window = n < 0 ? 0 : n > 4 ? 4 : n;
         else if (strcmp(k, "rival") == 0)
             cfg.rival = n < 0 ? 0 : n > 3 ? 3 : n;
         else if (strcmp(k, "vanish") == 0)
@@ -1002,6 +1007,7 @@ void config_save(void)
     fprintf(f, "still_camera = %d\nframe_rate = %d\ngem_style = %d\n", cfg.still_camera, cfg.frame_rate, cfg.gem_style);
     fprintf(f, "hud_style = %d\nbackdrop = %d\nhit_ratings = %d\nhw_length = %d\nsudden_death = %d\nhard_rock = %d\n", cfg.hud_style,
             cfg.backdrop, cfg.hit_ratings, cfg.hw_length, cfg.sudden_death, cfg.hard_rock);
+    fprintf(f, "flash_rules = %d\nflash_motion = %d\n", cfg.flash_rules, cfg.flash_motion);
     fclose(f);
     remove(path);
     rename(tmp, path);

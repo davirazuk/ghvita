@@ -208,9 +208,25 @@ void plat_perf_trouble(void)
 
 static bool ime_active;
 
+static bool half_rate;
+static unsigned half_vc;                // the refresh count at the last drawn frame
+
+void plat_half_rate(bool on)
+{
+    if (on && !half_rate)
+        half_vc = sceDisplayGetVcount();
+    half_rate = on;
+}
+
 void plat_swap(void)
 {
     int64_t before = sceKernelGetProcessTimeWide();
+    if (half_rate) {
+        // two refreshes on from the last drawn frame (no more than two waits: a slow frame doesn't fall further behind)
+        for (int k = 0; k < 2 && (int)(sceDisplayGetVcount() - half_vc) < 2; k++)
+            sceDisplayWaitVblankStart();
+        half_vc = sceDisplayGetVcount();
+    }
     vglSwapBuffers(ime_active ? GL_TRUE : GL_FALSE);     // GL_TRUE: the keyboard dialog is drawn too
     int64_t after = sceKernelGetProcessTimeWide();
     if (perf_level == 1) {
@@ -226,7 +242,8 @@ void plat_skip_frame(void)
 {
     // the frame on the screen stays a second vblank
     int64_t before = sceKernelGetProcessTimeWide();
-    sceDisplayWaitVblankStart();
+    if (!half_rate || (int)(sceDisplayGetVcount() - half_vc) < 1)
+        sceDisplayWaitVblankStart();
     int64_t after = sceKernelGetProcessTimeWide();
     if (perf_level == 1) {
         sceKernelPowerTick(SCE_KERNEL_POWER_TICK_DEFAULT);

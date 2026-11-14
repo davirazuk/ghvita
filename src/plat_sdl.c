@@ -250,10 +250,35 @@ bool plat_poll(Pad * pad)
 
 static void frame_passed(void);
 
+static bool half_rate;
+static double half_t;                   // when the last frame was drawn
+
+static double now_ms(void)
+{
+    return SDL_GetPerformanceCounter() * 1000.0 / SDL_GetPerformanceFrequency();
+}
+
+// wait till ms after the last drawn frame
+static void wait_until(double ms)
+{
+    double left = half_t + ms - now_ms();
+    if (left > 0 && left < 50)
+        SDL_Delay((Uint32)left);
+}
+
+void plat_half_rate(bool on)
+{
+    if (on && !half_rate)
+        half_t = now_ms();
+    half_rate = on;
+}
+
 void plat_skip_frame(void)
 {
     // a shot asked for now waits for the next frame drawn
-    if (!fixed_clock)
+    if (half_rate && !fixed_clock)
+        wait_until(1000.0 / 60);
+    else if (!fixed_clock)
         SDL_Delay(16);
     frame_passed();
 }
@@ -263,6 +288,10 @@ void plat_swap(void)
     if (pending_shot[0]) {
         plat_screenshot(pending_shot);
         pending_shot[0] = 0;
+    }
+    if (half_rate && !fixed_clock) {
+        wait_until(1000.0 / 30);
+        half_t = now_ms();
     }
     SDL_GL_SwapWindow(window);
     frame_passed();

@@ -4096,18 +4096,18 @@ enum { O_SPEED, O_HIGHWAY, O_VENUE, O_BAND, O_SING, O_SINGDIFF, O_OFFSET, O_LAYO
        O_CAMERA, O_HWALPHA, O_VLIGHT, O_FLASH, O_POPUPS, O_TIMING, O_LIVE, O_VANISH, O_MISSSND, O_REAR, O_BEND, O_COUNTDOWN,
        O_RESET, O_FIVEPADS, O_DOUBLEKICK, O_EASYSUS, O_COUNTIN, O_SCREENS, O_PROGRESS, O_CUPS, O_AUTOREPRESS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, O_CROWDHANDS, O_VIGNETTE, O_LYRICS, O_MENUMUSIC, O_SINGSP, O_SHRINKCHECK, O_GHOST, O_RIVAL, O_WINDOW, O_LIGHTFX, O_SONGSPEED,
        O_FRAMERATE, O_STILLCAM, O_GEMSTYLE, O_PRESET,
-       O_HUDSTYLE, O_BACKDROP, O_RATINGS, O_HWLEN, O_SUDDEN, O_HARDROCK, O_COUNT };
+       O_HUDSTYLE, O_BACKDROP, O_RATINGS, O_HWLEN, O_SUDDEN, O_HARDROCK, O_FLASHRULES, O_FLASHMOTION, O_COUNT };
 
 // the options by subject, L and R between them
 enum { OPT_TABS = 8, OPT_TAB_MAX = 18 };
 static const char * opt_tab_names[OPT_TABS] = {"GAME", "CONTROLS", "HIGHWAY", "STAGE", "SCREEN", "GRAPHICS", "SOUND", "LIBRARY"};
 static const int opt_tabs[OPT_TABS][OPT_TAB_MAX + 1] = {
-    {O_SPEED, O_SONGSPEED, O_OFFSET, O_WINDOW, O_SUDDEN, O_HARDROCK, O_NOFAIL, O_EASYSUS, O_AUTOREPRESS, O_VANISH, O_COUNTDOWN, O_SING, O_SINGDIFF, O_RIVAL, O_RESET, -1},
+    {O_SPEED, O_SONGSPEED, O_OFFSET, O_WINDOW, O_FLASHRULES, O_SUDDEN, O_HARDROCK, O_NOFAIL, O_EASYSUS, O_AUTOREPRESS, O_VANISH, O_COUNTDOWN, O_SING, O_SINGDIFF, O_RIVAL, O_RESET, -1},
     {O_LAYOUT, O_DRUMKEYS, O_FIVEPADS, O_DOUBLEKICK, O_LEFTY, O_TILT, O_REAR, O_SINGSP, -1},
     {O_HIGHWAY, O_HWALPHA, O_CAMERA, O_CUPS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, -1},
     {O_VENUE, O_VLIGHT, O_BAND, O_CROWDHANDS, O_VIGNETTE, O_SCREENS, O_FLASH, -1},
     {O_LYRICS, O_POPUPS, O_PROGRESS, O_TIMING, O_LIVE, O_GHOST, O_LIGHTFX, O_FPS, -1},
-    {O_PRESET, O_FRAMERATE, O_FPS, O_GEMSTYLE, O_HUDSTYLE, O_BACKDROP, O_RATINGS, O_HWLEN, O_STILLCAM, O_LIGHTFX, O_BAND, O_FIRE, O_FLASH, O_CROWDHANDS, O_VIGNETTE, -1},
+    {O_PRESET, O_FRAMERATE, O_FPS, O_GEMSTYLE, O_FLASHMOTION, O_HUDSTYLE, O_BACKDROP, O_RATINGS, O_HWLEN, O_STILLCAM, O_LIGHTFX, O_BAND, O_FIRE, O_FLASH, O_CROWDHANDS, O_VIGNETTE, -1},
     {O_MUSIC, O_SFX, O_CROWD, O_MENUMUSIC, O_COUNTIN, O_DRUMHITS, O_MISSSND, O_BEND, -1},
     {O_SHRINKCHECK, -1},
 };
@@ -4254,6 +4254,8 @@ static void option_text(int i, char * name, char * value, size_t n)
     }
     case O_SUDDEN: strcpy(name, "Sudden death"); snprintf(value, n, "%s", cfg.sudden_death ? "On" : "Off"); break;
     case O_HARDROCK: strcpy(name, "Hard rock meter"); snprintf(value, n, "%s", cfg.hard_rock ? "On" : "Off"); break;
+    case O_FLASHRULES: strcpy(name, "Flash note style plays"); snprintf(value, n, "%s", cfg.flash_rules ? "Like Guitar Flash" : "Like World Tour"); break;
+    case O_FLASHMOTION: strcpy(name, "Flash note motion"); snprintf(value, n, "%s", cfg.flash_motion ? "Smooth" : "Flash's 24 fps"); break;
     case O_PRESET: {
         static const char * const pn[] = {"Full", "Balanced", "Battery", "Custom"};
         strcpy(name, "Graphics preset");
@@ -4265,9 +4267,9 @@ static void option_text(int i, char * name, char * value, size_t n)
         snprintf(value, n, cfg.song_speed < 100 ? "%d%%  (not saved)" : "%d%%", cfg.song_speed);
         break;
     case O_WINDOW: {
-        static const char * const wn[4] = {"Normal", "Strict", "Lenient", "Pro"};
+        static const char * const wn[5] = {"Normal", "Strict", "Lenient", "Pro", "Guitar Hero 3"};
         strcpy(name, "Timing window");
-        snprintf(value, n, "%s", wn[cfg.hit_window % 4]);
+        snprintf(value, n, "%s", wn[cfg.hit_window % 5]);
         break;
     }
     case O_RIVAL: {
@@ -4374,7 +4376,7 @@ static void change_option(int i, int d)
     case O_LIVE: cfg.live_stats = !cfg.live_stats; break;
     case O_GHOST: cfg.no_ghost = !cfg.no_ghost; break;
     case O_RIVAL: cfg.rival = (cfg.rival + d + 4) % 4; break;
-    case O_WINDOW: cfg.hit_window = (cfg.hit_window + d + 4) % 4; break;
+    case O_WINDOW: cfg.hit_window = (cfg.hit_window + d + 5) % 5; break;
     case O_LIGHTFX: cfg.light_fx = !cfg.light_fx; break;
     case O_FRAMERATE: cfg.frame_rate = cfg.frame_rate == 30 ? 60 : 30; break;
     case O_STILLCAM: cfg.still_camera = !cfg.still_camera; break;
@@ -4390,6 +4392,8 @@ static void change_option(int i, int d)
     case O_HWLEN: cfg.hw_length = (cfg.hw_length + d + 3) % 3; break;
     case O_SUDDEN: cfg.sudden_death = !cfg.sudden_death; break;
     case O_HARDROCK: cfg.hard_rock = !cfg.hard_rock; break;
+    case O_FLASHRULES: cfg.flash_rules = !cfg.flash_rules; break;
+    case O_FLASHMOTION: cfg.flash_motion = !cfg.flash_motion; break;
     case O_PRESET: {
         int p = graphics_preset();
         set_graphics_preset(((p > 2 ? (d > 0 ? -1 : 3) : p) + d + 3) % 3);
@@ -4626,7 +4630,7 @@ static void options_screen(void)
         "X counts the songs whose audio isn't shrunk to Opus yet, then X shrinks them, right on the Vita.",
         "GHOST +1200: how far ahead (or behind) your best run on the chart you were at this point.",
         "How good the computer rival is in a battle (Triangle on GET READY).",
-        "How early or late a note can be hit, either way: Normal 85 ms, Strict 70, Lenient 110, Pro 55.",
+        "How early or late a note can be hit: Normal 85 ms, Strict 70, Lenient 110, Pro 55, or GH3's own 116 early / 100 late.",
         "Light drops the hit rings, Star Power glitter, smoke, band backlight, lasers and sparks, for a steadier frame rate.",
         "The song's speed. Below 100% the run isn't saved (scores, medals, the tour); practice has its own speed.",
         "30 fps draws every other frame and saves power; your buttons are still read 60 times a second, so timing stays exact.",
@@ -4639,6 +4643,8 @@ static void options_screen(void)
         "How far up the highway you can see the notes coming. Long gives more time to read fast songs.",
         "One missed note and the song's over. For the brave.",
         "The rock meter falls twice as fast when you miss: keep the crowd with you.",
+        "With Note style Flash, Guitar Flash's rules: its timing per difficulty, every press must take a note, chords note by note.",
+        "Flash's notes move in its own 24 steps a second, speeding up as they come. Smooth draws them every frame.",
     };
     char line[160];
     const char * text = about[opt];
@@ -5592,6 +5598,12 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "Flash note style now plays like Guitar Flash: its timing per difficulty, chords note by note, frets held below a note count.",
+        "In Flash, a press that takes no note is an error (it breaks your streak). Its meter, x4 multiplier and timed Star Power too.",
+        "Flash's notes move like Flash's: 24 steps a second, speeding up as they fall, and a lower, closer camera. Smooth in GRAPHICS.",
+        "GAME, Flash note style plays: Like Guitar Flash or Like World Tour. New timing window: Guitar Hero 3 (116 early, 100 late).",
+        "Late hits are capped at half the way to the next note, as in GH: a fast run no longer eats the next note early.",
+        "Fixed 30 fps: it still drew 60 frames a second. Now it really draws 30 (and reads the buttons 60 times a second).",
         "Downloaded songs sound clean now: their audio was resampled badly (gritty cymbals and voices) and MP3s ran 25 ms late.",
         "Songs you downloaded before: SELECT in the song list, Repair downloaded songs' audio. They download again, scores kept.",
         "Fixed downloads sometimes running twice at once and spoiling each other's files.",
@@ -5895,6 +5907,7 @@ int main(void)
                 plat_keep_awake();
         }
         screen_frames++;
+        plat_half_rate(drawn == S_PLAY && screen == S_PLAY && cfg.frame_rate == 30 && outro_t < 0);
         if (skip_draw) {
             skip_draw = false;
             plat_skip_frame();

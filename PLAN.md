@@ -400,3 +400,18 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   strings or silver bar, thick white edges; notes are flat pucks with a white top and coloured dot (HOPO all white,
   tap dark); targets coloured rings round dark middles, grey button when held; fire 1.3x, doubled, no smoke frames;
   grey glossy x badge on the strikeline; side bars get a shine stripe.
+
+## Guitar Flash's own rules, GH3 windows (2026-11-13, late)
+
+- Read guitarflash.com's HTML5 engine (mainGame.js, deobfuscated locally, nothing copied) for its rules, put in game.c's GF:
+  - clock in 24ths; a note on screen Y s early (1.67/1.96/2.25), falling faster each tick (speed += Z: 0.36/0.26/0.2)
+  - taken between y 270 and 350: Easy/Med -125/+83 ms, Hard -125/+125, Expert -167/+125
+  - a press arms its fret 2 frames (83 ms); unused = error (streak 0, meter -2/60, overhits++). Chords per lane;
+    a single note takes held frets below it. No HOPOs (all notes drawn plain)
+  - meter 60 steps from 29: +1 hit, -2 miss/error; multiplier x4 max (bass too); Star Power by the clock 7.4/11.5/15.6 s
+- `flash_rules` (GAME) and `flash_motion` (GRAPHICS, 24 fps steps or smooth); time_z() maps its y curve to the highway
+- Flash camera lower and wider (eye 2.3/-2.4, fov 64): the highway narrows hard to the top as Flash's does
+- hit_window 4 = GH3 (116 early, 100 late, HOPO 83); every window's late end capped at half the gap to the next note
+- humanbot Expert spread 20: Flash rules 672/687 and 0 errors with no stray presses; slips and bounces give errors
+- 30 fps never worked on the Vita: vglSwapBuffers queues the flip and returns, so only skipped frames waited a vblank and
+  drawn frames still came every refresh. Now paced by sceDisplayGetVcount (drawn = last + 2, read-only frame between)

@@ -36,6 +36,9 @@ bool plat_poll(Pad * pad);
 void plat_swap(void);
 // a frame not drawn (30 fps): its time passes as if it were shown, nothing new goes on the screen
 void plat_skip_frame(void);
+// 30 fps in songs: a drawn frame every second refresh, a frame only read (plat_skip_frame) between. The swap doesn't
+// wait for the screen (it's queued), so the pacing has to be kept by the refresh count, both kinds of frame
+void plat_half_rate(bool on);
 // in songs the Vita's clocks follow the load (plat_swap watches the frame times): trouble elsewhere (the audio
 // decoder falling behind) asks for full speed
 void plat_perf_trouble(void);
