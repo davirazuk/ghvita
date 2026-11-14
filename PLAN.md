@@ -478,3 +478,12 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   percentile of 8 s windows, notes/s; steps 2.2/3.4/4.6/5.6/6.8/8.2, drums -0.8), Song.guessed bit per part + 0x80 done,
   drawn paler; done lazily in the song list, saved by songs_flush() on every go(). Vocals not estimated.
   Pause: progress plate moved under the patch (y 464); hit rating hidden while paused.
+
+## World Tour's own solo HUD (v241, 2026-11-14)
+- User: lamps "flat and shit, worse than ever"; left HUD needed work. Footage crops (lampref Gb7EtSt65xI, 6Eb-bEcOjwk):
+  dome on HUD_RM_solo_bottom (score, green LCD) over HUD_counter_body (streak, orange LCD, frame stretched 172x33);
+  no multiplier on the left (the rail plate has it). Amp + nixie box gone (backup ~/.cache/ghv-work/game.c.preleft).
+  Layout: bar 14,398 186x38; counter 172x33 under it; dome k 0.56 (tubes/glow scaled by ks).
+- Rail: screen-space along the projected rail line (z 0.62..2.25, x -HALF_W+0.01): multi_light_seat strip
+  (1.9 x step wide) + hud_score_light_{0,1,2}{,_green,_purple,_blue} bulbs (GHWT's own 32x32, flipped, 1.05 x 0.82
+  step, 0.36 step out), lit glow 0.55. The capsule lamp_* art and hud_rope are no longer drawn.

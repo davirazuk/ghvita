@@ -5590,6 +5590,8 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "Left HUD laid out as World Tour's: the ROCK dome on the score bar, the note streak counter under it.",
+        "Streak lamps redone with World Tour's own small bulbs on its gold seat, tight against the rail.",
         "Songs whose charter gave no difficulty get one estimated from the chart (paler bars in the song list).",
         "Pause menu: the song progress sits under the patch, and the last hit rating no longer hangs over it.",
         "Streak lamps redone like World Tour's: short domes end to end on a gold strip flush against the rail.",
