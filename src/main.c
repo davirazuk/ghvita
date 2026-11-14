@@ -5590,6 +5590,8 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "Streak lamps: a chunky gold seat on the rail with small glowing bulb tips, as World Tour has them.",
+        "Left HUD: bigger chrome-rimmed ROCK dome, paler score digits, bar sized to match.",
         "Left HUD laid out as World Tour's: the ROCK dome on the score bar, the note streak counter under it.",
         "Streak lamps redone with World Tour's own small bulbs on its gold seat, tight against the rail.",
         "Songs whose charter gave no difficulty get one estimated from the chart (paler bars in the song list).",

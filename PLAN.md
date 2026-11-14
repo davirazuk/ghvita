@@ -487,3 +487,7 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 - Rail: screen-space along the projected rail line (z 0.62..2.25, x -HALF_W+0.01): multi_light_seat strip
   (1.9 x step wide) + hud_score_light_{0,1,2}{,_green,_purple,_blue} bulbs (GHWT's own 32x32, flipped, 1.05 x 0.82
   step, 0.36 step out), lit glow 0.55. The capsule lamp_* art and hud_rope are no longer drawn.
+- v242 (user: "still badish, especially the lamps"): side-by-side with Gb7EtSt65xI at the same scale. Rail: gold
+  seat quad 3.0 x step wide (art's gold is 0.3 of it) at 0.35 step out, bulbs 0.8 x 0.64 step at 0.72 step out (tips
+  on the gold's outer edge), glow 0.7. Left: bar 170x36 at 16,400, counter 158x31, dome k 0.66 (0.79 of the bar as
+  footage), rim lifted by an additive warm pass, score digits tinted + additive pass (pale lime). Backup game.c.v241

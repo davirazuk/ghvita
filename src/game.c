@@ -3951,9 +3951,9 @@ static void draw_rail_meter(void)
     // the seat: a twisted gold strip, wider near you as the perspective has it
     {
         const Sprite * seat = atlas_get(res.hud, "multi_light_seat");
-        float step = len / 5, wa = step * 1.9f, wb = wa * 0.8f;
-        float ax = a[0] - dxl * step * 0.15f + nx * wa * 0.12f, ay = a[1] - dyl * step * 0.15f + ny * wa * 0.12f;
-        float bx = b[0] + dxl * step * 0.15f + nx * wb * 0.12f, by = b[1] + dyl * step * 0.15f + ny * wb * 0.12f;
+        float step = len / 5, wa = step * 3.0f, wb = wa * 0.8f;   // the art's gold is 0.3 of its width
+        float ax = a[0] - dxl * step * 0.45f + nx * step * 0.38f, ay = a[1] - dyl * step * 0.45f + ny * step * 0.38f;
+        float bx = b[0] + dxl * step * 0.45f + nx * step * 0.32f, by = b[1] + dyl * step * 0.45f + ny * step * 0.32f;
         const float p[4][3] = {{bx - nx * wb / 2, by - ny * wb / 2, 0}, {bx + nx * wb / 2, by + ny * wb / 2, 0},
                                {ax + nx * wa / 2, ay + ny * wa / 2, 0}, {ax - nx * wa / 2, ay - ny * wa / 2, 0}};
         const float uv[4][2] = {{seat->u0, seat->v0}, {seat->u1, seat->v0}, {seat->u1, seat->v1}, {seat->u0, seat->v1}};
@@ -3968,16 +3968,16 @@ static void draw_rail_meter(void)
         snprintf(name, sizeof(name), "hud_score_light_%d%s", state, hue);
         const Sprite * s = atlas_get(res.hud, name);
         float f = (i + 0.5f) / 5, step = len / 5 * (1.12f - 0.24f * f);
-        float px = a[0] + (b[0] - a[0]) * f + nx * step * 0.36f, py = a[1] + (b[1] - a[1]) * f + ny * step * 0.36f;
-        float w = step * 1.05f, h = step * 0.82f;
+        float px = a[0] + (b[0] - a[0]) * f + nx * step * 0.72f, py = a[1] + (b[1] - a[1]) * f + ny * step * 0.72f;
+        float w = step * 0.8f, h = step * 0.64f;
         // the art's round end is on its left: flipped, it points out from the rail
         gfx_sprite_uv(s, px - w / 2, py - h / 2, w, h, 1, 0, 0, 1, WHITE);
         if (state == 2) {
             const uint32_t light = G.sp_active ? RGBA(95, 225, 255, 255) : base_m >= 3 ? RGBA(255, 130, 225, 255)
                                  : base_m == 2 ? RGBA(90, 245, 110, 255) : RGBA(255, 196, 70, 255);
             gfx_blend(BLEND_ADD);
-            float r = step * 1.1f;
-            gfx_sprite(atlas_get(res.game, "glow"), px + w * 0.2f - r, py - r, r * 2, r * 2, with_alpha(light, 0.55f));
+            float r = step * 0.95f;
+            gfx_sprite(atlas_get(res.game, "glow"), px + w * 0.25f - r, py - r, r * 2, r * 2, with_alpha(light, 0.7f));
             gfx_blend(BLEND_ALPHA);
         }
     }
@@ -4276,7 +4276,7 @@ static void hud_at(const char * name, float x0, float y0, float kx, float ky, fl
 }
 
 // a number on an LCD, right-aligned in `cells` cells; the empty cells show their unlit segments
-static void lcd(const char * which, long value, int cells, float right, float y, float h)
+static void lcd(const char * which, long value, int cells, float right, float y, float h, uint32_t tint)
 {
     const Sprite * s = atlas_get(res.game, which);
     char buf[24];
@@ -4287,7 +4287,7 @@ static void lcd(const char * which, long value, int cells, float right, float y,
         if (buf[i] == ' ')
             continue;
         float u0 = (buf[i] - '0') * cell;
-        gfx_sprite_uv(s, x + i * w, y, w, h, u0, 0, u0 + cell, 1, buf[i] == ' ' ? RGBA(255, 255, 255, 90) : WHITE);
+        gfx_sprite_uv(s, x + i * w, y, w, h, u0, 0, u0 + cell, 1, tint);
     }
 }
 
@@ -4771,9 +4771,9 @@ static void draw_hud(void)
     {
         // laid out as World Tour's solo HUD (footage in ~/.cache/ghv-work/lampref): the score bar, the streak counter
         // under it, both a little wider than the dome, which sits on the bar
-        const float bar_x = 14, bar_w = 186, bar_y = 398, bar_h = 38;      // the score bar's leather, on the screen
-        const float cnt_w = 172, cnt_h = 33, cnt_y = bar_y + bar_h + 2;
-        const float k = 0.56f, ks = k / 0.6f;                                // the dome's 256x256 texture
+        const float bar_x = 16, bar_w = 170, bar_y = 400, bar_h = 36;      // the score bar's leather, on the screen
+        const float cnt_w = 158, cnt_h = 31, cnt_y = bar_y + bar_h + 2;
+        const float k = 0.66f, ks = k / 0.6f;                                // the dome's 256x256 texture
         const float dx = bar_x + bar_w / 2 - 128 * k, dy = bar_y + 6 - 172 * k;
         const float cx = dx + 129 * k, cy = dy + 124 * k;   // the centre of the dome's arc
         const float pi = 3.14159265f;
@@ -4813,7 +4813,10 @@ static void draw_hud(void)
             // the counter rolls up to the score rather than jumping
             double gap = G.score - G.shown_score;
             G.shown_score = gap < 1 ? G.score : G.shown_score + gap * 0.25 + 1;
-            lcd("lcd_green", (long)G.shown_score, 7, bar_x + bar_w - 14, bar_y + 7, 25);
+            lcd("lcd_green", (long)G.shown_score, 7, bar_x + bar_w - 13, bar_y + 6, 24, RGBA(225, 245, 160, 255));
+            gfx_blend(BLEND_ADD);     // and paler, as the footage's are
+            lcd("lcd_green", (long)G.shown_score, 7, bar_x + bar_w - 13, bar_y + 6, 24, RGBA(105, 95, 60, 255));
+            gfx_blend(BLEND_ALPHA);   // the footage's pale yellow-green
             if (G.mult_pop > 0.02f) {
                 // the window lights up a moment as the multiplier climbs
                 gfx_blend(BLEND_ADD);
@@ -4821,7 +4824,7 @@ static void draw_hud(void)
                            with_alpha(G.sp_active ? RGBA(120, 210, 255, 255) : RGBA(150, 255, 120, 255), 0.45f * G.mult_pop));
                 gfx_blend(BLEND_ALPHA);
             }
-            lcd("lcd_orange", G.streak, 5, cx0 + cnt_w - 16 * fx, cnt_y + 7 * fy + 1, 17);
+            lcd("lcd_orange", G.streak, 5, cx0 + cnt_w - 16 * fx, cnt_y + 7 * fy + 1, 17, WHITE);
         }
         // the dome: the metal first, its bright window set inside it with ROCK in black, the three sectors pale, the one
         // the needle's in lit up. The art's plinth under the rim is cropped: the dome sits on the score plate
@@ -4830,6 +4833,10 @@ static void draw_hud(void)
         if (h < 0.25f)
             w0 *= 0.65f + 0.35f * fabsf(sinf(t * 6));        // failing: the red throbs
         gfx_sprite_uv(atlas_get(res.hud, "hud_rock_body"), dx, dy, 256 * k, 172 * k, 0, 0, 1, 172.0f / 256, RGBA(245, 230, 195, 255));
+        // World Tour's rim reads as bright chrome; the art's is dark gunmetal: lifted with a warm silver pass
+        gfx_blend(BLEND_ADD);
+        gfx_sprite_uv(atlas_get(res.hud, "hud_rock_body"), dx, dy, 256 * k, 172 * k, 0, 0, 1, 172.0f / 256, RGBA(150, 140, 115, 255));
+        gfx_blend(BLEND_ALPHA);
         (void)m;
         const float wk = k * 0.9f, wx = cx - 129 * wk, wy = cy - 124 * wk;
         if (w0 > 0)
