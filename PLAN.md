@@ -496,3 +496,6 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   diffuse/ambient/Blinn highlight against cam_eye, convex back-face skip; lit bulbs white-hot core, hue rim, additive
   glow board). z 0.75..2.15, seat x -HALF_W-0.05. ~600 quads a frame: watch Vita frame time. Compare tool:
   ~/.cache/ghv-work/scripts/lampcmp.sh (footage | lit | unlit at the same scale). Backup game.c.v242
+- v244 ("better but not great"): close zoom vs 6Eb-bEcOjwk: chain slimmer/longer, bulbs inline with the gold.
+  z 0.55..2.15, rb 0.072, seat r 0.045 at -HALF_W-0.045, bulbs 0.045 further out and on top; lit glow 0.95 + two
+  glow boards (hue wide, white core)

@@ -4054,7 +4054,7 @@ static void draw_rail_meter(void)
     // the streak lamps on the right rail, as World Tour has them: a twisted gold bar lying along the outside of the
     // rail just under the multiplier, five glass bulbs on it pointing out, end to end; unlit they're dark red glass,
     // lit yellow up to x2, green to x3, purple on to the top, blue in Star Power
-    const float z0 = 0.75f, z1 = 2.15f, rb = 0.082f, seat_x = -HALF_W - 0.05f, seat_r = 0.055f;
+    const float z0 = 0.55f, z1 = 2.15f, rb = 0.072f, seat_x = -HALF_W - 0.045f, seat_r = 0.045f;
     int m = multiplier(), base_m = 1 + G.streak / 10, max_m = G.part_id == PART_BASS ? 6 : 4;
     int lit = base_m >= max_m ? 5 : (G.streak % 10) / 2;
     bool half = base_m < max_m && G.streak % 2;
@@ -4075,11 +4075,14 @@ static void draw_rail_meter(void)
         gfx_tex(NULL);
         if (i == 4)
             lamp_seat(seat_x, seat_r, z0 - 0.05f, z1 + 0.05f, seat_r);
-        lamp_bulb(seat_x - 0.07f, seat_r + rb * 0.55f, zc, rb, base, state == 2 ? 1.0f : state == 1 ? 0.3f : 0, hue);
+        lamp_bulb(seat_x - 0.045f, seat_r + rb * 0.7f, zc, rb, base, state == 2 ? 0.95f : state == 1 ? 0.3f : 0, hue);
         if (state == 2) {
             gfx_blend(BLEND_ADD);
-            board(seat_x - 0.12f, seat_r - 0.12f, zc, 0.7f, 0.55f, atlas_get(res.game, "glow"), 0, 0, 1, 1,
-                  RGBA((int)hue[0], (int)hue[1], (int)hue[2], 170));
+            // the bloom round a lit bulb: its colour wide, white hot at the middle
+            board(seat_x - 0.1f, seat_r - 0.1f, zc, 0.6f, 0.5f, atlas_get(res.game, "glow"), 0, 0, 1, 1,
+                  RGBA((int)hue[0], (int)hue[1], (int)hue[2], 140));
+            board(seat_x - 0.08f, seat_r - 0.04f, zc - 0.01f, 0.32f, 0.28f, atlas_get(res.game, "glow"), 0, 0, 1, 1,
+                  RGBA(255, 245, 250, 150));
             gfx_blend(BLEND_ALPHA);
         }
     }

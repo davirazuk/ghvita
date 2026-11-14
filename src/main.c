@@ -5590,6 +5590,7 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "Streak lamps tuned to World Tour footage: a slim gold chain along the rail, small bulbs with a soft white-hot glow.",
         "Streak lamps are real 3D now, as in World Tour: glass bulbs on a twisted gold bar along the rail, lit by the stage.",
         "Streak lamps: a chunky gold seat on the rail with small glowing bulb tips, as World Tour has them.",
         "Left HUD: bigger chrome-rimmed ROCK dome, paler score digits, bar sized to match.",
