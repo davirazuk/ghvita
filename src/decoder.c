@@ -1,3 +1,4 @@
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -6,9 +7,10 @@
 #include <opusfile.h>
 #include <mpg123.h>
 #include "decoder.h"
+#include "resamp.h"
 #include "plat.h"
 
-#define SRC_FRAMES 2048                 // the resampler's window of source frames
+#define SRC_FRAMES 4096                 // the resampler's window of source frames
 
 typedef enum { K_VORBIS, K_OPUS, K_MP3, K_WAV } Kind;
 
@@ -26,9 +28,10 @@ struct Decoder {
     int wav_bits, wav_float, wav_block;
     // resampling (rate != 48000): source frames as stereo, the next output frame's place among them
     int16_t * src;
-    int src_count;
+    int src_count, src_real;            // frames in src, and how many of them are the file's (the rest silence)
     double pos, step;
     bool src_eof;
+    RsKernel kern;
 };
 
 // ------------------------------------------------------------------------------------------- the file's own frames
@@ -225,7 +228,7 @@ static bool open_mp3(Decoder * d, const char * path)
     d->mh = mpg123_new(NULL, &err);
     if (!d->mh)
         return false;
-    mpg123_param(d->mh, MPG123_FLAGS, MPG123_FORCE_STEREO | MPG123_QUIET, 0);
+    mpg123_param(d->mh, MPG123_FLAGS, MPG123_FORCE_STEREO | MPG123_QUIET | MPG123_GAPLESS, 0);
     long rate;
     int channels, enc;
     if (mpg123_open(d->mh, path) != MPG123_OK || mpg123_getformat(d->mh, &rate, &channels, &enc) != MPG123_OK) {
@@ -286,6 +289,10 @@ Decoder * dec_open(const char * path)
     if (d->rate != 48000) {
         d->step = d->rate / 48000.0;
         d->src = malloc(SRC_FRAMES * 2 * sizeof(int16_t));
+        if (d->src && !rs_kernel(&d->kern, d->rate)) {
+            free(d->src);
+            d->src = NULL;
+        }
     }
     dec_seek(d, 0);
     return d;
@@ -302,35 +309,29 @@ void dec_close(Decoder * d)
     case K_WAV: fclose(d->wav); break;
     }
     free(d->src);
+    rs_kernel_free(&d->kern);
     free(d);
 }
 
 // ---------------------------------------------------------------------------------------------------- 48 kHz out
 
+// the window: frames pos - (RS_HALF - 1) .. pos + RS_HALF of src; before the start it's silence
 bool dec_seek(Decoder * d, int64_t frame)
 {
     if (!d->src)
         return raw_seek(d, frame);
     double at = frame * d->step;
     int64_t whole = (int64_t)at;
-    // the frame before the one asked for (cubic interpolation looks one back)
-    int64_t first = whole > 0 ? whole - 1 : 0;
+    int64_t first = whole - (RS_HALF - 1);
+    int pad = first < 0 ? (int)-first : 0;
+    if (first < 0)
+        first = 0;
     bool ok = raw_seek(d, first);
-    d->src_count = 0;
+    memset(d->src, 0, (size_t)pad * 2 * sizeof(int16_t));
+    d->src_count = pad;
+    d->src_real = pad;
     d->src_eof = false;
-    d->pos = whole - first + (at - whole);
-    if (whole == 0) {
-        // nothing before the start: repeat the first frame
-        int n = raw_read(d, d->src + 2, SRC_FRAMES - 1);
-        if (n <= 0) {
-            d->src_eof = true;
-            n = 0;
-        }
-        d->src[0] = n ? d->src[2] : 0;
-        d->src[1] = n ? d->src[3] : 0;
-        d->src_count = n + 1;
-        d->pos = 1 + at;
-    }
+    d->pos = (RS_HALF - 1) + (at - whole);
     return ok;
 }
 
@@ -339,33 +340,38 @@ static int resample(Decoder * d, int16_t * out, int frames)
     int made = 0;
     while (made < frames) {
         int i = (int)d->pos;
-        // the four frames around pos: i - 1 .. i + 2
-        if (i + 2 >= d->src_count && !d->src_eof) {
-            int keep = d->src_count - (i - 1);
+        if (d->src_eof && i >= d->src_real)
+            break;                      // past the last real frame
+        if (i + RS_HALF >= d->src_count) {
+            // slide the window down to what's still needed, then fill: the file, or silence after its end
+            int keep = d->src_count - (i - (RS_HALF - 1));
             if (keep < 0)
                 keep = 0;
-            memmove(d->src, d->src + (d->src_count - keep) * 2, keep * 2 * sizeof(int16_t));
-            d->pos -= d->src_count - keep;
+            int drop = d->src_count - keep;
+            memmove(d->src, d->src + drop * 2, (size_t)keep * 2 * sizeof(int16_t));
+            d->pos -= drop;
+            d->src_real -= drop;
             d->src_count = keep;
-            int n = raw_read(d, d->src + keep * 2, SRC_FRAMES - keep);
-            if (n <= 0)
-                d->src_eof = true;
-            else
+            if (!d->src_eof) {
+                int n = raw_read(d, d->src + keep * 2, SRC_FRAMES - keep);
+                if (n <= 0)
+                    d->src_eof = true;
+                else {
+                    d->src_count += n;
+                    d->src_real = d->src_count;
+                }
+            }
+            if (d->src_eof) {
+                int n = RS_HALF * 2;
+                memset(d->src + d->src_count * 2, 0, (size_t)n * 2 * sizeof(int16_t));
                 d->src_count += n;
+            }
             continue;
         }
-        if (i >= d->src_count - 1 && d->src_eof)
-            break;
-        float t = (float)(d->pos - i);
-        for (int c = 0; c < 2; c++) {
-            int last = d->src_count - 1;
-            float p0 = d->src[(i > 0 ? i - 1 : 0) * 2 + c], p1 = d->src[i * 2 + c];
-            float p2 = d->src[(i + 1 <= last ? i + 1 : last) * 2 + c];
-            float p3 = d->src[(i + 2 <= last ? i + 2 : last) * 2 + c];
-            // Catmull-Rom
-            float v = p1 + 0.5f * t * (p2 - p0 + t * (2 * p0 - 5 * p1 + 4 * p2 - p3 + t * (3 * (p1 - p2) + p3 - p0)));
-            out[made * 2 + c] = clamp16((int)(v + (v >= 0 ? 0.5f : -0.5f)));
-        }
+        float v[2];
+        rs_point(&d->kern, d->src + (i - (RS_HALF - 1)) * 2, (float)(d->pos - i), v);
+        out[made * 2] = clamp16((int)lrintf(v[0]));
+        out[made * 2 + 1] = clamp16((int)lrintf(v[1]));
         made++;
         d->pos += d->step;
     }

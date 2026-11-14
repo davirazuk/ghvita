@@ -1908,7 +1908,7 @@ static struct {
     char old[256];
 } swaps[SWAP_MAX];
 static int swaps_n;
-static bool upd_was_running;
+static bool upd_was_running, upd_repair;
 
 // a new download that's an update: the old folder goes and the new one takes its name, so its scores still count
 static void swap_in_update(char * folder, size_t size)
@@ -1951,6 +1951,22 @@ static void updates_poll(void)
     static DlHit hits[64];
     static char old[64][256];
     int n = dl_updates_take(hits, old, 64), queued = 0;
+    if (upd_repair) {
+        // the same charts again: each installs over its own folder, scores and all
+        upd_repair = false;
+        for (int i = 0; i < n; i++)
+            queued += dl_queue(&hits[i]) ? 1 : 0;
+        char t[96];
+        if (!total)
+            snprintf(t, sizeof(t), "Every downloaded song's audio is fine");
+        else if (!queued)
+            snprintf(t, sizeof(t), "Couldn't find those songs online: download them again by hand");
+        else
+            snprintf(t, sizeof(t), "%d %s downloading again with clean audio%s", queued, queued == 1 ? "song" : "songs",
+                     queued < total ? " (some couldn't be found)" : "");
+        say(t);
+        return;
+    }
     for (int i = 0; i < n; i++) {
         if (swaps_n < SWAP_MAX && dl_queue(&hits[i])) {
             snprintf(swaps[swaps_n].id, sizeof(swaps[0].id), "%s", hits[i].id);
@@ -1992,6 +2008,36 @@ static void updates_check(void)
         upd_was_running = true;
         char t[64];
         snprintf(t, sizeof(t), "Checking %d songs for newer charts", n);
+        say(t);
+    }
+}
+
+// songs whose audio this game converted before v228 (gritty highs, MP3s late): each downloaded again
+static void repair_check(void)
+{
+    static DlUpdateAsk ask[64];
+    int n = 0;
+    for (int i = 0; i < songs_count() && n < 64; i++) {
+        const Song * s = songs_get(i);
+        if ((strncmp(s->source, "chorus:", 7) && strncmp(s->source, "rv:", 3)) || !shrink_old(s->folder))
+            continue;
+        DlUpdateAsk * a = &ask[n++];
+        memset(a, 0, sizeof(*a));
+        a->repair = true;
+        snprintf(a->source, sizeof(a->source), "%s", s->source);
+        snprintf(a->name, sizeof(a->name), "%s", s->name);
+        snprintf(a->artist, sizeof(a->artist), "%s", s->artist);
+        snprintf(a->charter, sizeof(a->charter), "%s", s->charter);
+        snprintf(a->folder, sizeof(a->folder), "%s", s->folder);
+    }
+    if (!n) {
+        say("Every downloaded song's audio is fine");
+        return;
+    }
+    if (dl_updates_start(ask, n)) {
+        upd_was_running = upd_repair = true;
+        char t[80];
+        snprintf(t, sizeof(t), "Finding %d %s to download again", n, n == 1 ? "song" : "songs");
         say(t);
     }
 }
@@ -2269,7 +2315,7 @@ static int setlist_find(int song)
 
 static void list_menu_update(void)
 {
-    enum { ROWS = 10 };
+    enum { ROWS = 11 };
     Song * s = songs_get(sel);
     if (repeat & BTN_UP)
         list_row = (list_row + ROWS - 1) % ROWS;
@@ -2330,6 +2376,9 @@ static void list_menu_update(void)
         else if (list_row == 8) {
             updates_check();
             list_menu = false;
+        } else if (list_row == 10) {
+            repair_check();
+            list_menu = false;
         } else if (list_row == 9 && view_n) {
             // a gig of five songs picked at random from what the list shows, played as a setlist
             setlist_n = 0;
@@ -2359,7 +2408,7 @@ static void list_menu_draw(const Song * s)
 {
     gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(0, 0, 0, 170));
     panel(200, 62, 560, 440);
-    char rows[10][64];
+    char rows[11][64];
     snprintf(rows[0], sizeof(rows[0]), "Sort by   %s", sort_name(cfg.sort));
     snprintf(rows[1], sizeof(rows[1]), "Show   %s", show_name());
     snprintf(rows[2], sizeof(rows[2]), "%s", s && s->fav ? "Take out of favourites" : "Add to favourites");
@@ -2369,15 +2418,19 @@ static void list_menu_draw(const Song * s)
     snprintf(rows[6], sizeof(rows[6]), "Play the setlist (%d %s)", setlist_n, setlist_n == 1 ? "song" : "songs");
     snprintf(rows[7], sizeof(rows[7]), "Clear the setlist");
     int done, total, found;
-    if (dl_updates_progress(&done, &total, &found))
+    if (!upd_repair && dl_updates_progress(&done, &total, &found))
         snprintf(rows[8], sizeof(rows[8]), "Checking for newer charts %d/%d", done, total);
     else
         snprintf(rows[8], sizeof(rows[8]), "Check for newer charts");
     snprintf(rows[9], sizeof(rows[9]), "Random gig: 5 songs from this list");
-    for (int i = 0; i < 10; i++) {
-        float y = 78 + i * 42;
+    if (upd_repair && dl_updates_progress(&done, &total, &found))
+        snprintf(rows[10], sizeof(rows[10]), "Finding songs to download again %d/%d", done, total);
+    else
+        snprintf(rows[10], sizeof(rows[10]), "Repair downloaded songs' audio");
+    for (int i = 0; i < 11; i++) {
+        float y = 74 + i * 38.5f;
         if (i == list_row)
-            select_bar(224, y - 4, 512, 40, WHITE);
+            select_bar(224, y - 4, 512, 37, WHITE);
         font_draw_fit(res.ui, rows[i], SCREEN_W / 2, y + 2, 28, 460, i == list_row ? RGBA(255, 230, 150, 255)
                                                                                    : RGBA(220, 215, 205, 255), ALIGN_CENTER);
     }
@@ -5539,9 +5592,12 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "Downloaded songs sound clean now: their audio was resampled badly (gritty cymbals and voices) and MP3s ran 25 ms late.",
+        "Songs you downloaded before: SELECT in the song list, Repair downloaded songs' audio. They download again, scores kept.",
+        "Fixed downloads sometimes running twice at once and spoiling each other's files.",
+        "Flash looks more like Guitar Flash: white-topped pucks, ring targets, black lane lines, big fire, its own camera.",
         "Every hit is rated PERFECT, GREAT or GOOD. Results show your accuracy and a rank, S+ to D; the song list keeps your best.",
         "Tighter, fairer timing: Normal window 85 ms (was 95), new Pro 55 ms, and a chord's keys have to land together.",
-        "Flash rebuilt to look like the real thing: domed notes, ring targets, side meters, x4 badge, the song's art behind.",
         "More GRAPHICS options: HUD style, background (venue / cover art / dark), hit ratings, highway length.",
         "New modifiers in GAME: Sudden death (one miss ends it) and Hard rock meter. Seven new achievements to chase.",
         "Venues have 4 camera angles from the real 3D stages: the camera cuts on sections, solos and Star Power.",

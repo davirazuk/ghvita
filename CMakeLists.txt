@@ -15,7 +15,7 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -Wno-unused-parameter -Wno-mis
 set_source_files_properties(src/main.c src/shrink.c src/rbcon.c src/moggdec.c src/songconv.c src/dl.c src/net.c src/json.c src/songs.c src/career.c PROPERTIES COMPILE_OPTIONS -Os)
 # its memory is one block read as whatever's in it
 set_source_files_properties(src/ppmd7.c PROPERTIES COMPILE_FLAGS -fno-strict-aliasing)
-set(SRCS src/main.c src/player.c src/achieve.c src/game.c src/gfx.c src/font.c src/audio.c src/decoder.c src/chart.c src/songs.c src/career.c src/songconv.c
+set(SRCS src/main.c src/player.c src/achieve.c src/game.c src/gfx.c src/font.c src/audio.c src/decoder.c src/resamp.c src/chart.c src/songs.c src/career.c src/songconv.c
          src/res.c src/json.c src/net.c src/dl.c src/mega.c src/aes128.c src/moggdec.c src/rar.c src/ppmd7.c src/tour.c src/vocals.c src/rbcon.c src/shrink.c
          src/update.c src/update_apply.c)
 

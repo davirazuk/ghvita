@@ -10,6 +10,8 @@
 #include "audio.h"
 #include "decoder.h"
 #include "plat.h"
+#include "resamp.h"
+#include <math.h>
 #include "shrink.h"
 
 #define FRAME 960                       // 20 ms
@@ -73,7 +75,8 @@ static Out * out_open(const char * path, int bitrate)
     head[13] = 48000 >> 8;
     add_packet(o, head, sizeof(head), 0, true, false);
     write_pages(o, true);
-    unsigned char tags[22] = "OpusTags\6\0\0\0ghvita";
+    // "ghvita2": made with the sinc resampler. Plain "ghvita" stems went through straight-line resampling
+    unsigned char tags[23] = "OpusTags\7\0\0\0ghvita2";
     add_packet(o, tags, sizeof(tags), 0, false, false);
     write_pages(o, true);
     return o;
@@ -142,6 +145,28 @@ static void wait_for_game(void)
         plat_sleep_us(200000);
 }
 
+static void emit_out(void * ctx, int l, int r)
+{
+    out_push((Out *)ctx, l, r);
+}
+
+// a stem's tracks added together can pass full scale (a kit's six at once): pull it under, back up over a few
+// tenths of a second, instead of cutting the tops off
+typedef struct {
+    float env, rel;
+} Limit;
+
+static inline void limit(Limit * m, int * l, int * r)
+{
+    const float ceil_ = 30500;
+    int al = *l < 0 ? -*l : *l, ar = *r < 0 ? -*r : *r, pk = al > ar ? al : ar;
+    if (pk * m->env > ceil_)
+        m->env = ceil_ / pk;
+    *l = (int)(*l * m->env);
+    *r = (int)(*r * m->env);
+    m->env += (1 - m->env) * m->rel;
+}
+
 bool shrink_mogg(const char * folder)
 {
     char path[700], name[720];
@@ -191,9 +216,17 @@ bool shrink_mogg(const char * folder)
         ok &= out[g] != NULL;
     }
     static int16_t buf[8192];
-    int cur[MAX_GROUPS][2] = {{0}}, prev[MAX_GROUPS][2] = {{0}};
+    static int mixed[MAX_GROUPS][8192 / 2 * 2];
+    static Resamp rs[MAX_GROUPS];
+    Limit lim[MAX_GROUPS];
+    int cur[MAX_GROUPS][2] = {{0}};
     int64_t power[MAX_GROUPS] = {0}, heard_frames = 0;
-    double phase = 0, step = rate / 48000.0;
+    for (int g = 0; g < groups; g++) {
+        lim[g].env = 1;
+        lim[g].rel = 1 - expf(-1.0f / (0.25f * rate));
+        if (out[g] && !rs_open(&rs[g], rate))
+            ok = false;
+    }
     int bitstream;
     while (ok) {
         wait_for_game();
@@ -216,22 +249,24 @@ bool shrink_mogg(const char * folder)
                 cur[g][0] >>= 12;
                 cur[g][1] >>= 12;
                 power[g] += (int64_t)cur[g][0] * cur[g][0] + (int64_t)cur[g][1] * cur[g][1];
+                limit(&lim[g], &cur[g][0], &cur[g][1]);
+                mixed[g][f * 2] = cur[g][0];
+                mixed[g][f * 2 + 1] = cur[g][1];
             }
-            // to 48 kHz
-            for (; phase < 1; phase += step)
-                for (int g = 0; g < groups; g++)
-                    if (out[g])
-                        out_push(out[g], prev[g][0] + (int)((cur[g][0] - prev[g][0]) * phase),
-                                 prev[g][1] + (int)((cur[g][1] - prev[g][1]) * phase));
-            phase -= 1;
-            memcpy(prev, cur, sizeof(cur));
         }
+        // to 48 kHz
+        for (int g = 0; g < groups; g++)
+            if (out[g])
+                rs_push(&rs[g], mixed[g], frames, emit_out, out[g]);
         heard_frames += frames;
     }
     ov_clear(&vf);
     for (int g = 0; g < groups; g++)
-        if (out[g])
+        if (out[g]) {
+            rs_finish(&rs[g], emit_out, out[g]);
+            rs_close(&rs[g]);
             ok &= out_close(out[g]);
+        }
     if (ok)
         remove(path);
     // a custom often has all its audio in one track: an empty stem would cost a decoder all song long
@@ -320,6 +355,37 @@ static void shrink_stem(const char * path, int bitrate)
     if (!ok || rename(tmp, path))
         remove(tmp);
     plat_log("shrink: %s %s", path, ok ? "to Opus" : "left as it was");
+}
+
+// a stem made on the Vita before v228 (resampled with straight lines, MP3s 25 ms late)
+static bool old_stem(const char * path)
+{
+    unsigned char head[256];
+    FILE * f = fopen(path, "rb");
+    if (!f)
+        return false;
+    size_t n = fread(head, 1, sizeof(head), f);
+    fclose(f);
+    for (size_t i = 0; i + 18 <= n; i++)
+        if (!memcmp(head + i, "OpusTags\6\0\0\0ghvita", 18))
+            return true;
+    return false;
+}
+
+bool shrink_old(const char * folder)
+{
+    DIR * d = opendir(folder);
+    if (!d)
+        return false;
+    bool old = false;
+    for (struct dirent * e; !old && (e = readdir(d));)
+        if (is_audio(e->d_name)) {
+            char path[700];
+            snprintf(path, sizeof(path), "%s/%s", folder, e->d_name);
+            old = old_stem(path);
+        }
+    closedir(d);
+    return old;
 }
 
 bool shrink_done(const char * folder)

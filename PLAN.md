@@ -380,3 +380,23 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 - Hit ratings (cfg.hit_ratings 0/1/2 with ms), PERFECT xN for runs of 3+. Highway length (cfg.hw_length: z_far 8.5/11/14.5).
 - Modifiers: cfg.sudden_death (miss_note -> rock_change(-2)), cfg.hard_rock (losses doubled in rock_change).
 - Achievements: rank_a, rank_s, rank_splus, perfect300, sudden, pro_window, hard_rock (AchPlay has accuracy etc).
+
+## Download audio, Flash look again (2026-11-13, night)
+
+- User: "downloads come with messed up audio", Flash "still bad", improve visuals and engine.
+- Audio: every 44.1 kHz download went through a bad resampler: shrink_mogg drew straight lines, the decoder (and so
+  shrink_stem) Catmull-Rom. A 10 kHz tone came back with a 13.9 kHz alias at -23 / -28 dB (gritty highs). New
+  src/resamp.c: Kaiser windowed sinc, 32 taps, 512 phases (nearest), one table per rate shared by all streams. Alias
+  now -66 dB; vs soxr 57.5 dB (Vorbis, was 40.5). Seeks sample-exact (dec_seek pads RS_HALF - 1 frames of silence).
+  shrink_mogg mixes, limits (instant attack, 0.25 s release, ceiling 30500) and resamples per group via Resamp.
+- MP3: MPG123_FLAGS replaced the defaults and so lost MPG123_GAPLESS: MP3s were 1203 samples (25 ms) late. Fixed.
+- Downloader race: job_thread chose a QUEUED job under the lock but run_job only marked it later (after wiping its
+  tmp folder): two of the three workers could run one job into one folder. Now claimed before the unlock.
+- Old Vita-made stems carry the Opus vendor "ghvita"; new ones "ghvita2". shrink_old(folder) finds them; song list
+  menu row 10 "Repair downloaded songs' audio" queues each again (DlUpdateAsk.repair: Chorus by md5 url, RhythmVerse
+  found by searching its name with no filters, matched by id); it installs over its own folder (same_source), scores kept.
+- Tests: ~/.cache/ghv-work/bin dl_test, dec_test, shrink_test (dectest/*.c); real RB moggs in ~/.cache/ghv-work/dlt/moggs.
+- Flash: own camera (G.cam_flash: eye 0,3.35,-4.6, fov 46) when camera 0; lighter board with black lane lines, no
+  strings or silver bar, thick white edges; notes are flat pucks with a white top and coloured dot (HOPO all white,
+  tap dark); targets coloured rings round dark middles, grey button when held; fire 1.3x, doubled, no smoke frames;
+  grey glossy x badge on the strikeline; side bars get a shine stripe.

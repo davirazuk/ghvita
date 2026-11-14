@@ -55,6 +55,12 @@ int main(int c, char ** v)
         snprintf(one.name, sizeof(one.name), "test");
         snprintf(one.url, sizeof(one.url), "%s", v[3]);
     } else {
+        for (int site = 0; site < DL_SITES; site++) {
+            DlFilter f;
+            dl_get_filter(site, &f);
+            f.genre = f.instrument = f.difficulty = -1;
+            dl_set_filter(site, &f);
+        }
         dl_search(atoi(v[2]), v[3]);
         usleep(200000);
         while (dl_searching())
@@ -66,7 +72,7 @@ int main(int c, char ** v)
         bool found = false;
         for (int i = 0; i < dl_count() && !found; i++) {
             DlHit * h = dl_hit(i);
-            if (strcasestr(h->name, v[4]) && !h->unplayable[0] && (c < 6 || strstr(h->url, v[5]))) {
+            if (strcasestr(h->name, v[4]) && (!getenv("GHV_RB") || h->rock_band == (atoi(getenv("GHV_RB")) == 1)) && !h->unplayable[0] && (c < 6 || strstr(h->url, v[5]))) {
                 one = *h;
                 found = true;
             }

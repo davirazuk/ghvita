@@ -8,5 +8,7 @@ bool shrink_mogg(const char * folder);
 void shrink_song(const char * folder);
 // the caller's conversions run beside a song being played instead of waiting for it to end (the downloader's queue)
 void shrink_defer(bool defer);
+// a stem of it was converted here by a build before the clean resampler: download it again to fix it
+bool shrink_old(const char * folder);
 // every stem of a song folder is Opus already
 bool shrink_done(const char * folder);

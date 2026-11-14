@@ -105,6 +105,7 @@ typedef struct {
     char source[80];                // "chorus:<md5>" as the song has it
     char name[96], artist[96], charter[64];
     char folder[256];
+    bool repair;                    // not a newer chart: this same one again (its audio was made badly)
 } DlUpdateAsk;
 bool dl_updates_start(const DlUpdateAsk * ask, int n);  // false: one's already going, or nothing to ask
 bool dl_updates_progress(int * done, int * total, int * found);   // true while it's going

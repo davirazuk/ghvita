@@ -696,7 +696,7 @@ static void rv_filters(char * out, size_t size, const DlFilter * f)
         snprintf(head, sizeof(head), "%s&artist=%s", out, piece);
         snprintf(out, size, "%s", head);
     }
-    if (f->genre >= 0) {
+    if (f->genre >= 0 && dl_genre_slug(f->genre)[0]) {
         char head[220];
         url_escape(piece, sizeof(piece), dl_genre_slug(f->genre));
         snprintf(head, sizeof(head), "%s&genre%%5B0%%5D=%s", out, piece);
@@ -728,8 +728,18 @@ static bool filter_set(const DlFilter * f)
 
 // one page of a RhythmVerse search (nothing typed: the newest), Clone Hero and Phase Shift uploads (the same song
 // folders) together, and asked for by name its Rock Band customs; false when none answered
+static bool rv_fetch_as(const char * text, int page, int records, DlHit ** out, int * n, int * total, char * err,
+                        size_t err_size, bool plain);
+
 static bool rv_fetch(const char * text, int page, int records, DlHit ** out, int * n, int * total, char * err,
                      size_t err_size)
+{
+    return rv_fetch_as(text, page, records, out, n, total, err, err_size, false);
+}
+
+// plain: none of the panel's filters (a song looked for again by its own id)
+static bool rv_fetch_as(const char * text, int page, int records, DlHit ** out, int * n, int * total, char * err,
+                        size_t err_size, bool plain)
 {
     bool any = false;
     static const char * const systems[3] = {"ch", "ps", "rb3xbox"};
@@ -739,6 +749,10 @@ static bool rv_fetch(const char * text, int page, int records, DlHit ** out, int
         url_escape(q, sizeof(q), text);
         DlFilter flat;
         dl_get_filter(DL_RHYTHMVERSE, &flat);
+        if (plain) {
+            memset(&flat, 0, sizeof(flat));
+            flat.genre = flat.instrument = flat.difficulty = -1;
+        }
         if (text[0])
             snprintf(post, sizeof(post), "text=%s&data_type=full&records=%d&page=%d", q, records, page);
         else
@@ -2091,6 +2105,10 @@ static int job_thread(void * arg)
         for (int i = 0; i < job_count; i++)
             if (jobs[i].state == JOB_QUEUED && (!next || jobs[i].bumps < next->bumps))
                 next = &jobs[i];
+        // taken before the lock goes: three workers look every 50 ms, and two on one job wrote one folder at once
+        // (each wiping the other's download mid-unpack: songs came in with their audio cut or garbled)
+        if (next)
+            next->state = JOB_DOWNLOADING;
         pthread_mutex_unlock(&lock);
         if (next) {
             run_job(next);
@@ -2135,6 +2153,51 @@ static void * upd_thread(void * arg)
     (void)arg;
     for (int i = 0; i < upd.n; i++) {
         const DlUpdateAsk * a = &upd.ask[i];
+        if (a->repair) {
+            // the same chart again: Chorus's address is its md5, RhythmVerse's is found by searching for it
+            DlHit h, * hits = NULL;
+            bool got = false;
+            memset(&h, 0, sizeof(h));
+            if (!strncmp(a->source, "chorus:", 7)) {
+                h.site = DL_CHORUS;
+                snprintf(h.id, sizeof(h.id), "%s", a->source);
+                snprintf(h.url, sizeof(h.url), "https://files.enchor.us/%s.sng", a->source + 7);
+                snprintf(h.name, sizeof(h.name), "%s", a->name);
+                snprintf(h.artist, sizeof(h.artist), "%s", a->artist);
+                snprintf(h.charter, sizeof(h.charter), "%s", a->charter);
+                got = true;
+            } else if (!strncmp(a->source, "rv:", 3)) {
+                char text[200], err[160] = "";
+                int n = 0, total = 0;
+                snprintf(text, sizeof(text), "%s", a->name);
+                for (int pass = 0; pass < 2 && !got; pass++) {
+                    if (pass)
+                        snprintf(text, sizeof(text), "%s %s", a->artist, a->name);
+                    n = total = 0;
+                    free(hits);
+                    hits = NULL;
+                    rv_fetch_as(text, 1, 60, &hits, &n, &total, err, sizeof(err), true);
+                    for (int k = 0; k < n && !got; k++)
+                        if (!strcmp(hits[k].id, a->source)) {
+                            h = hits[k];
+                            got = true;
+                        }
+                }
+            }
+            free(hits);
+            if (got) {
+                pthread_mutex_lock(&upd_lock);
+                if (upd.found < UPD_MAX) {
+                    upd.hits[upd.found] = h;
+                    snprintf(upd.old[upd.found], sizeof(upd.old[0]), "%s", a->folder);
+                    upd.found++;
+                }
+                pthread_mutex_unlock(&upd_lock);
+            } else
+                plat_log("repair: %s - %s (%s) not found again", a->artist, a->name, a->source);
+            upd.done = i + 1;
+            continue;
+        }
         char q[200], post[600], err[160];
         char both[200];
         snprintf(both, sizeof(both), "%s %s", a->name, a->artist);
