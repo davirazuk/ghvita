@@ -74,6 +74,7 @@ static int64_t ring_start;              // the frame the rings start with (earli
 static float fade_vol = 1, fade_target = 1, fade_step;
 static float music_vol = 1, effects_vol = 1;
 static volatile int underruns;
+static int underruns_logged;           // the count at the last song's log line
 static float song_speed = 1;            // not 1: the song plays slower and lower, or faster and higher, like a tape (practice)
 static float slow_pos;                  // where the next output frame falls in the slowed buffer
 #define MAX_SPEED 2               // the fastest the stretch goes
@@ -782,8 +783,9 @@ bool audio_song_active(void)
 void audio_log_cost(void)
 {
     if (bend_frames)
-        plat_log("whammy: %d frames, avg %.0f us, slowest %d us; buffer %d us, underruns %d", bend_frames,
-                 (double)bend_us / bend_frames, bend_worst, 512 * 1000000 / AUDIO_RATE, underruns);
+        plat_log("whammy: %d frames, avg %.0f us, slowest %d us; buffer %d us, underruns %d this song", bend_frames,
+                 (double)bend_us / bend_frames, bend_worst, 512 * 1000000 / AUDIO_RATE, underruns - underruns_logged);
+    underruns_logged = underruns;
     bend_us = bend_frames = bend_worst = 0;
 }
 

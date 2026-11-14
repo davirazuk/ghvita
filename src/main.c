@@ -4636,7 +4636,7 @@ static void options_screen(void)
         "24 fps moves the notes in Guitar Flash's 24 steps a second, at any frame rate. Smooth moves them every frame.",
     };
     char line[160];
-    const char * text = about[opt];
+    const char * text = opt >= 0 && opt < O_COUNT && about[opt] ? about[opt] : "";   // a gap in the table: no help, no crash
     if (!text)                  // an option without a description must never crash the draw
         text = "";
     if (opt == O_LAYOUT) {
@@ -5587,6 +5587,7 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "The downloader keeps its folder tidy: old search covers (they had piled up past 100 MB) and dead download folders go.",
         "Flash mode is now just its engine: GAME, Engine: Guitar Flash plays by Flash's rules on the normal highway.",
         "GAME, Note motion: 24 fps steps the notes like Guitar Flash, at 30 or 60 fps. The flat Flash look is gone.",
         "The venue lights follow the song's own light show (Rock Band charts): verses, choruses, strobes, blackouts, silhouettes.",

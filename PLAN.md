@@ -461,3 +461,6 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 - GAME: Engine World Tour / Guitar Flash (cfg.engine; GF.on = engine && frets && !battle: gf_judge, its meter, x4,
   timed SP) and Note motion Smooth / 24 fps (cfg.note_steps; time_z quantizes G.t to 1/24 s). Both on the normal
   highway. Bot: clean input FCs 687/687 on both engines and both motions.
+- v236: dl.c tidy_thread on downloader start: tmp/covers trimmed to the newest 300 (card had 1922 = 121 MB), job-*
+  folders >1 day old with no live job removed. Options help lookup guarded against table gaps. whammy log line
+  reports underruns per song (the old number was the session total). Vita dumps Nov 2-4 = already-fixed bugs.

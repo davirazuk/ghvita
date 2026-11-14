@@ -6,6 +6,7 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <archive.h>
 #include <archive_entry.h>
 #ifdef __vita__
@@ -1199,6 +1200,90 @@ static int search_thread(void * arg)
 
 static int job_thread(void * arg);
 
+// tmp/ kept in bounds, off the main thread (thousands of files on the card): the search covers down to the newest
+// COVERS_KEPT (they come back when shown again; 1900 of them were 121 MB), and job folders no queued song owns
+#define COVERS_KEPT 300
+typedef struct {
+    char name[64];
+    long mtime;
+} Aged;
+
+static int newest_first(const void * a, const void * b)
+{
+    long x = ((const Aged *)a)->mtime, y = ((const Aged *)b)->mtime;
+    return x < y ? 1 : x > y ? -1 : 0;
+}
+
+static int tidy_thread(void * arg)
+{
+    (void)arg;
+    char dir[400], p[700];
+    snprintf(dir, sizeof(dir), "%s/covers", tmp_dir());
+    DIR * d = opendir(dir);
+    Aged * v = NULL;
+    int n = 0, cap = 0;
+    struct dirent * e;
+    struct stat st;
+    while (d && (e = readdir(d))) {
+        if (e->d_name[0] == '.' || strlen(e->d_name) >= sizeof(v->name))
+            continue;
+        snprintf(p, sizeof(p), "%s/%s", dir, e->d_name);
+        if (stat(p, &st) != 0)
+            continue;
+        if (n == cap) {
+            cap = cap ? cap * 2 : 256;
+            Aged * w = realloc(v, cap * sizeof(Aged));
+            if (!w)
+                break;
+            v = w;
+        }
+        snprintf(v[n].name, sizeof(v[n].name), "%s", e->d_name);
+        v[n++].mtime = (long)st.st_mtime;
+    }
+    if (d)
+        closedir(d);
+    int gone = 0;
+    if (n > COVERS_KEPT) {
+        qsort(v, n, sizeof(Aged), newest_first);
+        for (int i = COVERS_KEPT; i < n; i++) {
+            snprintf(p, sizeof(p), "%s/%s", dir, v[i].name);
+            gone += remove(p) == 0;
+        }
+    }
+    free(v);
+    // job folders: a day old and no job of that id in the queue
+    int jobs_gone = 0;
+    long now = (long)time(NULL);
+    if ((d = opendir(tmp_dir()))) {
+        while ((e = readdir(d))) {
+            if (strncmp(e->d_name, "job-", 4))
+                continue;
+            snprintf(p, sizeof(p), "%s/%s", tmp_dir(), e->d_name);
+            if (stat(p, &st) != 0 || now - (long)st.st_mtime < 24 * 3600)
+                continue;
+            bool owned = false;
+            pthread_mutex_lock(&lock);
+            for (int i = 0; i < job_count && !owned; i++) {
+                if (jobs[i].state == JOB_NONE || jobs[i].state == JOB_DONE)
+                    continue;
+                char tag[96];
+                snprintf(tag, sizeof(tag), "%s", jobs[i].hit.id);
+                dl_safe_part(tag);
+                owned = !strcmp(tag, e->d_name + 4);
+            }
+            pthread_mutex_unlock(&lock);
+            if (!owned) {
+                dl_remove_tree(p);
+                jobs_gone++;
+            }
+        }
+        closedir(d);
+    }
+    if (gone || jobs_gone)
+        plat_log("dl: tidied tmp, %d old covers and %d left-over job folders", gone, jobs_gone);
+    return 0;
+}
+
 static void start(void)
 {
     if (started)
@@ -1209,6 +1294,7 @@ static void start(void)
     snprintf(p, sizeof(p), "%s/covers", tmp_dir());
     mkdir(p, 0777);
     dl_load();
+    plat_thread("dl_tidy", tidy_thread, NULL, PLAT_BACKGROUND);
     plat_thread("dl_search", search_thread, NULL, PLAT_BACKGROUND);
     // three of them: the downloads share the line, the converting takes its turn (the slow host of one song no
     // longer holds the others back)
