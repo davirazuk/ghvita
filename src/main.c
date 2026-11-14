@@ -144,6 +144,17 @@ static void banner(const char * text)
     font_draw_shadow(res.title, text, 30, 16, 52, RGBA(255, 236, 200, 255), ALIGN_LEFT);
 }
 
+// a song's best rank from its best accuracy (S+ needs the full combo as well), coloured like the results'
+static void draw_rank(const Score * b, float x, float y, float size)
+{
+    int a = b->acc;
+    if (!a)
+        return;
+    const char * rk = a >= 980 && b->fc ? "S+" : a >= 950 ? "S" : a >= 900 ? "A" : a >= 800 ? "B" : a >= 700 ? "C" : "D";
+    uint32_t c = rk[0] == 'S' ? RGBA(255, 214, 70, 255) : rk[0] == 'A' ? RGBA(120, 230, 130, 255) : RGBA(210, 210, 220, 255);
+    font_draw_shadow(res.title, rk, x, y, size, c, ALIGN_LEFT);
+}
+
 static void draw_stars(int stars, float x, float y, float size)
 {
     for (int i = 0; i < 5; i++) {
@@ -2540,12 +2551,14 @@ static void song_list(void)
         upper(up, sizeof(up), x->name);
         font_draw_fit(res.ui, up, 82, y + 4, 26, 480, on ? RGBA(255, 236, 170, 255) : RGBA(235, 235, 235, 255),
                       ALIGN_LEFT);
-        font_draw_fit(res.ui, x->artist, 84, y + 28, 20, 370, on ? RGBA(255, 210, 140, 255) : RGBA(170, 170, 175, 255),
+        font_draw_fit(res.ui, x->artist, 84, y + 28, 20, x->best[first_part(x)][cfg.last_diff].acc ? 340 : 370,
+                      on ? RGBA(255, 210, 140, 255) : RGBA(170, 170, 175, 255),
                       ALIGN_LEFT);
         const Score * b = &x->best[first_part(x)][cfg.last_diff];
         if (b->stars)
             draw_stars(b->stars, 470, y + 30, 18);
         draw_medal(medal_of(b), 572, y + 39, 9);
+        draw_rank(b, 440, y + 24, 22);
         if (x->fav)
             gfx_sprite(atlas_get(res.hud, "hud_star_gold"), 56, y + 34, 18, 18, WHITE);
     }
@@ -2665,6 +2678,7 @@ static void draw_select(const Song * s, bool loading)
         if (b->stars)
             draw_stars(b->stars, 330, y + 4, 24);
         draw_medal(medal_of(b), 532, y + 16, 13);
+        draw_rank(b, 566, y + 2, 28);
     }
     if (cfg.song_speed != 100) {
         // a slowed song isn't saved: said before it's played, not after
@@ -3204,13 +3218,17 @@ static void finish_song(int how)
              "on average, spread %d", how == GAME_DONE ? "done" : "failed", result.score, result.stars,
              result.notes_hit, result.notes_total, result.best_streak, result.sp_hit, result.sp_total, result.overhits,
              result.fc ? ", full combo" : "", result.off_ms, result.spread_ms);
+    if (result.rank[0])
+        plat_log("accuracy: %d.%d%%, rank %s, %d perfect, %d great, %d good", result.accuracy_x10 / 10, result.accuracy_x10 % 10,
+                 result.rank, result.perfects, result.greats, result.goods);
     game_log_whammy();
     Song * s = songs_get(sel);
     result_best = false;
     result_medal = 0;
     if (s && !result.failed) {
         Score sc = {result.score, (uint8_t)result.stars,
-                    (uint8_t)(result.notes_total ? result.notes_hit * 100 / result.notes_total : 0), result.fc};
+                    (uint8_t)(result.notes_total ? result.notes_hit * 100 / result.notes_total : 0), result.fc,
+                    (uint16_t)result.accuracy_x10};
         result_best = counts && result.score > s->best[result.part][result.diff].score;
         int had = medal_of(&s->best[result.part][result.diff]), got = medal_of(&sc);
         result_medal = got > had && counts ? got : 0;
@@ -3232,7 +3250,8 @@ static void finish_song(int how)
     AchPlay ap = {result.part, result.diff, result.stars, result.score, result.best_streak, result.overhits, result.sp_hit,
                   result.sp_total, result.notes_total ? result.notes_hit * 100 / result.notes_total : 0, result.failed,
                   result.fc, practicing || result_slowed, autoplay, daily_streak(), songs_count(), result.battle, result.rival_level,
-                  (int)(game_song_speed() * 100 + 0.5f)};
+                  (int)(game_song_speed() * 100 + 0.5f), result.accuracy_x10, result.perfects, cfg.sudden_death, cfg.hard_rock,
+                  cfg.hit_window};
     result_ach_n = achieve_check(&ap, result_ach, 6);
     for (int i = 0; i < result_ach_n && i < 6; i++)
         plat_log("achievement: %s", achieve_get(result_ach[i])->name);
@@ -3598,6 +3617,12 @@ static void results_screen(void)
             sound_play(res.snd[SND_STAR], 0.35f, false);
         }
         draw_stars(shown >= 6 || (result.stars >= 6 && a >= 1) ? 6 : shown, 460, 136, 56);
+        if (result.rank[0] && result.part != PART_VOCALS && a >= 1) {
+            // the rank lands once the stars are in
+            uint32_t rc = result.rank[0] == 'S' ? RGBA(255, 214, 70, 255) : result.rank[0] == 'A' ? RGBA(120, 230, 130, 255)
+                          : result.rank[0] == 'F' ? RGBA(255, 80, 60, 255) : RGBA(220, 220, 230, 255);
+            font_draw_shadow(res.title, result.rank, 395, 112, 72, rc, ALIGN_CENTER);
+        }
     }
     int pct = result.notes_total ? result.notes_hit * 100 / result.notes_total : 0;
     struct {
@@ -3614,12 +3639,17 @@ static void results_screen(void)
     rows[0].label = "Score";
     snprintf(rows[1].value, sizeof(rows[1].value), "%d%%  (%d / %d)", pct, result.notes_hit, result.notes_total);
     rows[1].label = "Notes hit";
-    snprintf(rows[2].value, sizeof(rows[2].value), "%d", result.best_streak);
+    if (result.overhits)
+        snprintf(rows[2].value, sizeof(rows[2].value), "%d   (%d overhit%s)", result.best_streak, result.overhits,
+                 result.overhits == 1 ? "" : "s");
+    else
+        snprintf(rows[2].value, sizeof(rows[2].value), "%d", result.best_streak);
     rows[2].label = "Best streak";
     snprintf(rows[3].value, sizeof(rows[3].value), "%d / %d", result.sp_hit, result.sp_total);
     rows[3].label = "Star Power phrases";
-    snprintf(rows[4].value, sizeof(rows[4].value), "%d", result.overhits);
-    rows[4].label = "Overhits";
+    snprintf(rows[4].value, sizeof(rows[4].value), "%d.%d%%   P %d  G %d  OK %d", result.accuracy_x10 / 10,
+             result.accuracy_x10 % 10, result.perfects, result.greats, result.goods);
+    rows[4].label = "Accuracy";
     rows[5].label = "Your timing";
     if (!result.timed)
         strcpy(rows[5].value, "-");
@@ -4012,18 +4042,19 @@ static void set_graphics_preset(int p)
 enum { O_SPEED, O_HIGHWAY, O_VENUE, O_BAND, O_SING, O_SINGDIFF, O_OFFSET, O_LAYOUT, O_DRUMKEYS, O_DRUMHITS, O_TILT, O_NOFAIL, O_LEFTY, O_MUSIC, O_SFX, O_CROWD, O_FPS,
        O_CAMERA, O_HWALPHA, O_VLIGHT, O_FLASH, O_POPUPS, O_TIMING, O_LIVE, O_VANISH, O_MISSSND, O_REAR, O_BEND, O_COUNTDOWN,
        O_RESET, O_FIVEPADS, O_DOUBLEKICK, O_EASYSUS, O_COUNTIN, O_SCREENS, O_PROGRESS, O_CUPS, O_AUTOREPRESS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, O_CROWDHANDS, O_VIGNETTE, O_LYRICS, O_MENUMUSIC, O_SINGSP, O_SHRINKCHECK, O_GHOST, O_RIVAL, O_WINDOW, O_LIGHTFX, O_SONGSPEED,
-       O_FRAMERATE, O_STILLCAM, O_GEMSTYLE, O_PRESET, O_COUNT };
+       O_FRAMERATE, O_STILLCAM, O_GEMSTYLE, O_PRESET,
+       O_HUDSTYLE, O_BACKDROP, O_RATINGS, O_HWLEN, O_SUDDEN, O_HARDROCK, O_COUNT };
 
 // the options by subject, L and R between them
-enum { OPT_TABS = 8, OPT_TAB_MAX = 14 };
+enum { OPT_TABS = 8, OPT_TAB_MAX = 18 };
 static const char * opt_tab_names[OPT_TABS] = {"GAME", "CONTROLS", "HIGHWAY", "STAGE", "SCREEN", "GRAPHICS", "SOUND", "LIBRARY"};
 static const int opt_tabs[OPT_TABS][OPT_TAB_MAX + 1] = {
-    {O_SPEED, O_SONGSPEED, O_OFFSET, O_NOFAIL, O_EASYSUS, O_AUTOREPRESS, O_VANISH, O_COUNTDOWN, O_SING, O_SINGDIFF, O_RIVAL, O_WINDOW, O_RESET, -1},
+    {O_SPEED, O_SONGSPEED, O_OFFSET, O_WINDOW, O_SUDDEN, O_HARDROCK, O_NOFAIL, O_EASYSUS, O_AUTOREPRESS, O_VANISH, O_COUNTDOWN, O_SING, O_SINGDIFF, O_RIVAL, O_RESET, -1},
     {O_LAYOUT, O_DRUMKEYS, O_FIVEPADS, O_DOUBLEKICK, O_LEFTY, O_TILT, O_REAR, O_SINGSP, -1},
     {O_HIGHWAY, O_HWALPHA, O_CAMERA, O_CUPS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, -1},
     {O_VENUE, O_VLIGHT, O_BAND, O_CROWDHANDS, O_VIGNETTE, O_SCREENS, O_FLASH, -1},
     {O_LYRICS, O_POPUPS, O_PROGRESS, O_TIMING, O_LIVE, O_GHOST, O_LIGHTFX, O_FPS, -1},
-    {O_PRESET, O_FRAMERATE, O_FPS, O_STILLCAM, O_GEMSTYLE, O_LIGHTFX, O_BAND, O_FIRE, O_FLASH, O_CROWDHANDS, O_VIGNETTE, -1},
+    {O_PRESET, O_FRAMERATE, O_FPS, O_GEMSTYLE, O_HUDSTYLE, O_BACKDROP, O_RATINGS, O_HWLEN, O_STILLCAM, O_LIGHTFX, O_BAND, O_FIRE, O_FLASH, O_CROWDHANDS, O_VIGNETTE, -1},
     {O_MUSIC, O_SFX, O_CROWD, O_MENUMUSIC, O_COUNTIN, O_DRUMHITS, O_MISSSND, O_BEND, -1},
     {O_SHRINKCHECK, -1},
 };
@@ -4149,6 +4180,27 @@ static void option_text(int i, char * name, char * value, size_t n)
     case O_FRAMERATE: strcpy(name, "Frame rate"); snprintf(value, n, "%d fps", cfg.frame_rate == 30 ? 30 : 60); break;
     case O_STILLCAM: strcpy(name, "Venue camera"); snprintf(value, n, "%s", cfg.still_camera ? "Wide shot only" : "Cuts between shots"); break;
     case O_GEMSTYLE: strcpy(name, "Note style"); snprintf(value, n, "%s", cfg.gem_style ? "Flash" : "World Tour"); break;
+    case O_HUDSTYLE: strcpy(name, "HUD"); snprintf(value, n, "%s", cfg.hud_style ? "Flash" : "World Tour"); break;
+    case O_BACKDROP: {
+        static const char * const bn[3] = {"Venue and band", "Song's cover art", "Dark"};
+        strcpy(name, "Background");
+        snprintf(value, n, "%s", bn[cfg.backdrop % 3]);
+        break;
+    }
+    case O_RATINGS: {
+        static const char * const rn[3] = {"Off", "On", "On, with ms"};
+        strcpy(name, "Hit ratings");
+        snprintf(value, n, "%s", rn[cfg.hit_ratings % 3]);
+        break;
+    }
+    case O_HWLEN: {
+        static const char * const ln[3] = {"Short", "Normal", "Long"};
+        strcpy(name, "Highway length");
+        snprintf(value, n, "%s", ln[cfg.hw_length % 3]);
+        break;
+    }
+    case O_SUDDEN: strcpy(name, "Sudden death"); snprintf(value, n, "%s", cfg.sudden_death ? "On" : "Off"); break;
+    case O_HARDROCK: strcpy(name, "Hard rock meter"); snprintf(value, n, "%s", cfg.hard_rock ? "On" : "Off"); break;
     case O_PRESET: {
         static const char * const pn[] = {"Full", "Balanced", "Battery", "Custom"};
         strcpy(name, "Graphics preset");
@@ -4160,9 +4212,9 @@ static void option_text(int i, char * name, char * value, size_t n)
         snprintf(value, n, cfg.song_speed < 100 ? "%d%%  (not saved)" : "%d%%", cfg.song_speed);
         break;
     case O_WINDOW: {
-        static const char * const wn[3] = {"Normal", "Strict", "Lenient"};
+        static const char * const wn[4] = {"Normal", "Strict", "Lenient", "Pro"};
         strcpy(name, "Timing window");
-        snprintf(value, n, "%s", wn[cfg.hit_window % 3]);
+        snprintf(value, n, "%s", wn[cfg.hit_window % 4]);
         break;
     }
     case O_RIVAL: {
@@ -4269,11 +4321,22 @@ static void change_option(int i, int d)
     case O_LIVE: cfg.live_stats = !cfg.live_stats; break;
     case O_GHOST: cfg.no_ghost = !cfg.no_ghost; break;
     case O_RIVAL: cfg.rival = (cfg.rival + d + 4) % 4; break;
-    case O_WINDOW: cfg.hit_window = (cfg.hit_window + d + 3) % 3; break;
+    case O_WINDOW: cfg.hit_window = (cfg.hit_window + d + 4) % 4; break;
     case O_LIGHTFX: cfg.light_fx = !cfg.light_fx; break;
     case O_FRAMERATE: cfg.frame_rate = cfg.frame_rate == 30 ? 60 : 30; break;
     case O_STILLCAM: cfg.still_camera = !cfg.still_camera; break;
-    case O_GEMSTYLE: cfg.gem_style = !cfg.gem_style; break;
+    case O_GEMSTYLE:
+        // the whole look goes with it; the HUD and background can be set apart afterwards
+        cfg.gem_style = !cfg.gem_style;
+        cfg.hud_style = cfg.gem_style;
+        cfg.backdrop = cfg.gem_style ? 1 : 0;
+        break;
+    case O_HUDSTYLE: cfg.hud_style = !cfg.hud_style; break;
+    case O_BACKDROP: cfg.backdrop = (cfg.backdrop + d + 3) % 3; break;
+    case O_RATINGS: cfg.hit_ratings = (cfg.hit_ratings + d + 3) % 3; break;
+    case O_HWLEN: cfg.hw_length = (cfg.hw_length + d + 3) % 3; break;
+    case O_SUDDEN: cfg.sudden_death = !cfg.sudden_death; break;
+    case O_HARDROCK: cfg.hard_rock = !cfg.hard_rock; break;
     case O_PRESET: {
         int p = graphics_preset();
         set_graphics_preset(((p > 2 ? (d > 0 ? -1 : 3) : p) + d + 3) % 3);
@@ -4510,13 +4573,19 @@ static void options_screen(void)
         "X counts the songs whose audio isn't shrunk to Opus yet, then X shrinks them, right on the Vita.",
         "GHOST +1200: how far ahead (or behind) your best run on the chart you were at this point.",
         "How good the computer rival is in a battle (Triangle on GET READY).",
-        "How early or late a note can be hit: Strict 75 ms, Normal 95 ms, Lenient 115 ms either way.",
+        "How early or late a note can be hit, either way: Normal 85 ms, Strict 70, Lenient 110, Pro 55.",
         "Light drops the hit rings, Star Power glitter, smoke, band backlight, lasers and sparks, for a steadier frame rate.",
         "The song's speed. Below 100% the run isn't saved (scores, medals, the tour); practice has its own speed.",
         "30 fps draws every other frame and saves power; your buttons are still read 60 times a second, so timing stays exact.",
         "Cuts between each venue's four camera angles with the song, or keeps the wide shot (loads quicker, less memory).",
-        "World Tour's gems, or Flash: round flat discs on a plain dark board, like the browser classic.",
+        "World Tour's gems, or Flash: domed notes, ring targets, side bars and the song's art behind (all changeable after).",
         "Full: everything. Balanced: lighter effects at 60 fps. Battery: 30 fps, wide shot only, lighter effects.",
+        "World Tour's rock dome and counters, or Flash's: bars up the sides of the highway and a multiplier badge.",
+        "Behind the highway: the venue with the band, the song's cover art (like Flash's band photo), or plain dark.",
+        "PERFECT (25 ms), GREAT (50 ms) or GOOD over the strikeline as you hit. With ms adds how early (-) or late (+).",
+        "How far up the highway you can see the notes coming. Long gives more time to read fast songs.",
+        "One missed note and the song's over. For the brave.",
+        "The rock meter falls twice as fast when you miss: keep the crowd with you.",
     };
     char line[160];
     const char * text = about[opt];
@@ -5470,9 +5539,13 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "Every hit is rated PERFECT, GREAT or GOOD. Results show your accuracy and a rank, S+ to D; the song list keeps your best.",
+        "Tighter, fairer timing: Normal window 85 ms (was 95), new Pro 55 ms, and a chord's keys have to land together.",
+        "Flash rebuilt to look like the real thing: domed notes, ring targets, side meters, x4 badge, the song's art behind.",
+        "More GRAPHICS options: HUD style, background (venue / cover art / dark), hit ratings, highway length.",
+        "New modifiers in GAME: Sudden death (one miss ends it) and Hard rock meter. Seven new achievements to chase.",
         "Venues have 4 camera angles from the real 3D stages: the camera cuts on sections, solos and Star Power.",
         "New GRAPHICS tab: 60 or 30 fps (buttons still read at 60), venue camera, note style, Full/Balanced/Battery.",
-        "Note style Flash: round flat notes on a plain dark board, ring targets that flash when you hit.",
         "Battles get GH3's attacks: Broken String (tap the fret 5x), Double Notes, Whammy and Amp Overload.",
         "Holding a fret, its lane's light now comes out of the cup instead of from the bottom edge of the highway.",
         "Streak lamps fixed: full-size gold bulbs on the rail again (the last builds shrank them to dots), domes tipped up-right.",

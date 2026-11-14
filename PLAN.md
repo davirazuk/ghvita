@@ -358,3 +358,25 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   GHV_ATTACK=<n> lands attack n at 4 s (the bot repairs a broken string by pressing the lane).
 - Tested on PC only (bot full combos at 30 fps, Flash, still camera; battles with each attack under ASan; regress.sh
   clean). Hardware unknowns: shot load time, texture memory with band + 4 shots, 30 fps frame pacing.
+
+## Ratings, accuracy, a real Flash look, modifiers (2026-11-13, later)
+
+- User: "flash mode is ass", wants more visual settings, a more accurate/cooler/slightly harder engine, more to do.
+- Engine: WINDOW Normal 85 ms (was 95), Strict 70, Lenient 110, Pro 55 (cfg.hit_window 3). CHORD_SPREAD 0.08 s: a
+  chord key pressed later than that after the first restarts the chord from the frets still held (held frets still
+  count). Every hit_note is rated from G.t - note time minus half a frame (buttons read per frame: +8 ms bias seen in the
+  bot): Perfect <= 25 ms, Great <= 50, else Good. Accuracy = (P + 0.7 G + 0.4 Good) / notes; rank S+ (98 + every note),
+  S 95, A 90, B 80, C 70, D, F failed. Result.accuracy_x10/rank/perfects..; log line "accuracy:"; scores.txt gets the
+  accuracy as an 8th field (old builds ignore it) -> Score.acc, rank drawn in the song list and GET READY.
+  Compared with v226 on Plug In Baby (tools/humanbot.py seed 3): spread 20 ms same notes; 35 ms -11 notes; 50 ms -13.
+  Bot: 100% S+. rg.py 0 misses.
+- Flash (from the site's own promo shots: guitarflash.com/site/img/destaque/gf3.jpg): notes and targets drawn in 2D
+  after the 3D highway, placed with project() (proj_now, so battle shakes apply): domed caps (dark band, white rim,
+  coloured top, shine; hammer-on white middle, tap dark), thick ring targets with black middles lit when held, white
+  ring thrown on press. Drums keep World Tour gems. Choosing Note style Flash also sets HUD Flash + Background cover art.
+- HUD Flash (cfg.hud_style): rock meter as red/yellow/green bar up the outside of the left rail with a white needle band,
+  Star Power bar up the right, multiplier badge under the strikeline, score + streak bottom left; rail lamps hidden.
+- Background (cfg.backdrop): venue / song cover (drifting, beat-lit, falls back to dark) / dark with key-colour glow.
+- Hit ratings (cfg.hit_ratings 0/1/2 with ms), PERFECT xN for runs of 3+. Highway length (cfg.hw_length: z_far 8.5/11/14.5).
+- Modifiers: cfg.sudden_death (miss_note -> rock_change(-2)), cfg.hard_rock (losses doubled in rock_change).
+- Achievements: rank_a, rank_s, rank_splus, perfect300, sudden, pro_window, hard_rock (AchPlay has accuracy etc).

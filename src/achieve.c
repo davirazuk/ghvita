@@ -41,6 +41,13 @@ static const Achievement list[] = {
     {"brutal", "Giant Killer", "Beat a Brutal rival on Expert"},
     {"speed125", "Speed Demon", "Finish a song at 125% song speed or faster"},
     {"speed150", "Ludicrous", "4 stars at 150% song speed"},
+    {"rank_a", "Sharp", "An A rank (90% accuracy) on Hard or Expert"},
+    {"rank_s", "Surgical", "An S rank (95% accuracy) on Expert"},
+    {"rank_splus", "Perfectionist", "S+ on Expert: 98% accuracy and a full combo"},
+    {"perfect300", "Laser Focus", "300 Perfect hits in one song"},
+    {"sudden", "No Second Chances", "Finish a song on Hard or Expert with Sudden death on"},
+    {"pro_window", "Pro Timing", "4 stars on Expert with the Pro timing window"},
+    {"hard_rock", "Tough Crowd", "Finish an Expert song with the Hard rock meter"},
 };
 #define N (int)(sizeof(list) / sizeof(list[0]))
 static bool have[N];
@@ -135,6 +142,13 @@ int achieve_check(const AchPlay * p, int * out, int max)
         else if (!strcmp(id, "gold")) v = done && p->stars >= 6;
         else if (!strcmp(id, "speed125")) v = done && p->speed >= 125;
         else if (!strcmp(id, "speed150")) v = done && p->speed >= 150 && p->stars >= 4;
+        else if (!strcmp(id, "rank_a")) v = done && !vocal && p->diff >= DIFF_HARD && p->accuracy >= 900;
+        else if (!strcmp(id, "rank_s")) v = done && !vocal && expert && p->accuracy >= 950;
+        else if (!strcmp(id, "rank_splus")) v = done && !vocal && expert && p->accuracy >= 980 && p->fc;
+        else if (!strcmp(id, "perfect300")) v = done && p->perfects >= 300;
+        else if (!strcmp(id, "sudden")) v = done && !vocal && p->sudden_death && p->diff >= DIFF_HARD;
+        else if (!strcmp(id, "pro_window")) v = done && expert && p->window == 3 && p->stars >= 4;
+        else if (!strcmp(id, "hard_rock")) v = done && expert && p->hard_rock;
         else if (!strcmp(id, "streak100")) v = !p->practice && p->best_streak >= 100;
         else if (!strcmp(id, "streak500")) v = !p->practice && p->best_streak >= 500;
         else if (!strcmp(id, "streak1000")) v = !p->practice && p->best_streak >= 1000;

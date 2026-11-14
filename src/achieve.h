@@ -13,6 +13,10 @@ typedef struct {
     int daily_streak, library;
     int battle, rival;          // battle: 0 none, 1 won, 2 lost; the rival's level (0 easy .. 3 brutal)
     int speed;                  // the song speed, % (100 as written)
+    int accuracy;               // tenths of a percent (game.h Result.accuracy_x10), 0 when not rated
+    int perfects;
+    bool sudden_death, hard_rock;
+    int window;                 // cfg.hit_window: 3 is Pro
 } AchPlay;
 
 int achieve_count(void);

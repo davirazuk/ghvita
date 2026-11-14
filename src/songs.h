@@ -11,6 +11,7 @@ typedef struct {
     uint8_t stars;          // 0-6 (6: gold)
     uint8_t percent;
     uint8_t fc;
+    uint16_t acc;           // the best accuracy, in tenths of a percent (0: none kept: from before build 227)
 } Score;
 
 typedef struct {
@@ -95,7 +96,7 @@ typedef struct {
     bool metronome;         // practice ticks along with the beat
     int song_speed;         // the song's speed in %, outside practice (below 100 the run isn't saved)
     bool light_fx;          // the lighter look: no ring, glitter, smoke, backlight or crowd flashes (for a steady frame rate)
-    int hit_window;         // 0 normal, 1 strict, 2 lenient
+    int hit_window;         // 0 normal (85 ms), 1 strict (70), 2 lenient (110), 3 pro (55)
     int rival;              // battle: the rival's skill, 0 easy 1 normal 2 hard 3 brutal
     bool vanish;            // notes vanish before they reach the strikeline
     bool no_miss_sound;
@@ -123,7 +124,13 @@ typedef struct {
     int sing_diff;          // the singing along is judged at: the instrument's would be Expert (MEDIUM as set)
     bool still_camera;      // the venue's wide shot only: no cuts to its other camera angles (and 7.5 MB less loaded)
     int frame_rate;         // in songs: 60, or 30 (every other frame drawn; buttons still read 60 times a second)
-    int gem_style;          // 0 World Tour's gems, 1 Flash: round flat discs on a plain dark board
+    int gem_style;          // 0 World Tour's gems, 1 Flash: domed caps and ring targets, drawn flat on the screen
+    int hud_style;          // 0 World Tour's rock dome and counters, 1 Flash: bars beside the highway, a multiplier badge
+    int backdrop;           // 0 the venue and band, 1 the song's cover art (Flash's band photo), 2 dark
+    int hit_ratings;        // 0 off, 1 PERFECT / GREAT / GOOD over the strikeline, 2 the same with the milliseconds
+    int hw_length;          // the highway's far end: 0 short, 1 normal, 2 long
+    bool sudden_death;      // one missed note fails the song
+    bool hard_rock;         // the rock meter falls twice as fast
     int last_part, last_diff;
     int sort;
     char last_song[256];

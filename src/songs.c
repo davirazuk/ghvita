@@ -403,9 +403,9 @@ static void load_scores(void)
         if (!tab)
             continue;
         *tab = 0;
-        int part, diff, score, stars, percent, fc;
-        long when = 0;      // lines from before build 52 have no time
-        if (sscanf(tab + 1, "%d %d %d %d %d %d %ld", &part, &diff, &score, &stars, &percent, &fc, &when) < 6)
+        int part, diff, score, stars, percent, fc, acc = 0;
+        long when = 0;      // lines from before build 52 have no time, from before 227 no accuracy
+        if (sscanf(tab + 1, "%d %d %d %d %d %d %ld %d", &part, &diff, &score, &stars, &percent, &fc, &when, &acc) < 6)
             continue;
         if (part < 0 || part >= PART_COUNT || diff < 0 || diff >= DIFF_COUNT)
             continue;
@@ -421,6 +421,8 @@ static void load_scores(void)
                     b->percent = percent;
                 }
                 b->fc |= fc;
+                if (acc > b->acc && acc <= 1000)
+                    b->acc = (uint16_t)acc;
                 break;
             }
         }
@@ -722,14 +724,16 @@ void songs_save_score(Song * s, int part, int diff, Score score)
         b->percent = score.percent;
     }
     b->fc |= score.fc;
+    if (score.acc > b->acc)
+        b->acc = score.acc;
     char path[400];
     snprintf(path, sizeof(path), "%sscores.txt", player_dir());
     FILE * f = fopen(path, "a");
     if (!f)
         return;
     long now = (long)time(NULL);
-    fprintf(f, "%s\t%d %d %d %d %d %d %ld\n", base_name(s->folder), part, diff, score.score, score.stars, score.percent,
-            score.fc, now);
+    fprintf(f, "%s\t%d %d %d %d %d %d %ld %d\n", base_name(s->folder), part, diff, score.score, score.stars, score.percent,
+            score.fc, now, score.acc);
     fclose(f);
     s->last_played = now;
 }
@@ -787,6 +791,8 @@ void config_defaults(void)
     cfg.speed = 5;
     cfg.song_speed = 100;
     cfg.frame_rate = 60;
+    cfg.hit_ratings = 1;
+    cfg.hw_length = 1;
     snprintf(cfg.highway, sizeof(cfg.highway), "judy");
     snprintf(cfg.venue, sizeof(cfg.venue), "song");
     cfg.tilt = true;
@@ -857,12 +863,24 @@ void config_load(void)
             cfg.frame_rate = n == 30 ? 30 : 60;
         else if (strcmp(k, "gem_style") == 0)
             cfg.gem_style = n == 1 ? 1 : 0;
+        else if (strcmp(k, "hud_style") == 0)
+            cfg.hud_style = n == 1 ? 1 : 0;
+        else if (strcmp(k, "backdrop") == 0)
+            cfg.backdrop = n >= 0 && n <= 2 ? n : 0;
+        else if (strcmp(k, "hit_ratings") == 0)
+            cfg.hit_ratings = n >= 0 && n <= 2 ? n : 1;
+        else if (strcmp(k, "hw_length") == 0)
+            cfg.hw_length = n >= 0 && n <= 2 ? n : 1;
+        else if (strcmp(k, "sudden_death") == 0)
+            cfg.sudden_death = n != 0;
+        else if (strcmp(k, "hard_rock") == 0)
+            cfg.hard_rock = n != 0;
         else if (strcmp(k, "metronome") == 0)
             cfg.metronome = n != 0;
         else if (strcmp(k, "song_speed") == 0)
             cfg.song_speed = n < 50 ? 50 : n > 150 ? 150 : n / 5 * 5;
         else if (strcmp(k, "hit_window") == 0)
-            cfg.hit_window = n < 0 ? 0 : n > 2 ? 2 : n;
+            cfg.hit_window = n < 0 ? 0 : n > 3 ? 3 : n;
         else if (strcmp(k, "rival") == 0)
             cfg.rival = n < 0 ? 0 : n > 3 ? 3 : n;
         else if (strcmp(k, "vanish") == 0)
@@ -982,6 +1000,8 @@ void config_save(void)
     fprintf(f, "no_ghost = %d\nnotes_look = 1\nrival = %d\nhit_window = %d\nlight_fx = %d\nmetronome = %d\nsong_speed = %d\n", cfg.no_ghost, cfg.rival, cfg.hit_window,
             cfg.light_fx, cfg.metronome, cfg.song_speed);
     fprintf(f, "still_camera = %d\nframe_rate = %d\ngem_style = %d\n", cfg.still_camera, cfg.frame_rate, cfg.gem_style);
+    fprintf(f, "hud_style = %d\nbackdrop = %d\nhit_ratings = %d\nhw_length = %d\nsudden_death = %d\nhard_rock = %d\n", cfg.hud_style,
+            cfg.backdrop, cfg.hit_ratings, cfg.hw_length, cfg.sudden_death, cfg.hard_rock);
     fclose(f);
     remove(path);
     rename(tmp, path);
