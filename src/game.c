@@ -3956,51 +3956,23 @@ static void draw_rail_meter(void)
     gfx_3d(G.proj, G.view);
     gfx_blend(BLEND_ALPHA);
     rail_quad(atlas_get(res.hud, "hud_rope"), rope0, rope1, z0, z1, true, false, WHITE);
-    gfx_2d();
-    const float lz = z0 + 0.5f, lg = (z1 - 0.35f - lz) / 5, fx = rope1 + 0.02f;
+    // the lamps lie on the board's plane beside the rail, out from the rope, so the perspective turns them with it
+    const float lz = z0 + 0.35f, lg = (z1 - lz) / 5, foot = rope1 + 0.03f, reach = 0.42f;
     for (int i = 0; i < 5; i++) {
         char name[32];
         int state = i < lit ? 2 : half && i == lit ? 1 : 0;
         snprintf(name, sizeof(name), "lamp_%d%s", state, hue);
         const Sprite * s = atlas_get(res.game, name);
-        // its foot on the rope, and the rail's way on the screen there
-        float zc = lz + lg * (i + 0.5f), a[2], b[2], f[2], o[2];
-        project(fx, 0.016f, zc - lg * 0.3f, &a[0], &a[1]);
-        project(fx, 0.016f, zc + lg * 0.3f, &b[0], &b[1]);
-        project(fx, 0.016f, zc, &f[0], &f[1]);
-        project(fx - 0.5f, 0.016f, zc, &o[0], &o[1]);           // outward, away from the lanes
-        float tx = b[0] - a[0], ty = b[1] - a[1], tl = hypotf(tx, ty);
-        if (tl < 1)
-            continue;
-        tx /= tl;
-        ty /= tl;
-        float nx = -ty, ny = tx;
-        if (nx * (o[0] - f[0]) + ny * (o[1] - f[1]) < 0) {
-            nx = -nx;
-            ny = -ny;
-        }
-        // tipped up towards the top of the screen a little, as a lamp stood on a rail is seen from above it
-        const float tip = 0.22f;
-        float ux = nx * cosf(tip) - ny * sinf(tip) * (nx > 0 ? -1 : 1), uy = ny * cosf(tip) + nx * sinf(tip) * (nx > 0 ? -1 : 1);
-        float ul = hypotf(ux, uy);
-        ux /= ul;
-        uy /= ul;
-        const float wide = tl * 0.72f, len = wide * 1.9f, vx = -uy * wide, vy = ux * wide;
-        const float mx0 = f[0], my0 = f[1];
-        const float p[4][3] = {{mx0 + ux * len - vx, my0 + uy * len - vy, 0}, {mx0 - vx, my0 - vy, 0}, {mx0 + vx, my0 + vy, 0},
-                               {mx0 + ux * len + vx, my0 + uy * len + vy, 0}};
-        const float uv[4][2] = {{s->u0, s->v0}, {s->u1, s->v0}, {s->u1, s->v1}, {s->u0, s->v1}};
+        float zc = lz + lg * (i + 0.5f), d = lg * 0.78f;
         // unlit, a dark red glass, not gold
-        const uint32_t lc = state == 0 ? RGBA(235, 120, 95, 255) : WHITE, c[4] = {lc, lc, lc, lc};
-        gfx_tex(s->tex);
-        gfx_quad(p, uv, c);
+        const uint32_t lc = state == 0 ? RGBA(235, 120, 95, 255) : WHITE;
+        flat(foot - reach, foot, zc - d / 2, zc + d / 2, 0.018f, s, 0, 1, lc, lc);
         if (state == 2) {
-            // lit, it throws light round itself
             const uint32_t light = G.sp_active ? RGBA(95, 225, 255, 255) : base_m >= 3 ? RGBA(255, 130, 225, 255)
                                  : base_m == 2 ? RGBA(90, 245, 110, 255) : RGBA(255, 196, 70, 255);
-            float mx = mx0 + ux * len * 0.7f, my = my0 + uy * len * 0.7f, r = wide * 2.2f;
             gfx_blend(BLEND_ADD);
-            gfx_sprite(atlas_get(res.game, "glow"), mx - r, my - r, r * 2, r * 2, with_alpha(light, 0.55f));
+            flat(foot - reach * 1.6f, foot + 0.1f, zc - d, zc + d, 0.02f, atlas_get(res.game, "glow"), 0, 1,
+                 with_alpha(light, 0.5f), with_alpha(light, 0.5f));
             gfx_blend(BLEND_ALPHA);
         }
     }
@@ -4015,11 +3987,11 @@ static void draw_rail_meter(void)
             uint32_t bc = G.sp_active ? RGBA(95, 225, 255, 255) : m >= 3 ? RGBA(255, 130, 225, 255)
                         : RGBA(90, 245, 110, 255);
             gfx_blend(BLEND_ADD);
-            board(-HALF_W - 0.30f, 0.0f, z1 + 0.05f - 0.4f * G.mult_pop, 2.6f * G.mult_pop, 2.0f * G.mult_pop,
+            board(-HALF_W - 0.34f, 0.0f, z1 + 0.12f - 0.4f * G.mult_pop, 2.6f * G.mult_pop, 2.0f * G.mult_pop,
                   atlas_get(res.game, "glow"), 0, 0, 1, 1, with_alpha(bc, G.mult_pop));
             gfx_blend(BLEND_ALPHA);
         }
-        board(-HALF_W - 0.30f, 0.02f, z1 + 0.05f, 0.8f * pop, 0.4f * pop, atlas_get(res.game, name), 0, 0, 1, 1,
+        board(-HALF_W - 0.34f, 0.02f, z1 + 0.12f, 0.95f * pop, 0.475f * pop, atlas_get(res.game, name), 0, 0, 1, 1,
               G.sp_active ? RGBA(170, 225, 255, 255) : WHITE);
     }
 }

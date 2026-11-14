@@ -5587,7 +5587,7 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
-        "The multiplier lamps on the highway's rail stand square to it, spaced out on a thin gold rope instead of buried in it.",
+        "The multiplier lamps lie along the highway's rail in its own perspective, with the x4 plate at the end of the row.",
         "The downloader keeps its folder tidy: old search covers (they had piled up past 100 MB) and dead download folders go.",
         "Flash mode is now just its engine: GAME, Engine: Guitar Flash plays by Flash's rules on the normal highway.",
         "GAME, Note motion: 24 fps steps the notes like Guitar Flash, at 30 or 60 fps. The flat Flash look is gone.",
