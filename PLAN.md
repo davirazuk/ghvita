@@ -427,3 +427,11 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 - audio_song_time smoothed: free-running at song speed, 6% a frame toward the audio anchor, reset over 40 ms or on a
   jump (per-frame clock wobble 0.30 -> 0.04 ms on PC)
 - humanbot with no deliberate faults: Plug In Baby guitar 687/687, bass 793/793 (judging is exact)
+
+## GHWT HUD amp, GH Star Power meter rules (v232, 2026-11-14)
+
+- HUD (hud_style 0): dome moved up (dy 204) onto hud_score_body (the amp, 256 art at 0.62): score in its window (lcd
+  green), multiplier as hud_score_nixie_{1-4}a / {2,4,6,8}b in the ring (drawn behind the body: the ring is glass),
+  font fallback for bass x5/x6 and x10/x12; hud_score_flash on a multiplier rise. Streak counter plate dropped
+- SP: activation +0.1 rock; while active hits +0.036 (x2), misses x0.5 (WT rules only; Flash keeps its own)
+- Flash notes 0.43 radius, side 0.27, lit rim

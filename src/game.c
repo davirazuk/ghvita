@@ -2503,7 +2503,8 @@ static void miss_note(int i)
     if (GF.on)
         rock_change(-2 / 60.0f);
     else
-        rock_change(-loss[G.diff] * (G.roll && G.roll[i] ? 0.25f : G.drums ? 0.5f : 1));
+        // in Star Power the crowd's with you: a miss costs half, as in GH
+        rock_change(-loss[G.diff] * (G.roll && G.roll[i] ? 0.25f : G.drums ? 0.5f : 1) * (G.sp_active ? 0.5f : 1));
     if (G.phrase[i] >= 0 && G.phrase_ok[G.phrase[i]]) {
         G.phrase_ok[G.phrase[i]] = false;
     }
@@ -2562,7 +2563,7 @@ static void hit_note(int i)
         G.cheer = 1;
         sound_play(res.snd[SND_CHEER1 + rand() % 3], cfg.crowd_vol * 0.08f, false);
     }
-    rock_change(GF.on ? 1 / 60.0f : 0.018f);
+    rock_change(GF.on ? 1 / 60.0f : G.sp_active ? 0.036f : 0.018f);     // Star Power fills it twice as fast
     for (int l = 0; l < 6 && struck; l++)
         if (n->frets & (1 << l))
             G.flame_t[l] = G.t;
@@ -2921,6 +2922,8 @@ static void activate_sp(void)
         float s = G.sp, secs = s <= 0.75f ? 7.375f + (s - 0.5f) / 0.25f * 4.0833f : 11.4583f + (s - 0.75f) / 0.25f * 4.125f;
         GF.sp_rate = s / secs;
     }
+    if (!GF.on)
+        rock_change(0.1f);              // GH: Star Power lifts the meter, the way to save a song from the red
     G.kick = 1;
     G.sp_on_t = G.t;
     G.sp_last_q = chart_quarters(G.chart, G.t);
@@ -3991,8 +3994,8 @@ static void f2_twinkle(float x, float y, float r, uint32_t c)
 static void flash_gem(int l, float z, int c, int kind, float a, float size)
 {
     float sx, sy, rx, ry;
-    flash_spot(l, z, 0.38f * size, &sx, &sy, &rx, &ry);
-    float h = rx * 0.2f, ol = fmaxf(2, rx * 0.09f);
+    flash_spot(l, z, 0.43f * size, &sx, &sy, &rx, &ry);
+    float h = rx * 0.27f, ol = fmaxf(2, rx * 0.09f);
     uint32_t black = with_alpha(RGBA(12, 10, 18, 255), a);
     flash_ell(sx, sy + ry * 0.35f, rx * 1.1f, ry * 1.1f, with_alpha(RGBA(0, 0, 0, 255), a * 0.45f), with_alpha(RGBA(0, 0, 0, 255), 0));
     // the outline: the whole puck's shape, a size bigger, in black
@@ -4014,6 +4017,8 @@ static void flash_gem(int l, float z, int c, int kind, float a, float size)
         flash_ell(sx, ty, rx * 0.94f, ry * 0.94f, flash_col(c, 1.3f, a), flash_col(c, 0.95f, a));
         flash_annulus(sx, ty, rx * 0.56f, ry * 0.56f, rx * 0.68f, ry * 0.68f, flash_col(c, 0.7f, a * 0.8f), flash_col(c, 0.7f, a * 0.8f));
     }
+    // the top's rim catching the light along its far edge
+    flash_annulus(sx, ty, rx * 0.84f, ry * 0.84f, rx * 0.96f, ry * 0.96f, with_alpha(WHITE, 0), with_alpha(WHITE, a * (kind == 2 ? 0.2f : 0.45f)));
     // light on it: a soft glint up and to the left, a twinkle in it
     flash_ell(sx - rx * 0.3f, ty - ry * 0.2f, rx * 0.36f, ry * 0.3f, with_alpha(WHITE, a * 0.5f), with_alpha(WHITE, 0));
     f2_twinkle(sx - rx * 0.34f, ty - ry * 0.26f, rx * 0.3f, with_alpha(WHITE, a * 0.95f));
@@ -5117,7 +5122,7 @@ static void draw_hud(void)
     if (cfg.hud_style == 1)
         draw_flash_hud();
     else {
-        const float k = 0.6f, dx = 30, dy = 288;           // the dome's 256x256 texture
+        const float k = 0.6f, dx = 30, dy = 204;           // the dome's 256x256 texture
         const float cx = dx + 129 * k, cy = dy + 124 * k;   // the centre of the dome's arc
         const float pi = 3.14159265f;
         // six tubes stand round the dome, lit as the meter fills: orange, blue once Star Power can be used
@@ -5143,18 +5148,40 @@ static void draw_hud(void)
                 gfx_blend(BLEND_ALPHA);
             }
         }
-        // the score counter the dome stands on, the streak plate under it
-        const float sk = 0.62f, sx = cx - 129 * sk, sy = dy + 172 * k - 66 * sk;
-        gfx_rect(sx + 22 * sk, sy + 78 * sk, 212 * sk, 44 * sk, RGBA(2, 12, 4, 255));
-        hud_at("hud_rm_solo_bottom", sx, sy, sk, sk, 0, 0, 256, 128, WHITE);
+        // World Tour's score amp under the dome: the score glowing green in its window, the multiplier a nixie tube
+        // in its ring (orange, blue in Star Power), lit up a moment as it climbs. Its 256 art at ak
+        const float ak = 0.62f, ax = cx - 136 * ak, ay = dy + 166 * k;
+        int m = multiplier();
+        static const char * const nix_a[5] = {NULL, "hud_score_nixie_1a", "hud_score_nixie_2a", "hud_score_nixie_3a", "hud_score_nixie_4a"};
+        const char * nix = NULL;
+        if (G.sp_active)
+            nix = m == 2 ? "hud_score_nixie_2b" : m == 4 ? "hud_score_nixie_4b" : m == 6 ? "hud_score_nixie_6b" : m == 8 ? "hud_score_nixie_8b" : NULL;
+        else if (m >= 1 && m <= 4)
+            nix = nix_a[m];
+        float rcx = ax + 136 * ak, rcy = ay + 150 * ak, rr = 56 * ak;
+        gfx_rect(ax + 46 * ak, ay + 30 * ak, 176 * ak, 42 * ak, RGBA(2, 10, 4, 255));
+        if (nix)
+            hud_at(nix, rcx - rr + 6 * ak, rcy - rr, ak * 112 / 128, ak * 112 / 128, 0, 0, 128, 128, WHITE);
+        else {
+            // past the tubes the art has (a bass's x5, x6, or x10 and x12 in Star Power): the number lit in the glass
+            flash_ell(rcx, rcy, rr, rr, RGBA(30, 20, 14, 255), RGBA(12, 8, 6, 255));
+            char mt[8];
+            snprintf(mt, sizeof(mt), "%d", m);
+            font_draw_shadow(res.title, mt, rcx + 8 * ak, rcy - 24 * ak, 52 * ak,
+                             G.sp_active ? RGBA(120, 220, 255, 255) : RGBA(255, 150, 50, 255), ALIGN_CENTER);
+        }
+        gfx_sprite(atlas_get(res.hud, "hud_score_body"), ax, ay, 256 * ak, 256 * ak, WHITE);
+        if (G.mult_pop > 0.02f) {
+            gfx_blend(BLEND_ADD);
+            float fw = 150 * ak * (1 + 0.3f * (1 - G.mult_pop));
+            gfx_sprite(atlas_get(res.hud, "hud_score_flash"), rcx - fw / 2, rcy - fw / 2, fw, fw,
+                       fade_alpha(G.sp_active ? RGBA(130, 210, 255, 255) : RGBA(255, 190, 110, 255), G.mult_pop));
+            gfx_blend(BLEND_ALPHA);
+        }
         // the counter rolls up to the score rather than jumping
         double gap = G.score - G.shown_score;
         G.shown_score = gap < 1 ? G.score : G.shown_score + gap * 0.25 + 1;
-        lcd("lcd_green", (long)G.shown_score, 7, sx + 226 * sk, sy + 100 * sk - 13, 26);
-        const float kx = 0.54f, ky = 0.42f, px = cx - 128 * kx, py = sy + 122 * sk - 24 * ky;
-        gfx_rect(px + 40 * kx, py + 38 * ky, 176 * kx, 50 * ky, RGBA(3, 3, 3, 255));
-        hud_at("hud_counter_body", px, py, kx, ky, 0, 0, 256, 128, WHITE);
-        lcd("lcd_orange", G.streak, 4, px + 214 * kx, py + 62 * ky - 9, 19);
+        lcd("lcd_green", (long)G.shown_score, 7, ax + 216 * ak, ay + 38 * ak, 26 * ak * 1.15f);
         // the dome: the metal first, its bright window set inside it with ROCK in black, the three sectors pale, the one
         // the needle's in lit up. The art's plinth under the rim is cropped: the dome sits on the score plate
         float h = G.rock;
@@ -5162,6 +5189,7 @@ static void draw_hud(void)
         if (h < 0.25f)
             w0 *= 0.65f + 0.35f * fabsf(sinf(t * 6));        // failing: the red throbs
         gfx_sprite_uv(atlas_get(res.hud, "hud_rock_body"), dx, dy, 256 * k, 172 * k, 0, 0, 1, 172.0f / 256, RGBA(245, 230, 195, 255));
+        (void)m;
         const float wk = k * 0.9f, wx = cx - 129 * wk, wy = cy - 124 * wk;
         if (w0 > 0)
             hud_at("hud_rock_bg_red", wx, wy, wk, wk, 0, 0, 256, 256, fade_alpha(WHITE, w0));
