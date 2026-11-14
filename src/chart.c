@@ -66,6 +66,29 @@ Chart * chart_load(const char * path)
         TAKE(p->solos, p->solo_count, Range)
     }
 #undef TAKE
+    // cues ride with the sections, marked by a leading \1: apart, the sections are only the song's own
+    int ncue = 0;
+    for (int i = 0; i < c->section_count; i++)
+        ncue += c->sections[i].name[0] == 1;
+    if (ncue) {
+        c->cues = malloc(ncue * sizeof(Section));
+        c->own_sections = malloc((c->section_count - ncue + 1) * sizeof(Section));
+        if (!c->cues || !c->own_sections)
+            goto bad;
+        int a = 0, b = 0;
+        for (int i = 0; i < c->section_count; i++) {
+            const Section * s = &c->sections[i];
+            if (s->name[0] == 1) {
+                c->cues[a] = *s;
+                memmove(c->cues[a].name, s->name + 1, sizeof(s->name) - 1);
+                a++;
+            } else
+                c->own_sections[b++] = *s;
+        }
+        c->cue_count = a;
+        c->sections = c->own_sections;
+        c->section_count = b;
+    }
     return c;
 bad:
     plat_log("chart: %s is damaged", path);
@@ -78,6 +101,8 @@ void chart_free(Chart * c)
     if (!c)
         return;
     free(c->parts);
+    free(c->cues);
+    free(c->own_sections);
     free(c->blob);
     free(c);
 }

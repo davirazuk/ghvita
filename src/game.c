@@ -12,6 +12,7 @@
 #include "res.h"
 #include "audio.h"
 #include "whammybar.h"
+#include "cues.h"
 
 // seconds early or late a note can still be hit: Normal is Warriors of Rock-ish lenient; Options can widen or narrow it
 // the hit window either way: Normal 85 ms, Strict 70, Lenient 110, Pro 55
@@ -71,6 +72,11 @@ typedef struct {
     int lane;                   // -1: right across
 } Zone;
 
+// the looks of a chart's own light show (Rock Band's lighting cues)
+enum { CUE_NONE, CUE_VERSE, CUE_CHORUS, CUE_COOL, CUE_WARM, CUE_DISCHORD, CUE_STOMP, CUE_HARMONY, CUE_FRENZY,
+       CUE_SILHOUETTE, CUE_SILHOUETTE_SPOT, CUE_SEARCH, CUE_STROBE_SLOW, CUE_STROBE_FAST, CUE_BLACK_SLOW, CUE_BLACK_FAST,
+       CUE_BLACK_SPOT, CUE_BRE, CUE_INTRO };
+
 static struct {
     Song * song;
     Chart * chart;
@@ -129,6 +135,8 @@ static struct {
     double miss_t[6];                   // a lane's last miss: its cup flashes red
     double wave_t;
     double strobe_t;                    // a chorus came in: the stage strobes
+    int cue_i, cue_mode, cue_step;      // the chart's light show: the next cue, the look it's in, its keyframe
+    double cue_t, flare_t, flare_len;   // when the look began; a flare's flash
     float kick;
     double shown_score;                 // what the counter shows, rolling up to the score
     char ach_text[48];                  // an achievement just earned, shown along the bottom
@@ -718,7 +726,9 @@ static void draw_rig(double beat, float pulse)
 // and Star Power. They swing in from nothing and fade out the same way
 static void draw_lasers(double beat, float pulse)
 {
-    bool on = (G.big_section && G.rock >= 0.5f) || G.sp_active;
+    bool cued = G.chart->cue_count && G.cue_mode != CUE_NONE;
+    bool on = cued ? G.cue_mode == CUE_SEARCH || G.cue_mode == CUE_FRENZY || G.cue_mode == CUE_BRE || G.sp_active
+                   : (G.big_section && G.rock >= 0.5f) || G.sp_active;
     G.laser += ((on ? 1 : 0) - G.laser) * ease(0.05f);
     if (G.laser < 0.02f || cfg.light_fx || !G.marks)
         return;
@@ -947,6 +957,57 @@ static uint32_t col3(const float c[3], float a)
 // where the chart names none) and as bright as the song is loud; a solo goes through them on every beat, a streak at
 // the top multiplier heats them up, Star Power floods the stage blue-white and a band that's failing plays under a
 // guttering red. The stage itself takes a little of the show's colour, and the camera never quite stands still.
+static float clamp01(float v);
+// the chart's light show up to now: a look, a keyframe step, a flare or the jets
+static void run_cues(void)
+{
+    const Chart * c = G.chart;
+    if (!c->cue_count)
+        return;
+    if (G.cue_i > 0 && c->cues[G.cue_i - 1].time / 1e6 > G.t + 0.05) {
+        // back in the song (practice, a restart): from the top
+        G.cue_i = G.cue_step = 0;
+        G.cue_mode = CUE_NONE;
+    }
+    static const struct { const char * name; int mode; } looks[] = {
+        {"verse", CUE_VERSE}, {"chorus", CUE_CHORUS}, {"manual cool", CUE_COOL}, {"loop cool", CUE_COOL},
+        {"manual warm", CUE_WARM}, {"loop warm", CUE_WARM}, {"dischord", CUE_DISCHORD}, {"stomp", CUE_STOMP},
+        {"harmony", CUE_HARMONY}, {"frenzy", CUE_FRENZY}, {"silhouettes", CUE_SILHOUETTE},
+        {"silhouettes spot", CUE_SILHOUETTE_SPOT}, {"searchlights", CUE_SEARCH}, {"sweep", CUE_SEARCH},
+        {"strobe slow", CUE_STROBE_SLOW}, {"strobe fast", CUE_STROBE_FAST}, {"blackout slow", CUE_BLACK_SLOW},
+        {"blackout fast", CUE_BLACK_FAST}, {"blackout spot", CUE_BLACK_SPOT}, {"bre", CUE_BRE}, {"intro", CUE_INTRO},
+        {"default", CUE_NONE}};
+    while (G.cue_i < c->cue_count && c->cues[G.cue_i].time / 1e6 <= G.t) {
+        const char * n = c->cues[G.cue_i++].name;
+        bool late = G.t - c->cues[G.cue_i - 1].time / 1e6 > 0.3;    // caught up after a seek: no flashes
+        if (!strcmp(n, "next"))
+            G.cue_step++;
+        else if (!strcmp(n, "prev"))
+            G.cue_step--;
+        else if (!strcmp(n, "first"))
+            G.cue_step = 0;
+        else if (!strcmp(n, "bonusfx")) {
+            if (!late && G.rock >= 0.4f) {
+                G.pyro_t = G.t;
+                party();
+            }
+        } else if (!strncmp(n, "flare", 5)) {
+            if (!late) {
+                G.flare_t = G.t;
+                G.flare_len = strstr(n, "slow") ? 0.9 : 0.3;
+            }
+        } else
+            for (size_t k = 0; k < sizeof(looks) / sizeof(looks[0]); k++)
+                if (!strcmp(n, looks[k].name)) {
+                    if (looks[k].mode != G.cue_mode)
+                        G.cue_t = G.t;
+                    G.cue_mode = looks[k].mode;
+                    G.cue_step = 0;
+                    break;
+                }
+    }
+}
+
 static void draw_stage(void)
 {
     if (!G.venue && cfg.backdrop == 1 && G.art) {
@@ -983,6 +1044,77 @@ static void draw_stage(void)
     float gl = (0.3f + 0.55f * G.band_loud) + 0.4f * pulse * (0.4f + 0.6f * inten);
     float lvl = (hot ? 0.64f : 0.5f) + 0.07f * pulse * (0.3f + energy);
     float t = (float)G.t;
+    run_cues();
+    if (G.chart->cue_count && G.cue_mode != CUE_NONE) {
+        // the chart's own show: the look its lighting cue asks for, stepped on by its keyframes
+        int st = ((G.cue_step % 3) + 3) % 3;
+        float since = (float)(G.t - G.cue_t);
+        switch (G.cue_mode) {
+        case CUE_VERSE: case CUE_INTRO:
+            pal = cool[st];
+            inten = 0.8f;
+            gl = 0.3f + 0.4f * G.band_loud + 0.25f * pulse;
+            lvl = G.cue_mode == CUE_INTRO ? 0.38f : 0.5f;
+            break;
+        case CUE_CHORUS:
+            pal = warm[st];
+            gl = 0.55f + 0.4f * G.band_loud + 0.5f * pulse;
+            lvl = 0.64f + 0.08f * pulse;
+            break;
+        case CUE_COOL: case CUE_WARM:
+            pal = (G.cue_mode == CUE_COOL ? cool : warm)[st];
+            break;
+        case CUE_HARMONY:
+            pal = cool[st];
+            for (int i = 0; i < 3; i++) {
+                key[i] = palettes[pal][0][i] * 0.6f + 0.4f;
+                wash[i] = palettes[pal][1][i] * 0.6f + 0.35f;
+            }
+            gl = 0.4f + 0.15f * sinf(t * 1.3f);
+            lvl = 0.52f;
+            break;
+        case CUE_DISCHORD:
+            pal = ((int)floor(beat * 2) & 1) ? 0 : 3;      // red against green, clashing on the off-beats
+            gl = 0.45f + 0.4f * (0.5f + 0.5f * sinf(t * 23));
+            break;
+        case CUE_STOMP:
+            gl = 0.12f + 1.0f * pulse * pulse;
+            lvl = 0.4f + 0.25f * pulse * pulse;
+            break;
+        case CUE_FRENZY: case CUE_BRE:
+            pal = ((int)floor(beat * 2) % 6 + 6) % 6;
+            gl = 0.7f + 0.4f * pulse;
+            lvl = 0.62f + 0.08f * pulse;
+            break;
+        case CUE_SILHOUETTE: case CUE_SILHOUETTE_SPOT:
+            // the stage in the dark, the lights blazing behind: the band in black against them
+            pal = G.cue_mode == CUE_SILHOUETTE_SPOT ? warm[st] : cool[st];
+            gl = 1.1f;
+            lvl = 0.24f;
+            break;
+        case CUE_SEARCH:
+            pal = 2;
+            gl = 0.5f + 0.3f * pulse;
+            lvl = 0.38f;
+            break;
+        case CUE_STROBE_SLOW: case CUE_STROBE_FAST:
+            gl = 0.3f;
+            lvl = 0.3f;
+            break;
+        case CUE_BLACK_SLOW: case CUE_BLACK_FAST: case CUE_BLACK_SPOT: {
+            float d = clamp01(since / (G.cue_mode == CUE_BLACK_SLOW ? 1.2f : 0.08f));
+            gl *= 1 - 0.9f * d;
+            lvl *= 1 - (G.cue_mode == CUE_BLACK_SPOT ? 0.5f : 0.62f) * d;
+            break;
+        }
+        default:
+            break;
+        }
+        if (G.cue_mode != CUE_HARMONY) {
+            memcpy(key, palettes[pal][0], sizeof(key));
+            memcpy(wash, palettes[pal][1], sizeof(wash));
+        }
+    }
     if (G.sp_active) {
         float sb = 0.35f + 0.65f * (1 - frac) * (1 - frac) * (1 - frac);
         const float spk[3] = {0.6f + 0.4f * sb, 0.85f + 0.15f * sb, 1};
@@ -1220,6 +1352,26 @@ static int kit_pads(const Note * n)
 }
 
 // the cell a member's on: the arm comes down to land on the next stroke, rebounds, and holds until the one after
+// guitars and bass (tools/band.py GROOVE, STRUMS): the body grooves through its 4-beat loop in 16 steps, locked to
+// the song's beat; each step has 3 frames of a strum (ready, struck, through) the chart drives. Between their parts
+// they keep grooving, hand ready, as GH's band does
+static int band_groove_cell(const BandPart * b, double phase, bool playing)
+{
+    int step = (int)(phase * 16) & 15, strum = 0;
+    if (b->part && playing) {
+        double since = G.t - b->last_hit;
+        if (since >= 0 && since < 0.07)
+            strum = 1;
+        else if (since >= 0 && since < 0.2 && !(G.t > b->hit_t - 0.05))
+            strum = 2;
+    } else if (!b->part && playing) {
+        // no chart for them: strumming eighths
+        double e = fmod(phase * 8, 1);
+        strum = e < 0.25 ? 1 : e < 0.6 ? 2 : 0;
+    }
+    return step * 3 + strum;
+}
+
 static int band_cell(int r, const BandPart * b, double beat)
 {
     bool drums = r == 0;
@@ -1357,7 +1509,7 @@ static void draw_band(double beat)
         gfx_sprite(dot, m[0] - w / 2, m[1] - h / 2, w, h, RGBA(6, 3, 12, 190));
     }
     for (int i = 0; i < 4; i++) {
-        int r = order[i];
+        int r = order[i & 3];
         Tex * t = G.band[r];
         if (!t)
             continue;
@@ -1366,14 +1518,16 @@ static void draw_band(double beat)
         // cell size, pixels per metre and the cell's bottom edge in metres, as in tools/band.py
         float cw = r == 0 ? 266 : 170, ch = r == 0 ? 232 : 256, ppm = r == 0 ? 88 : 120, y0 = r == 0 ? -0.62f : -0.08f;
         // each plays when their part does (no music, no playing), and between parts holds still
-        BandPart * bp = &G.band_part[r];
+        BandPart * bp = &G.band_part[r & 3];
         bool playing = band_playing(r, beat_len) && G.band_loud > 0.03f;
 #ifndef __vita__
         if (playing != bp->was)
             plat_log("band: member %d %s at %.2f", r, playing ? "plays" : "stops", G.t);
         bp->was = playing;
 #endif
-        if (playing && r != 1)
+        if (r >= 2)
+            bp->cell = band_groove_cell(bp, phase, playing);
+        else if (playing && r != 1)
             bp->cell = band_cell(r, bp, beat);
         int f = bp->cell;
         stage_point(&m[0], &m[1]);
@@ -1392,7 +1546,8 @@ static void draw_band(double beat)
         }
         float dip = (r ? bob * (playing ? 1 : 0.5f) + bp->pulse * 0.05f : bob * 0.3f + bp->pulse * 0.035f) * m[2] +
                     slump * m[2];
-        float lean = (r ? (i & 1 ? sway : -sway) * (playing ? 1 : 0.4f) : 0) * m[2];
+        // the guitars' bodies move in their pictures now: the card's own sway only adds a little
+        float lean = (r ? (i & 1 ? sway : -sway) * (playing ? 1 : 0.4f) * (r >= 2 ? 0.45f : 1) : 0) * m[2];
         if (r >= 2) {
             // walking: the weight goes foot to foot. In a solo they rock back with it
             float going = fabsf(bp->walk - (((((uint32_t)(beat / 16) + 1) * 2654435761u * (r * 2 + 1)) >> 16 & 255) / 255.0f - 0.5f) * 1.3f) > 0.03f ? 1 : 0;
@@ -1906,6 +2061,10 @@ static void reset_play(void)
     G.shown_score = 0;
     G.ach_t = -100;
     G.strobe_t = -100;
+    G.cue_i = 0;
+    G.cue_mode = CUE_NONE;
+    G.cue_step = 0;
+    G.cue_t = G.flare_t = -100;
     G.held = 0;
     G.touch_count = 0;
     double first = p->note_count ? p->notes[0].time / 1e6 : 0;
@@ -1976,6 +2135,13 @@ bool game_start(Song * song, int part, int diff)
     G.chart = chart_load(path);
     if (!G.chart)
         return false;
+    if (!G.chart->cue_count)            // converted before the charts kept their light shows: from the song's own chart
+        G.chart->cue_count = cues_load(song->folder, G.chart, &G.chart->cues);
+#ifndef __vita__
+    plat_log("lighting: %d cues", G.chart->cue_count);
+    for (int i = 0; getenv("GHV_CUELOG") && i < G.chart->cue_count; i++)
+        plat_log("cue %.3f %s", G.chart->cues[i].time / 1e6, G.chart->cues[i].name);
+#endif
     static Part vox_part;
     G.vocal = part == PART_VOCALS && vox_load(song->folder);
     G.sing = G.vocal || (cfg.sing_along && vox_load(song->folder));
@@ -5392,6 +5558,17 @@ void game_draw(void)
         double since = G.t - G.strobe_t;
         if (since >= 0 && since < 0.36 && fmod(since, 0.12) < 0.05 && cfg.flashes == 0)
             gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(255, 250, 240, 90));
+        // the chart's strobes: on the quarters, or the sixteenths; gentler with Flashes reduced, none with them off
+        int m = G.cue_mode;
+        if (G.chart->cue_count && (m == CUE_STROBE_SLOW || m == CUE_STROBE_FAST || m == CUE_BRE) && cfg.flashes < 2 &&
+            G.t > 0 && !G.sp_active) {
+            double q = chart_quarters(G.chart, G.t) * (m == CUE_STROBE_SLOW || cfg.flashes ? 1 : 4);
+            if (q - floor(q) < 0.22)
+                gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(255, 252, 245, cfg.flashes ? 30 : 105));
+        }
+        double fl = G.t - G.flare_t;
+        if (fl >= 0 && fl < G.flare_len * 3 && cfg.flashes < 2)
+            gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(255, 245, 225, (int)((cfg.flashes ? 35 : 120) * exp(-fl / G.flare_len))));
     }
     if (G.rock < 0.2f && !G.failed && !G.autoplay && G.t > 0 && cfg.flashes < 2) {
         // about to fail: the edges of the picture pulse red, faster the closer it gets

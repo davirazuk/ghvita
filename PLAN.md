@@ -435,3 +435,18 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   font fallback for bass x5/x6 and x10/x12; hud_score_flash on a multiplier rise. Streak counter plate dropped
 - SP: activation +0.1 rock; while active hits +0.036 (x2), misses x0.5 (WT rules only; Flash keeps its own)
 - Flash notes 0.43 radius, side 0.27, lit rim
+
+## Band grooves, the chart's light show (v233, 2026-11-14)
+
+- tools/band.py: guitar/bass sheets are now GROOVE 16 steps of the 4-beat t100 loop x 3 strum frames (ready, struck,
+  through; one hand shape) instead of 8 hand shapes x 6 strums on one frozen pose. game.c band_groove_cell: step from
+  the beat phase (tempo folded as before), strum from the chart's last hit; they keep grooving between their parts.
+  Card sway for r >= 2 cut to 0.45 (the picture moves now). Sheets regenerated for all 10 (old in
+  ~/.cache/ghv-work/band_assets_v232). Re-render: DISPLAY=:77 tools/band.py "<YARG plugins>/textures" <work> <members>
+- Lighting cues: songconv keeps [lighting (...)], [bonusfx], [next]/[prev]/[first] from VENUE/EVENTS/LIGHTING tracks
+  and .chart Events as \1-marked section names; chart.c splits them into c->cues. Songs converted earlier: cues.c
+  reads them from the kept notes.mid/notes.chart, timed by the chart's tempo map (identical to the converter's on
+  Chop Suey, 91 cues). draw_stage run_cues: looks verse/chorus/cool/warm (stepped by next), dischord, stomp, harmony,
+  frenzy, silhouettes(_spot), searchlights/sweep (lasers), strobe slow/fast (quarters/16ths, Flashes setting
+  respected), blackout slow/fast/spot (venue to ~40%, band readable), flare (white flash), bonusfx (pyro), bre.
+  SP and the failing red still win. Charts with no cues keep the section-based show

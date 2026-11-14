@@ -135,6 +135,11 @@ def sex_of(tex_dir, member):
 SHAPES = [('roll3_1', 5), ('roll3_2', 5), ('roll3_3', 5), ('roll3_4', 5), ('roll3_4', 6), ('bar1', 3), ('bar3', 5),
           ('bar2', 7)]
 STROKE = 6
+# guitars and bass: the body grooves through its loop (GROOVE steps over the 4 beats, as GH's band rocks), each step
+# with 3 frames of a strum (ready, struck, through) on one hand shape; cell = step * 3 + strum (game.c band_cell)
+GROOVE, STRUMS = 16, 3
+STRUM_K = [0, 2, 4]
+GROOVE_SHAPE = 1
 # the drummer: 8 frames of a hit for each of 6 strikes, the stick swinging from the groove down onto the drum and back.
 # Drums in the drummer's model space (BandAnimator.Pad*)
 PAD_SNARE, PAD_TOM, PAD_FLOOR = (0.32, 0.735, -0.38), (0.20, 0.965, -0.63), (-0.24, 0.705, -0.38)
@@ -284,11 +289,13 @@ def bake(path, work, tex_dir):
         f = s0 + i * span // FRAMES
         if role == 'vocalist':
             f = s0 + i * span // SING if i < SING else s0 + (i - SING) * span // (FRAMES - SING)
-        # the guitars and the drummer keep one pose: the chart moves them, cell by cell
-        pose = blended(clip, f if role == 'vocalist' else s0 + span - BLEND, (s0, s0 + span))
+        if g0 is not None:
+            f = s0 + (i // STRUMS) * span // GROOVE
+        # the drummer keeps one pose (the chart moves the sticks); the guitars groove through the loop
+        pose = blended(clip, f if role != 'drummer' else s0 + span - BLEND, (s0, s0 + span))
         if g0 is not None:
             rig = wc.Rig(bones, pose_over(bones, pose, hand_pose(anims, role == 'bassist', sex_of(tex_dir, name) != 'f',
-                                                                 i // STROKE, i % STROKE)))
+                                                                 GROOVE_SHAPE, STRUM_K[i % STRUMS])))
         else:
             rig = wc.Rig(bones, wc.pose(bones, pose, 0))
         if role == 'drummer':

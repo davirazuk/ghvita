@@ -60,6 +60,10 @@ typedef struct {
     const Section * sections;
     Part * parts;
     void * blob;
+    // the chart's own light show (lighting cues, "strobe fast", "verse" ...): set apart from the sections
+    int cue_count;
+    Section * cues;
+    Section * own_sections;             // the sections without the cues, when there were any
 } Chart;
 
 Chart * chart_load(const char * path);

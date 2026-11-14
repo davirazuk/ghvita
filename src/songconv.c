@@ -10,6 +10,7 @@
 #include <strings.h>
 #include <sys/stat.h>
 #include "songconv.h"
+#include "cues.h"
 #include "audio.h"
 #include "chart.h"
 #include "decoder.h"
@@ -477,6 +478,21 @@ static bool copy_file(const char * from, const char * to)
 
 // ------------------------------------------------------------------------------------------------------ the chart
 
+// A chart's own light show (Rock Band's VENUE track, Clone Hero's lighting events): kept with the section names,
+// marked by a leading \1 (chart.c sets them apart again). NULL: not a cue
+static char * lighting_cue(const char * t)
+{
+    char name[60];
+    if (!cue_name(t, name, sizeof(name)))
+        return NULL;
+    char * out = malloc(strlen(name) + 2);
+    if (out) {
+        out[0] = 1;
+        strcpy(out + 1, name);
+    }
+    return out;
+}
+
 typedef struct { int32_t tick; int64_t us; } TempoIn;
 typedef struct { int32_t tick; int num, den; } Sig;
 typedef struct { int32_t tick; char * text; } Name;
@@ -629,6 +645,15 @@ static bool parse_chart(char * text, Parsed * P)
                 p++;
             if (*p == '"')
                 p++;
+            char * cue = lighting_cue(p);
+            if (cue) {
+                size_t cl = strlen(cue);
+                if (cl && cue[cl - 1] == '"')
+                    cue[cl - 1] = 0;
+                Name nm = {tick, cue};
+                PUSH(P->names, nm);
+                continue;
+            }
             if (strncmp(p, "section", 7) != 0 || !isspace((unsigned char)p[7]))
                 continue;
             p += 7;
@@ -912,6 +937,14 @@ static bool parse_mid(const uint8_t * d, size_t n, const Source * src, Parsed * 
                 PUSH(P->names, nm);
             }
         }
+        if (named && (!strcmp(tname, "VENUE") || !strcmp(tname, "EVENTS") || !strcmp(tname, "LIGHTING")))
+            for (int i = 0; i < texts.n; i++) {
+                char * cue = lighting_cue(texts.v[i].text);
+                if (cue) {
+                    Name nm = {texts.v[i].tick, cue};
+                    PUSH(P->names, nm);
+                }
+            }
         int pid = -1;
         for (int p = 0; named && p < PART_COUNT; p++)
             if (strcmp(tname, mid_names[p]) == 0)
