@@ -502,3 +502,21 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 - v245: Note motion 24 fps was dead since v235 (the Flash-look removal took the stepped paths; only beats and
   sustains still used time_z). draw_now() is the stepped clock: draw_gems, the board scroll (draw_highway), gap/roll
   zones use it. Test: frame diffs on the highway, steps on = big change then ~0 on held frames
+
+## Crowd, singer moves, band lighting (v246, 2026-11-14)
+- Crowd: tools/crowd.py bakes GHWT's crowd peds (crowd_ped_01..04, crowd_pedf_1..2 .wtch from YargLook, 25 bones) from
+  behind into assets/crowd/<ped>.png: 8 frames x 4 moods (bad, reg_m, good_m, sp_m; the stretch of each clip that
+  loops best), 52x100 cells at 46 px/m, rendered by band_render. game.c draw_crowd: three rows (scale 1.6/2.1/2.7,
+  feet 565/655/755) in front of the stage, backlit (near-black + the key colour added along the top 55%), mood from
+  rock/cheer/SP with a few one mood down, one loop a beat (bored half speed); the old hands strip stays far back
+  (draw_crowd_mass). Off with cfg.no_crowd; the rim pass is off with light_fx.
+- Singer: tools/band.py gives vocalist sheets 64 frames (8 rows): 0-31 t100 singing, 32-47 GHWT's ns_100 idle between
+  lines, 48-63 spjump (32 clip frames round the pelvis peak, every 2nd). Jump frames drop the mic stand (it ran through
+  the body) and are lowered by the jump's rise so the cell holds them; game.c singer_rise[] lifts them back (band.py
+  prints SINGER_RISE). The singer jumps instead of the card spin when Star Power starts (sheets with 8 rows only).
+  Raw sheets in backups/band_raw, inked by band_ink.py; pre-change sheets in ~/.cache/ghv-work/band_assets_v245.
+- Band light: band_strip shades top to toe (strip_top/strip_bot: heads take the key colour, legs fall to shade); every
+  member has a thin additive rim in the key colour (the camera's one and everyone in SP a strong one).
+- Near shots: draw_band shrinks a member (feet fixed) whose head (2.35 m standing, 2.0 the kit) would leave the top of
+  the screen: the low SP shot cut heads off.
+- Rail lamps: the gold bar ends at the first and last bulbs (it poked out past them).

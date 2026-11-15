@@ -201,6 +201,15 @@ void res_load(void)
     res.logo = load_tex("logo.png", TEX_MIPMAP);
     res.vignette = load_tex("vignette.png", 0);
     res.hands = load_tex("crowd_hands.png", 0);
+    {
+        static const char * peds[6] = {"crowd_ped_01", "crowd_ped_02", "crowd_ped_03", "crowd_ped_04", "crowd_pedf_1",
+                                       "crowd_pedf_2"};
+        char path[64];
+        for (int i = 0; i < 6; i++) {
+            snprintf(path, sizeof(path), "crowd/%s.png", peds[i]);
+            res.crowd[i] = load_tex(path, 0);
+        }
+    }
     res_loading(1, "LOADING");
     plat_log("loaded: pictures %d ms", (int)((plat_now_us() - t0) / 1000));
     // the menus' own sounds now, the rest on a thread

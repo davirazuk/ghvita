@@ -5590,6 +5590,10 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "A real crowd: World Tour's own people stand in front of the stage, backlit, bored, nodding, cheering or going wild with the song.",
+        "The singer has World Tour's own moves between lines, and leaps into the air when Star Power kicks in.",
+        "The band is lit by the show: heads and shoulders catch the stage lights, every member has a rim of the light's colour.",
+        "Close camera shots no longer cut the band's heads off. Streak lamps: the gold chain no longer pokes out past the bulbs.",
         "Fixed: Note motion 24 fps (Flash) works again - the notes and the board step on Flash's clock.",
         "Streak lamps tuned to World Tour footage: a slim gold chain along the rail, small bulbs with a soft white-hot glow.",
         "Streak lamps are real 3D now, as in World Tour: glass bulbs on a twisted gold bar along the rail, lit by the stage.",

@@ -30,6 +30,7 @@ typedef struct {
     Font * ui;
     Font * title;
     Tex * bg_title, * bg_menu, * bg_results, * bg_stage, * logo, * vignette, * hands;
+    Tex * crowd[6];                     // GHWT's crowd from behind, a row per mood (tools/crowd.py)
     Sound * snd[SND_COUNT];
     int highway_count;
     char highway_names[24][32];

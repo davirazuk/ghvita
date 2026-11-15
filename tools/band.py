@@ -18,6 +18,8 @@ wc = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(wc)
 
 FRAMES, COLS, ROWS = 48, 8, 6
+V_FRAMES, V_ROWS = 64, 8   # the singer's: 32 singing (t100), 16 between lines (ns_100), 16 of the Star Power jump (spjump)
+REST, JUMP = 32, 48
 SING = 32               # the singer's sheet: this many frames of the loop with the mic at the mouth, the rest with it down
 CELLS = {'drummer': (266, 232, 88, -0.62)}
 STAND = (170, 256, 120, -0.08)      # cell w, h, pixels per metre, the cell's bottom in metres
@@ -284,15 +286,36 @@ def bake(path, work, tex_dir):
         gi = N['bone_guitar_body']
         g0 = (np.linalg.inv(M0[N['bone_pelvis']]) @ M0[gi], np.linalg.inv(M0[N['bone_chest']]) @ M0[gi])
     anims = load_hands(tex_dir, sex_of(tex_dir, name)) if g0 is not None else None
-    frames, centre = [], []
-    for i in range(FRAMES):
+    frames, centre, rises, stand_y = [], [], [], 0.0
+    nframes = V_FRAMES if role == 'vocalist' else FRAMES
+    if role == 'vocalist':
+        # between lines GHWT's singer has its own idle (ns_100), a loop of its own; Star Power starts with a jump
+        byname = {c[0]: c for c in clips}
+        ns = byname.get('ns_100', clip)
+        ns_span = int(round(BEATS * 60 / 100 * ns[1]))
+        ns0 = loop_start(bones, ns, N, ns_span, role)
+        jp = byname.get('spjump')
+        if jp is not None:
+            ys = [wc.pose(bones, jp, k)[N['bone_pelvis']][1, 3] for k in range(jp[2])]
+            peak = int(np.argmax(ys))
+            j0 = max(0, min(jp[2] - 33, peak - 16))
+            print(name, 'spjump peak', peak, 'window', j0, j0 + 32)
+    for i in range(nframes):
         f = s0 + i * span // FRAMES
         if role == 'vocalist':
-            f = s0 + i * span // SING if i < SING else s0 + (i - SING) * span // (FRAMES - SING)
+            f = s0 + i * span // SING
         if g0 is not None:
             f = s0 + (i // STRUMS) * span // GROOVE
         # the drummer keeps one pose (the chart moves the sticks); the guitars groove through the loop
-        pose = blended(clip, f if role != 'drummer' else s0 + span - BLEND, (s0, s0 + span))
+        if role == 'vocalist' and REST <= i < JUMP:
+            f = ns0 + (i - REST) * ns_span // (JUMP - REST)
+            pose = blended(ns, f, (ns0, ns0 + ns_span))
+        elif role == 'vocalist' and i >= JUMP:
+            f = j0 + (i - JUMP) * 2 if jp is not None else s0
+            # played once, not looped: the frames as they are
+            pose = (jp[0], jp[1], 1, jp[3], jp[4][f][None], jp[5][f][None]) if jp is not None else blended(clip, s0, (s0, s0 + span))
+        else:
+            pose = blended(clip, f if role != 'drummer' else s0 + span - BLEND, (s0, s0 + span))
         if g0 is not None:
             rig = wc.Rig(bones, pose_over(bones, pose, hand_pose(anims, role == 'bassist', sex_of(tex_dir, name) != 'f',
                                                                  GROOVE_SHAPE, STRUM_K[i % STRUMS])))
@@ -304,7 +327,7 @@ def bake(path, work, tex_dir):
         if role != 'drummer' or 'bone_ik_hand_slave_l' in N:
             wc.solve(rig, rest, role, (f - s0) / span * BEATS, g0)
         if role == 'vocalist':
-            hold_mic(rig, i < SING)
+            hold_mic(rig, i < REST)
         if g0 is not None:
             guitar_hands(rig)
         if role == 'drummer':
@@ -314,13 +337,34 @@ def bake(path, work, tex_dir):
                 M = rig.W[pm].copy()
                 M[:3, :3] = rig.W[tg][:3, :3]
                 rig.set_world(pm, M)
-        frames.append(skinned(meshes, [m @ b[4] for m, b in zip(rig.W, bones)]))
-        centre.append(rig.W[N['bone_pelvis']][:3, 3])
+        skin = [m @ b[4] for m, b in zip(rig.W, bones)]
+        if role == 'vocalist' and i >= JUMP:
+            # the jump: the stand isn't in it (it ran up through them), and they're brought down to the floor so the
+            # cell holds them; game.c lifts the frame by SINGER_RISE, these numbers
+            pel = rig.W[N['bone_pelvis']][:3, 3]
+            for bn in ('Bone_Mic_Stand', 'Bone_Mic_Adjust_Height', 'Bone_Mic_Adjust_Angle'):
+                if bn in N:
+                    Z = np.zeros((4, 4))
+                    Z[:3, 3] = pel
+                    Z[3, 3] = 1
+                    skin[N[bn]] = Z
+            if i == JUMP:
+                stand_y = float(pel[1])     # from where the jump starts: the same curve for every singer
+            rise = max(0.0, float(pel[1] - stand_y))
+            rises.append(rise)
+            for k in range(len(skin)):
+                D = np.eye(4)
+                D[1, 3] = -rise
+                skin[k] = D @ skin[k]
+        frames.append(skinned(meshes, skin))
+        if role != 'vocalist' or i < JUMP:
+            centre.append(rig.W[N['bone_pelvis']][:3, 3])
+
     c = np.mean(centre, axis=0)
     binp = os.path.join(work, name + '.bin')
     ca, sa = math.cos(PITCH), math.sin(PITCH)
     with open(binp, 'wb') as o:
-        o.write(struct.pack('<ii', len(meshes), FRAMES))
+        o.write(struct.pack('<ii', len(meshes), nframes))
         for tex, V, T in meshes:
             o.write(tex.encode()[:32].ljust(32, b'\0'))
             o.write(struct.pack('<ii', len(V), len(T)))
@@ -338,12 +382,14 @@ def bake(path, work, tex_dir):
     CW, CH, PPM, Y0 = CELLS.get(role, STAND)
     subprocess.run([RENDER, tex_dir, binp, pre, str(CW * SS), str(CH * SS), str(PPM * SS), str(Y0)], check=True)
     os.remove(binp)
-    sheet = Image.new('RGBA', (CW * COLS, CH * ROWS), (0, 0, 0, 0))
-    for i in range(FRAMES):
+    sheet = Image.new('RGBA', (CW * COLS, CH * (V_ROWS if role == 'vocalist' else ROWS)), (0, 0, 0, 0))
+    for i in range(nframes):
         im = Image.open('%s_%02d.png' % (pre, i)).convert('RGBa').resize((CW, CH), Image.BOX).convert('RGBA')
         sheet.paste(im, ((i % COLS) * CW, (i // COLS) * CH))
     out = os.path.join(OUT, name + '.png')
     sheet.quantize(256, method=Image.Quantize.FASTOCTREE, dither=Image.Dither.NONE).save(out, optimize=True)
+    if rises:
+        print(name, 'SINGER_RISE', ', '.join('%.3ff' % r for r in rises))
     print(name, clip[0], 'from frame', s0, 'span', span, os.path.getsize(out) // 1024, 'KB')
 
 

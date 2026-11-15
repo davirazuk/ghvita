@@ -854,25 +854,22 @@ static void vignette(void)
 
 // World Tour's own sheet of raised hands, four rows of it, three depths across the foot of the picture. Dark against
 // the lights, more of them and higher the better it's going; they jump on the beat
-static void draw_crowd(double beat)
+// the crowd's mass far back: a strip of raised hands, darker toward the front
+static void draw_crowd_mass(double beat, float mood)
 {
     Tex * t = res.hands;
-    if (!t || cfg.no_crowd)
+    if (!t)
         return;
     float lit[3];
-    float mood = G.rock < 0.33f ? 0.2f : 0.5f + G.rock * 0.5f;
-    if (G.sp_active)
-        mood = 1;
-    mood += G.cheer * 0.35f;            // a streak, a chorus: the crowd surges up
     gfx_tex(t);
     gfx_blend(BLEND_ALPHA);
-    for (int row = 0; row < 3; row++) {
-        float k = 0.4f + row * 0.3f;       // nearer rows are darker: the light's behind them
+    for (int row = 0; row < 2; row++) {
+        float k = 0.4f + row * 0.3f;
         for (int i = 0; i < 3; i++)
             lit[i] = (0.03f + G.stage_col[i] * 0.05f + G.key_col[i] * 0.14f) * (1.1f - k);
         uint32_t col = col3(lit, 1);
         float bounce = fabsf(sinf(3.14159265f * ((float)beat + row * 0.3f)));
-        float h = 112 + row * 22, top = 544 - h * (0.62f + 0.38f * mood) + 14 * row - bounce * 14 * mood;
+        float h = 100 + row * 18, top = 544 - h * (0.62f + 0.38f * mood) - 26 + 10 * row - bounce * 12 * mood;
         int sheet = ((int)floor(beat * 0.5) + row) & 3;
         float x = -40 + sinf((float)G.t * (0.3f + row * 0.1f) + row) * 16 + row * 90.0f;
         const float wid = 1100;
@@ -881,6 +878,78 @@ static void draw_crowd(double beat)
         const float p[4][3] = {{x, top, 0}, {x + wid, top, 0}, {x + wid, top + h, 0}, {x, top + h, 0}};
         const uint32_t c[4] = {col, col, col, col};
         gfx_quad(p, uv, c);
+    }
+}
+
+// World Tour's crowd in front of the stage, seen from behind: GHWT's own people (tools/crowd.py), each in the mood the
+// song puts them in: bored arms-down when it's going badly, nodding along, cheering when it's going well, wild in Star
+// Power. Each loops once a beat (twice as slow when bored), not all on the same frame, lit from the stage in front of
+// them so their backs are dark with the show's colour on their heads and shoulders
+#define CROWD_CW 52                     // tools/crowd.py's cells
+#define CROWD_CH 100
+#define CROWD_FRAMES 8
+static void draw_crowd(double beat)
+{
+    if (cfg.no_crowd)
+        return;
+    float mood = G.rock < 0.33f ? 0.2f : 0.5f + G.rock * 0.5f;
+    if (G.sp_active)
+        mood = 1;
+    mood += G.cheer * 0.35f;            // a streak, a chorus: the crowd surges up
+    draw_crowd_mass(beat, mood);
+    if (!res.crowd[0])
+        return;
+    int base = G.sp_active ? 3 : G.rock < 0.33f ? 0 : G.rock > 0.66f || G.cheer > 0.25f ? 2 : 1;
+    double bpm = G.t > 0 ? (chart_quarters(G.chart, G.t + 0.5) - chart_quarters(G.chart, G.t)) * 120 : 120;
+    double speed = 1;
+    while (bpm > 1 && bpm * speed > 160)
+        speed *= 0.5;
+    while (bpm > 1 && bpm * speed < 80)
+        speed *= 2;
+    const float pi = 3.14159265f;
+    gfx_blend(BLEND_ALPHA);
+    // back row first; feet below the screen, so the front rows show from the waist up
+    static const float scale[3] = {1.6f, 2.1f, 2.7f}, feet[3] = {565, 655, 755};
+    static const int count[3] = {14, 11, 9};
+    for (int row = 0; row < 3; row++) {
+        float sc = scale[row], w = CROWD_CW * sc, h = CROWD_CH * sc;
+        // backlit by the stage as in World Tour: near-black shapes, the show's colour along their tops
+        float dark = 0.3f - row * 0.07f;            // the nearer, the further from the light
+        float lit[3], rim[3];
+        for (int i = 0; i < 3; i++) {
+            lit[i] = (0.08f + G.stage_col[i] * 0.3f + G.key_col[i] * 0.2f) * dark;
+            rim[i] = G.key_col[i] * (0.5f + 0.5f * G.band_loud) * (1 - row * 0.25f);
+        }
+        for (int j = 0; j < count[row]; j++) {
+            uint32_t hsh = (uint32_t)(row * 97 + j + 1) * 2654435761u;
+            float x = (j + 0.5f + ((hsh >> 8 & 255) / 255.0f - 0.5f) * 0.6f) * SCREEN_W / count[row] - w / 2;
+            int ped = (int)(hsh >> 20) % 6;
+            Tex * t = res.crowd[ped];
+            if (!t)
+                continue;
+            // not everybody's as into it as the rest
+            int m = base - ((hsh >> 4 & 3) == 0 && base > 0 && base < 3 ? 1 : 0);
+            double loop = m == 0 ? 0.5 : 1;
+            float off = (hsh >> 12 & 255) / 255.0f;
+            int f = (int)floor((beat * speed * loop + off) * CROWD_FRAMES);
+            f = ((f % CROWD_FRAMES) + CROWD_FRAMES) % CROWD_FRAMES;
+            // a bounce on the beat when they're into it, a jump in Star Power
+            float on = fabsf(sinf((float)(beat * speed + off * 0.3f) * pi));
+            float up = (m >= 2 ? on * 0.05f : m == 1 ? on * 0.015f : 0) * h * (0.6f + 0.6f * G.band_loud);
+            float sway = sinf((float)G.t * 0.7f + j) * 4 * sc;
+            float y = feet[row] - h - up;
+            float u0 = (float)(f * CROWD_CW) / t->w, v0 = (float)(m * CROWD_CH) / t->h;
+            Sprite s = {t, u0, v0, u0 + (float)CROWD_CW / t->w, v0 + (float)CROWD_CH / t->h, CROWD_CW, CROWD_CH};
+            gfx_sprite(&s, x + sway, y, w, h, col3(lit, 1));
+            // the stage's light catches their heads and shoulders: the same shape a little up, added faintly
+            if (!cfg.light_fx) {
+                gfx_blend(BLEND_ADD);
+                Sprite top = s;
+                top.v1 = s.v0 + (s.v1 - s.v0) * 0.55f;
+                gfx_sprite(&top, x + sway, y - 1.5f * sc, w, h * 0.55f, col3(rim, 0.3f));
+                gfx_blend(BLEND_ALPHA);
+            }
+        }
     }
 }
 
@@ -1473,11 +1542,26 @@ static bool band_playing(int r, double beat_len)
 // A member's cell as a stiff card: the feet stay on their mark (and the kit under the drummer), and from there up
 // the body leans by `lean` and dips by `dip` (pixels, at the top of the cell), more the higher up: a spine and a pair of
 // knees, for four more quads than a flat picture.
+// the light on a member from top to toe: World Tour's spots come from the rig above, so heads and shoulders catch the
+// show's colour and the legs fall off into the stage's shade. Per channel, times the tint; 1 = flat
+static float strip_top[3] = {1, 1, 1}, strip_bot[3] = {1, 1, 1};
+
+static uint32_t tint_by(uint32_t c, const float k[3])
+{
+    int ch[3];
+    for (int i = 0; i < 3; i++) {
+        int v = (int)(((c >> (8 * i)) & 255) * k[i]);
+        ch[i] = v > 255 ? 255 : v;
+    }
+    return (c & 0xff000000u) | (uint32_t)ch[2] << 16 | (uint32_t)ch[1] << 8 | (uint32_t)ch[0];
+}
+
 static void band_strip(Tex * t, float x, float bottom, float w, float h, const float uv[4], float lean, float dip,
                        uint32_t tint)
 {
     // a stiff card turns about its feet: a true rotation, nothing sheared
-    const uint32_t c[4] = {tint, tint, tint, tint};
+    uint32_t top_c = tint_by(tint, strip_top), bot_c = tint_by(tint, strip_bot);
+    const uint32_t c[4] = {top_c, top_c, bot_c, bot_c};
     float a = h != 0 ? atan2f(lean, fabsf(h)) : 0, cs = cosf(a), sn = sinf(a);
     float top = h - dip, sign = h < 0 ? -1.0f : 1.0f;
     float bl[2] = {-w / 2, 0}, br[2] = {w / 2, 0}, tr[2] = {w / 2, -top}, tl[2] = {-w / 2, -top};
@@ -1500,6 +1584,11 @@ static void band_frame(Tex * t, int f, float cw, float ch, float x, float bottom
     const float uv[4] = {u0, v0, u0 + cw / t->w, v0 + ch / t->h};
     band_strip(t, x, bottom, w, h, uv, lean, dip, tint);
 }
+
+// the Star Power jump's height off the floor in metres, frame by frame (tools/band.py prints it as SINGER_RISE)
+#define SINGER_JUMP_S 1.07f
+static const float singer_rise[16] = {0.000f, 0.005f, 0.000f, 0.000f, 0.000f, 0.000f, 0.092f, 0.197f,
+                                      0.231f, 0.196f, 0.180f, 0.145f, 0.063f, 0.000f, 0.000f, 0.000f};
 
 static void draw_band(double beat)
 {
@@ -1548,6 +1637,11 @@ static void draw_band(double beat)
         }
         gfx_sprite(dot, m[0] - w / 2, m[1] - h / 2, w, h, RGBA(6, 3, 12, 190));
     }
+    // lit from the rig above: heads in the show's colour, legs in shade (band_strip)
+    for (int i = 0; i < 3; i++) {
+        strip_top[i] = 1.12f + G.key_col[i] * 0.4f * (0.6f + 0.4f * G.band_loud);
+        strip_bot[i] = 0.6f + G.stage_col[i] * 0.15f;
+    }
     for (int i = 0; i < 4; i++) {
         int r = order[i & 3];
         Tex * t = G.band[r];
@@ -1572,13 +1666,29 @@ static void draw_band(double beat)
         int f = bp->cell;
         stage_point(&m[0], &m[1]);
         m[2] *= G.cam_z;
+        {
+            // a near shot mustn't take their heads off the top of the screen, jumping included: they shrink to fit,
+            // feet where they stand
+            float tall = r == 0 ? 2.0f : 2.35f, room = m[1] - 8;
+            if (m[2] * tall > room && room > 40)
+                m[2] = room / tall;
+        }
         float s = m[2] / ppm, w = cw * s * (1 - 0.16f * bp->turn), h = ch * s;
         // the kit stays where it stands; what's on their feet moves from the knees up, and a jump leaves the stage
         float bottom = m[1] - y0 * m[2] - (r ? hop : 0) * m[2];
         // Star Power goes on and the front line spins round in the air, one after the other: a card turning about its
         // middle, edge-on halfway, its back (the picture mirrored) at the half turn
         float spun = (float)(G.t - G.sp_on_t) - (r == 1 ? 0.12f : r == 3 ? 0.24f : 0);
-        if (r && spun > 0 && spun < 0.6f) {
+        // the singer's sheet has World Tour's own Star Power jump (tools/band.py rows 6-7): that instead of the spin
+        bool jumps = r == 1 && t->h >= (int)ch * 8 && G.sp_on_t > 0;
+        int jump_f = -1;
+        if (jumps && spun > 0 && spun < SINGER_JUMP_S) {
+            int k = (int)(spun / SINGER_JUMP_S * 16);
+            k = k > 15 ? 15 : k;
+            jump_f = 48 + k;
+            bottom -= singer_rise[k] * m[2];
+        }
+        if (r && !jumps && spun > 0 && spun < 0.6f) {
             float k = spun / 0.6f;
             k = k * k * (3 - 2 * k);
             w *= cosf(k * 2 * pi);
@@ -1611,12 +1721,16 @@ static void draw_band(double beat)
             float want = playing ? 1 : 0, step = want - bp->mic;
             bp->mic += step > 0.17f ? 0.17f : step < -0.17f ? -0.17f : step;
             int sing = (int)(phase * 32) % 32, down = 32 + (int)(phase * 16) % 16;
+            if (jump_f >= 0)
+                band_frame(t, jump_f, cw, ch, m[0], bottom, w, h, lean, dip, tint);
+            else {
             if (bp->mic < 1)
                 band_frame(t, down, cw, ch, m[0], bottom, w, h, lean, dip,
                            with_alpha(tint, bp->mic < 0.5f ? 1 : 2 * (1 - bp->mic)));
             if (bp->mic > 0)
                 band_frame(t, sing, cw, ch, m[0], bottom, w, h, lean, dip,
                            with_alpha(tint, bp->mic > 0.5f ? 1 : 2 * bp->mic));
+            }
         } else {
             // a pool of the stage's light at their feet, the one the camera's on brighter, and the cut-out's own shape
             // lying on the floor in front of it
@@ -1628,10 +1742,12 @@ static void draw_band(double beat)
             band_frame(t, f, cw, ch, m[0], bottom, w, -h * 0.18f, -lean * 0.18f, 0, RGBA(6, 3, 12, 120));
             // backlit: their own shape a little larger, added in the stage's key colour, swelling on the beat (whoever the
             // camera's on, or everyone under Star Power: a second draw of a member costs the Vita's fill rate)
-            if ((G.focus == r || G.sp_active) && !cfg.light_fx) {
+            // everyone gets a thin rim of it; the one the camera's on a strong one
+            if (!cfg.light_fx) {
+            bool strong = G.focus == r || G.sp_active;
             gfx_blend(BLEND_ADD);
-            band_frame(t, f, cw, ch, m[0], bottom + h * 0.01f, w * 1.07f, h * 1.035f, lean, dip,
-                       col3(G.key_col, (0.3f + 0.45f * on_beat * G.band_loud) * (G.focus == r ? 1.4f : 1)));
+            band_frame(t, f, cw, ch, m[0], bottom + h * 0.01f, w * (strong ? 1.07f : 1.04f), h * (strong ? 1.035f : 1.02f),
+                       lean, dip, col3(G.key_col, (0.3f + 0.45f * on_beat * G.band_loud) * (G.focus == r ? 1.4f : strong ? 1 : 0.6f)));
             gfx_blend(BLEND_ALPHA);
             }
             band_frame(t, f, cw, ch, m[0], bottom, w, h, lean, dip, tint);
@@ -1639,11 +1755,13 @@ static void draw_band(double beat)
         // Star Power: they burn with it
         if (G.sp_active) {
             gfx_blend(BLEND_ADD);
-            band_frame(t, r == 1 ? (int)(phase * 32) % 32 : f, cw, ch, m[0], bottom, w, h, lean, dip,
+            band_frame(t, r == 1 ? (jump_f >= 0 ? jump_f : (int)(phase * 32) % 32) : f, cw, ch, m[0], bottom, w, h, lean, dip,
                        RGBA(90, 150, 255, 70 + (int)(90 * on_beat)));
             gfx_blend(BLEND_ALPHA);
         }
     }
+    for (int i = 0; i < 3; i++)
+        strip_top[i] = strip_bot[i] = 1;
 }
 
 static float clamp01(float v)
@@ -4078,7 +4196,7 @@ static void draw_rail_meter(void)
             base[k] = state == 0 ? dark[k] : hue[k] * (state == 1 ? 0.55f : 0.35f);
         gfx_tex(NULL);
         if (i == 4)
-            lamp_seat(seat_x, seat_r, z0 - 0.05f, z1 + 0.05f, seat_r);
+            lamp_seat(seat_x, seat_r, z0 + lg * 0.5f - rb * 0.6f, z1 - lg * 0.5f + rb * 0.3f, seat_r);
         lamp_bulb(seat_x - 0.045f, seat_r + rb * 0.7f, zc, rb, base, state == 2 ? 0.95f : state == 1 ? 0.3f : 0, hue);
         if (state == 2) {
             gfx_blend(BLEND_ADD);
