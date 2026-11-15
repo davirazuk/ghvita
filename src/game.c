@@ -4214,7 +4214,7 @@ static void draw_rail_meter(void)
             base[k] = state == 0 ? dark[k] : hue[k] * (state == 1 ? 0.55f : 0.35f);
         gfx_tex(NULL);
         if (i == 4)
-            lamp_seat(seat_x, seat_r, z0 + lg * 0.5f - rb * 0.9f, z1 - lg * 0.5f + rb * 0.9f, seat_r);
+            lamp_seat(seat_x, seat_r, z0 + lg * 0.5f - rb * 1.35f, z1 + 0.05f, seat_r);
         lamp_bulb(seat_x - 0.045f, seat_r + rb * 0.7f, zc, rb, base, state == 2 ? 0.95f : state == 1 ? 0.3f : 0, hue);
         if (state == 2) {
             gfx_blend(BLEND_ADD);

@@ -539,3 +539,7 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   copies of Hash Pipe (vocals taken out of parts: came back) and Go Away (chart = 1: redone); Plug In Baby and
   NeilSSong left alone.
 - Not possible: parts no chart has (Smile Like You Mean It's synth: Harmonix's RB chart has no keys anywhere).
+- v249: rail lamp chain from z0 + lg/2 - 1.35 rb (flush under the near bulb) to z1 + 0.05 (past the far bulb, as v245:
+  the far bulb hides the chain's end, so trimming there left the top lamp "ropeless").
+- Tried: GHWT venue moods (VR_MOOD in venue_render): the moods.txt parts are stage props swapped per mood (a riser
+  shell, an emblem), not lights; no lights pictures came out. Dropped.

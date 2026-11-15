@@ -5605,6 +5605,7 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "Streak lamps: the gold chain runs past the top bulb again (every bulb sits on it), and stops at the bottom one.",
         "SELECT in the song list, Find outdated songs: checks every downloaded song against its site and updates the ones missing a part (drums, vocals...), with an old chart or old audio. Scores kept.",
         "The guitarist and bassist do World Tour's own Star Power jump: a crouch and a big leap, guitars in hand.",
         "The drummer clicks the sticks over the kit through the count-in and after the last chord, and idles while their part rests.",
