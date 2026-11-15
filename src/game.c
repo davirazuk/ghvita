@@ -172,6 +172,7 @@ static struct {
     Tex * venue, * venue_lights;
     const char * venue_title;
     Tex * band[4];                      // drummer, vocalist, guitarist, bassist
+    Tex * band_alt[4];                  // their wilder loops, for the big sections (NULL: none)
     const float (*marks)[3];
     // the camera's shots of the venue (tools/venues.py SHOTS): 0 the wide one, then stage left, stage right, low front
     Tex * shot_tex[VENUE_SHOTS], * shot_glow[VENUE_SHOTS];
@@ -363,6 +364,7 @@ static void pick_band(const Song * song, uint32_t h)
             if (strncmp(res.band_names[i], roles[r], len) == 0)
                 found[n++] = i;
         G.band[r] = NULL;
+        G.band_alt[r] = NULL;
         G.band_rise[r] = NULL;
         if (!n)
             continue;
@@ -371,6 +373,7 @@ static void pick_band(const Song * song, uint32_t h)
             k = (k ^ (uint8_t)*c) * 16777619u;
         int pick = found[k % n];
         G.band[r] = res_band_sheet(r, res.band_names[pick]);
+        G.band_alt[r] = res_band_alt(r);
         G.band_rise[r] = res.band_has_rise[pick] ? res.band_rise[pick] : NULL;
     }
     (void)song;
@@ -1714,6 +1717,13 @@ static void draw_band(double beat)
             else if (!playing)
                 f = 48 + (int)(fmod(beat * speed, 2) / 2 * 8) % 8;
         }
+        // the big sections (choruses, solos, the outro, the chart's chorus and frenzy looks, Star Power) in each one's
+        // wilder GHWT loop: the same cells on its other sheet
+        bool wild = G.band_alt[r] && (G.big_section || G.show_mode == CUE_CHORUS || G.show_mode == CUE_FRENZY ||
+                                      G.sp_active || (r >= 2 && band_soloing(r)));
+        Tex * ts = wild ? G.band_alt[r] : t;                // the singer's singing frames
+        if (wild && r >= 2 && jump_f < 0 && f < 48)
+            t = G.band_alt[r];
         if (r && !jumps && spun > 0 && spun < 0.6f) {
             float k = spun / 0.6f;
             k = k * k * (3 - 2 * k);
@@ -1754,7 +1764,7 @@ static void draw_band(double beat)
                 band_frame(t, down, cw, ch, m[0], bottom, w, h, lean, dip,
                            with_alpha(tint, bp->mic < 0.5f ? 1 : 2 * (1 - bp->mic)));
             if (bp->mic > 0)
-                band_frame(t, sing, cw, ch, m[0], bottom, w, h, lean, dip,
+                band_frame(ts, sing, cw, ch, m[0], bottom, w, h, lean, dip,
                            with_alpha(tint, bp->mic > 0.5f ? 1 : 2 * bp->mic));
             }
         } else {
@@ -1781,7 +1791,7 @@ static void draw_band(double beat)
         // Star Power: they burn with it
         if (G.sp_active) {
             gfx_blend(BLEND_ADD);
-            band_frame(t, r == 1 ? (jump_f >= 0 ? jump_f : (int)(phase * 32) % 32) : f, cw, ch, m[0], bottom, w, h, lean, dip,
+            band_frame(r == 1 && jump_f < 0 ? ts : t, r == 1 ? (jump_f >= 0 ? jump_f : (int)(phase * 32) % 32) : f, cw, ch, m[0], bottom, w, h, lean, dip,
                        RGBA(90, 150, 255, 70 + (int)(90 * on_beat)));
             gfx_blend(BLEND_ALPHA);
         }

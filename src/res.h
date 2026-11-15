@@ -75,6 +75,7 @@ const char * res_venue_title(const char * zone);
 const float (*res_venue_marks(const char * zone))[3];
 // a band member's sheet by name ("guitarist_3"), one kept per role (0 drummer, 1 vocalist, 2 guitarist, 3 bassist)
 Tex * res_band_sheet(int role, const char * name);
+Tex * res_band_alt(int role);                   // that member's wilder loop (NULL: none), loaded with the sheet
 void res_band_free(void);
 void ui_sound(int which);
 // a background picture that fills the screen (they sit in the top-left 960x544 of a 1024x1024 texture)

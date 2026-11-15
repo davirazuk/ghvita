@@ -544,3 +544,13 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 - Tried: GHWT venue moods (VR_MOOD in venue_render): the moods.txt parts are stage props swapped per mood (a riser
   shell, an emblem), not lights; no lights pictures came out. Dropped.
 - v250: G.leap_t: the band's jump also fires when a chorus slams in with rock >= 0.5 (the pyro moment), 20 s apart at least (charts split choruses); Star Power sets it too. The old card spin stays for sheets without jump rows.
+- v251: band sheets load paletted (gfx.c tex_load_paletted: own 8-bit indexed PNG reader with stbi_zlib_decode_malloc,
+  glCompressedTexImage2D GL_PALETTE8_RGBA8_OES on the Vita = native P8 in vitaGL, RGBA on PC; any other PNG or a GL
+  error falls back to tex_load). GHV_P8CHECK=1 compares with stb_image on PC (0 bytes differ on every sheet). Band
+  memory ~49 MB -> ~12 MB even with the alt sheets. Not seen on hardware yet: if the band is missing or blocky, log.txt
+  "tex: paletted ... refused".
+- Alt loops: tools/band.py --alt bakes each member's other GHWT loop (band.py ALT: guitar horse/jimi/areyou, bass
+  joker/bleed/horse, singer today/areyou/dammit; drummers have none) into assets/band/alt/<name>.png in the main
+  sheet's first rows (guitars 48 groove x strum, singer 32 singing). res_band_alt; draw_band "wild" = big section,
+  cue chorus/frenzy, SP, or that guitarist's solo: the same cell from the alt sheet. Raw alt sheets in
+  backups/band_raw/alt, inked by band_ink.py.

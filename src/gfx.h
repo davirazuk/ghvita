@@ -31,6 +31,7 @@ typedef struct {
 
 void gfx_init(void);
 Tex * tex_load(const char * path, int flags);
+Tex * tex_load_paletted(const char * path, int flags);   // a 256-colour PNG kept paletted on the Vita (else as tex_load)
 Tex * tex_rgba(const uint8_t * px, int w, int h, int flags);
 void tex_free(Tex * t);
 Sprite sprite_whole(Tex * t);

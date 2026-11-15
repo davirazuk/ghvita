@@ -273,13 +273,27 @@ def skinned(meshes, skin):
     return out
 
 
-def bake(path, work, tex_dir):
+ALT = {'guitarist': ['horse_100', 'jimi_100', 'areyou_100', 'joker_100', 'bleed_100', 'damnit_100'],
+       'bassist': ['joker_100', 'bleed_100', 'danjoker_100', 'horse_100', 'jimi_100'],
+       'vocalist': ['today_100', 'areyou_100', 'dammit_100']}
+
+
+def bake(path, work, tex_dir, alt=False):
+    # alt: the member's other GHWT loop (the wilder one, for choruses and solos) into assets/band/alt/<name>.png: the
+    # guitars' 48 groove frames, the singer's 32 singing ones, laid out as the main sheet's first rows
     name = os.path.basename(path)[5:-5]
     role = name.split('_')[0]
     bones, meshes, clips = wc.read(path)
     N = {b[0]: i for i, b in enumerate(bones)}
     rest = wc.rest_model(bones)
     clip = pick_clip(clips, role)
+    if alt:
+        byname0 = {c[0]: c for c in clips}
+        want = [n for n in ALT.get(role, []) if n in byname0]
+        if not want:
+            print(name, 'no other loop')
+            return
+        clip = byname0[want[0]]
     span = int(round(BEATS * 60 / 100 * clip[1]))
     s0 = loop_start(bones, clip, N, span, role)
     M0 = wc.pose(bones, clip, s0)
@@ -289,7 +303,7 @@ def bake(path, work, tex_dir):
         g0 = (np.linalg.inv(M0[N['bone_pelvis']]) @ M0[gi], np.linalg.inv(M0[N['bone_chest']]) @ M0[gi])
     anims = load_hands(tex_dir, sex_of(tex_dir, name)) if g0 is not None else None
     frames, centre, rises, stand_y = [], [], [], 0.0
-    nframes = V_FRAMES
+    nframes = (SING if role == 'vocalist' else FRAMES) if alt else V_FRAMES
     byname = {c[0]: c for c in clips}
     jp = None
     if role == 'drummer':
@@ -414,7 +428,10 @@ def bake(path, work, tex_dir):
     for i in range(nframes):
         im = Image.open('%s_%02d.png' % (pre, i)).convert('RGBa').resize((CW, CH), Image.BOX).convert('RGBA')
         sheet.paste(im, ((i % COLS) * CW, (i // COLS) * CH))
-    out = os.path.join(OUT, name + '.png')
+    out = os.path.join(OUT, 'alt', name + '.png') if alt else os.path.join(OUT, name + '.png')
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    if alt:
+        sheet = sheet.crop((0, 0, CW * COLS, CH * ((nframes + COLS - 1) // COLS)))
     sheet.quantize(256, method=Image.Quantize.FASTOCTREE, dither=Image.Dither.NONE).save(out, optimize=True)
     if rises:
         # game.c lifts the jump's frames back up by these (assets/band/rise.txt: name and 16 heights in metres)
@@ -427,14 +444,16 @@ def bake(path, work, tex_dir):
 
 
 def main():
-    tex_dir, work = sys.argv[1], sys.argv[2]
+    alt = '--alt' in sys.argv
+    args = [a for a in sys.argv[1:] if a != '--alt']
+    tex_dir, work = args[0], args[1]
     os.makedirs(OUT, exist_ok=True)
     os.makedirs(work, exist_ok=True)
-    picks = sys.argv[3:]
+    picks = args[2:]
     for p in sorted(glob.glob(os.path.join(tex_dir, 'band_*.wtch'))):
         if not picks or os.path.basename(p)[5:-5] in picks:
-            bake(p, work, tex_dir)
-    if not picks:
+            bake(p, work, tex_dir, alt)
+    if not picks and not alt:
         with open(os.path.join(OUT, 'band.txt'), 'w') as f:
             f.write('\n'.join(sorted(x[:-4] for x in os.listdir(OUT) if x.endswith('.png'))) + '\n')
 

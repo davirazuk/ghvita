@@ -184,6 +184,168 @@ Tex * tex_load(const char * path, int flags)
     return t;
 }
 
+// A 256-colour PNG (8-bit indices, PLTE + tRNS, not interlaced) as its palette (RGBA) and indices; NULL when it's
+// anything else. The band's sheets are made that way (tools/band.py), and the Vita keeps them as they are: a byte a
+// pixel instead of four
+static uint32_t be32(const uint8_t * p)
+{
+    return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | p[3];
+}
+
+static uint8_t * load_png_p8(const char * path, uint8_t pal[256][4], int * w, int * h)
+{
+    FILE * f = fopen(path, "rb");
+    if (!f)
+        return NULL;
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    uint8_t * file = size > 8 ? malloc((size_t)size) : NULL;
+    if (!file || fread(file, 1, (size_t)size, f) != (size_t)size) {
+        fclose(f);
+        free(file);
+        return NULL;
+    }
+    fclose(f);
+    static const uint8_t sig[8] = {137, 80, 78, 71, 13, 10, 26, 10};
+    uint8_t * idat = NULL, * out = NULL;
+    size_t idat_n = 0;
+    int width = 0, height = 0;
+    bool ok = memcmp(file, sig, 8) == 0;
+    memset(pal, 0, 256 * 4);
+    for (int i = 0; i < 256; i++)
+        pal[i][3] = 255;
+    for (long at = 8; ok && at + 12 <= size;) {
+        uint32_t len = be32(file + at);
+        const uint8_t * type = file + at + 4, * d = file + at + 8;
+        if (len > (uint32_t)(size - at - 12)) {
+            ok = false;
+            break;
+        }
+        if (!memcmp(type, "IHDR", 4)) {
+            width = (int)be32(d);
+            height = (int)be32(d + 4);
+            // 8-bit indexed, no interlace; anything else goes the usual way
+            ok = len >= 13 && d[8] == 8 && d[9] == 3 && d[12] == 0 && width > 0 && height > 0 && width <= 4096 &&
+                 height <= 4096;
+        } else if (!memcmp(type, "PLTE", 4)) {
+            for (uint32_t i = 0; i < len / 3 && i < 256; i++) {
+                pal[i][0] = d[i * 3];
+                pal[i][1] = d[i * 3 + 1];
+                pal[i][2] = d[i * 3 + 2];
+            }
+        } else if (!memcmp(type, "tRNS", 4)) {
+            for (uint32_t i = 0; i < len && i < 256; i++)
+                pal[i][3] = d[i];
+        } else if (!memcmp(type, "IDAT", 4)) {
+            uint8_t * more = realloc(idat, idat_n + len);
+            if (!more) {
+                ok = false;
+                break;
+            }
+            idat = more;
+            memcpy(idat + idat_n, d, len);
+            idat_n += len;
+        } else if (!memcmp(type, "IEND", 4))
+            break;
+        at += 12 + (long)len;
+    }
+    free(file);
+    int raw_n = 0;
+    uint8_t * raw = ok && idat ? (uint8_t *)stbi_zlib_decode_malloc((const char *)idat, (int)idat_n, &raw_n) : NULL;
+    free(idat);
+    if (raw && raw_n >= (width + 1) * height) {
+        // the scanlines' filters undone, one byte a pixel
+        out = malloc((size_t)width * height);
+        for (int y = 0; out && y < height; y++) {
+            const uint8_t * line = raw + (size_t)y * (width + 1);
+            uint8_t * row = out + (size_t)y * width, * up = y ? row - width : NULL;
+            int ft = line[0];
+            for (int x = 0; x < width; x++) {
+                int a = x ? row[x - 1] : 0, b = up ? up[x] : 0, c = x && up ? up[x - 1] : 0, v = line[1 + x];
+                if (ft == 1)
+                    v += a;
+                else if (ft == 2)
+                    v += b;
+                else if (ft == 3)
+                    v += (a + b) / 2;
+                else if (ft == 4) {
+                    int p = a + b - c, pa = abs(p - a), pb = abs(p - b), pc = abs(p - c);
+                    v += pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
+                }
+                row[x] = (uint8_t)v;
+            }
+        }
+        *w = width;
+        *h = height;
+    }
+    free(raw);
+    return out;
+}
+
+Tex * tex_load_paletted(const char * path, int flags)
+{
+    static uint8_t pal[256][4];
+    int w, h;
+    uint8_t * idx = load_png_p8(path, pal, &w, &h);
+    if (!idx)
+        return tex_load(path, flags);
+#ifdef __vita__
+    // vitaGL keeps GL_PALETTE8_RGBA8_OES as a real paletted texture: the palette, then an index a pixel
+    size_t n = (size_t)w * h;
+    uint8_t * buf = malloc(sizeof(pal) + n);
+    if (!buf) {
+        free(idx);
+        return tex_load(path, flags);
+    }
+    memcpy(buf, pal, sizeof(pal));
+    memcpy(buf + sizeof(pal), idx, n);
+    free(idx);
+    Tex * t = calloc(1, sizeof(Tex));
+    t->w = w;
+    t->h = h;
+    glGenTextures(1, &t->id);
+    glBindTexture(GL_TEXTURE_2D, t->id);
+    GLint mag = flags & TEX_NEAREST ? GL_NEAREST : GL_LINEAR;
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, mag);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, mag);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glGetError();
+    glCompressedTexImage2D(GL_TEXTURE_2D, 0, GL_PALETTE8_RGBA8_OES, w, h, 0, (GLsizei)(sizeof(pal) + n), buf);
+    GLenum err = glGetError();
+    free(buf);
+    current_tex = NULL;
+    if (err != GL_NO_ERROR) {
+        plat_log("tex: paletted %s refused (0x%x), as RGBA", path, err);
+        tex_free(t);
+        return tex_load(path, flags);
+    }
+    return t;
+#else
+    // the desktop has the memory: as RGBA
+    uint8_t * px = malloc((size_t)w * h * 4);
+    for (size_t i = 0; px && i < (size_t)w * h; i++)
+        memcpy(px + i * 4, pal[idx[i]], 4);
+    free(idx);
+    if (px && getenv("GHV_P8CHECK")) {
+        // tests: the indices and palette against stb_image's own decoding
+        int sw, sh, sn;
+        uint8_t * ref = stbi_load(path, &sw, &sh, &sn, 4);
+        size_t bad = 0;
+        for (size_t i = 0; ref && sw == w && sh == h && i < (size_t)w * h * 4; i++)
+            bad += px[i] != ref[i];
+        plat_log("p8check: %s %dx%d %s, %zu bytes differ", path, w, h, ref ? "decoded" : "no ref", bad);
+        stbi_image_free(ref);
+    }
+    if (!px)
+        return tex_load(path, flags);
+    Tex * t = tex_rgba(px, w, h, flags);
+    free(px);
+    return t;
+#endif
+}
+
 void tex_free(Tex * t)
 {
     if (!t)

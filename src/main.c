@@ -5605,6 +5605,8 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "The band has two sets of moves now: World Tour's everyday groove in verses, and each member's wilder loop (lunges, arms up) in choruses, solos, Star Power and the outro.",
+        "The band's pictures take a quarter of the memory they did (kept in 256 colours on the Vita).",
         "The band leaps into the air when a chorus slams in and the crowd is with you (once every 20 s at most), not only on Star Power.",
         "Streak lamps: the gold chain runs past the top bulb again (every bulb sits on it), and stops at the bottom one.",
         "SELECT in the song list, Find outdated songs: checks every downloaded song against its site and updates the ones missing a part (drums, vocals...), with an old chart or old audio. Scores kept.",

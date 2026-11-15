@@ -74,6 +74,13 @@ static Tex * load_tex(const char * name, int flags)
     return tex_load(path, flags);
 }
 
+static Tex * load_tex_p8(const char * name)
+{
+    char path[512];
+    snprintf(path, sizeof(path), "%s%s", plat_asset_dir(), name);
+    return tex_load_paletted(path, 0);
+}
+
 static Sound * load_sound(const char * name)
 {
     char path[512];
@@ -207,7 +214,7 @@ void res_load(void)
         char path[64];
         for (int i = 0; i < 6; i++) {
             snprintf(path, sizeof(path), "crowd/%s.png", peds[i]);
-            res.crowd[i] = load_tex(path, 0);
+            res.crowd[i] = load_tex_p8(path);
         }
     }
     res_loading(1, "LOADING");
@@ -436,7 +443,7 @@ const float (*res_venue_marks(const char * zone))[3]
     return NULL;
 }
 
-static Tex * sheet[4];
+static Tex * sheet[4], * alt_sheet[4];
 static char loaded[4][16];
 
 // about 17 MB of pictures, wanted only during a song
@@ -444,9 +451,15 @@ void res_band_free(void)
 {
     for (int r = 0; r < 4; r++) {
         tex_free(sheet[r]);
-        sheet[r] = NULL;
+        tex_free(alt_sheet[r]);
+        sheet[r] = alt_sheet[r] = NULL;
         loaded[r][0] = 0;
     }
+}
+
+Tex * res_band_alt(int role)
+{
+    return role >= 0 && role < 4 ? alt_sheet[role] : NULL;
 }
 
 Tex * res_band_sheet(int role, const char * name)
@@ -455,7 +468,16 @@ Tex * res_band_sheet(int role, const char * name)
         tex_free(sheet[role]);
         char path[64];
         snprintf(path, sizeof(path), "band/%s.png", name);
-        sheet[role] = load_tex(path, 0);
+        sheet[role] = load_tex_p8(path);
+        // its wilder loop for the big sections, when there is one (tools/band.py --alt)
+        tex_free(alt_sheet[role]);
+        snprintf(path, sizeof(path), "band/alt/%s.png", name);
+        char full[512];
+        snprintf(full, sizeof(full), "%s%s", plat_asset_dir(), path);
+        FILE * f = fopen(full, "rb");
+        alt_sheet[role] = f ? load_tex_p8(path) : NULL;
+        if (f)
+            fclose(f);
         snprintf(loaded[role], sizeof(loaded[role]), "%s", name);
     }
     return sheet[role];
