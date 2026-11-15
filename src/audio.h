@@ -2,6 +2,7 @@
 // sound effects) and the song clock the notes follow
 #pragma once
 #include <stdbool.h>
+#include <stdint.h>
 
 #define MAX_STEMS 16
 
@@ -43,3 +44,9 @@ Sound * sound_load(const char * path);
 int sound_play(Sound * s, float volume, bool loop);
 void sound_stop(int voice);
 void sound_volume(int voice, float volume);
+// a voice mixed over the song (a replay's singing): mono 16-bit at rate, pcm[0] at song time t0; NULL: none. The
+// samples stay the caller's till it's set to NULL
+void audio_voice(const int16_t * pcm, int n, int channels, int rate, double t0, float volume);
+void audio_voice_volume(float volume);
+// the song's time for threads other than the game's (-1e9: not playing)
+double audio_song_clock(void);

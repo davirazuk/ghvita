@@ -562,3 +562,21 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   180 px/m, ink MaxFilter 7); draw_band/band_frame take cells from each sheet's width, so either size works. Play:
   strum held through a sustain, your misses aren't strummed, your whammy shakes your member on a ringing note.
   Not done: fret hand along the neck (needs 5x the frames).
+- v253 replays + singing (main). src/replay.c: every game_update frame is an RFrame (G.t, held/pressed lanes after
+  lefty/touch, whammy bar+dw, SP request bit (select/cymbals/tilt; tilt() now returns the trigger), mic pitch+level
+  when singing). game_update -> game_tick(pad, pressed, rf); in a replay game_update runs every frame whose t <= audio
+  time (max 8 a frame) with the recorded inputs and t, so it judges and scores the same (PC: mash run 2513 = replay
+  2513). Not kept for the bot, practice, battle. Files <player>/replays/<fnv(folder)>_<part><diff>_last.ghr and
+  _best.ghr (best unfailed score): head + the Config played with (other sizes tolerated: fields are appended) +
+  frames + singing as IMA ADPCM. In a replay cfg is the replay's (your volumes/fps/lights kept), cfg_borrowed stops
+  config_save, end_replay restores.
+  Singing: vocals.c mic_thread copies grains into a song-time buffer (audio_song_clock, thread-safe, REC_LATENCY 60
+  ms); the judge uses vox_feed (the frame's sample) so replays feed the same values; vox_replay(true) = no mic.
+  voicefx.c (once at replay load, needs the vocals chart): 90 Hz HP, 6.8 kHz LP, +3 dB at 3 kHz; time shift +-250 ms
+  that best lines voiced 10 ms frames up with chart notes; gate (-20 dB) + -10 dB outside notes; tuning = two-head
+  delay pitch shifter (W 512) pulling 80% of the way to the note when within 1.5 semitones (octave folded), back to
+  a plain W/2 delay otherwise; 3:1 compressor; makeup to ~3600 RMS; 25 ms predelay Freeverb-lite (4 comb + 2
+  allpass, stereo spread 11) -> stereo, mixed by audio_voice in mix(). Song's vocals in a replay with singing start
+  LOW (0.25), pause menu FULL/LOW/OFF (needs a separate vocals stem). SAVE YOUR SINGING writes a 16 kHz stereo WAV
+  to <player>/recordings. Option "Keep my singing in replays" (keep_singing). PC test mic: GHV_MIC=1 (tone) or
+  GHV_MIC=<raw s16 16 kHz> + GHV_MIC_LATE=<s>.

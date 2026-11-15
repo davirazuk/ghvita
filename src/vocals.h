@@ -2,6 +2,7 @@
 // thread reads the mic and finds the pitch; each frame the game asks how the note under the now line is going
 #pragma once
 #include <stdbool.h>
+#include <stdint.h>
 
 bool vox_load(const char * folder);         // false: no vocals.vhv (or nothing in it)
 void vox_free(void);                        // stops the mic too
@@ -22,3 +23,14 @@ void vox_draw(double t);
 bool vox_mic_ok(void);
 // the pitch detector alone (for the tests): MIDI note of 1024 samples at 16 kHz, -1 none
 float vox_pitch(const short * in, int n);
+// what the mic hears now; what the judging uses this frame (the game samples once, keeps it for the replay)
+void vox_heard(float * pitch, float * level);
+void vox_feed(float pitch, float level);
+void vox_replay(bool on);                   // a replay plays: no microphone
+// the singing kept from song time t0, room for that many seconds; got back (16 kHz, NULL: nothing sung)
+void vox_record_start(double t0, double seconds);
+void vox_record_stop(void);
+void vox_record_clear(void);
+// the note sung at song time s (within margin seconds of one): its pitch (MIDI; 0 spoken or a clap), -1 none
+int vox_target_at(double s, double margin);
+const int16_t * vox_record_get(int * n, float * t0);

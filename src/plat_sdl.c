@@ -16,12 +16,14 @@
 //   GHV_DATA=dir      the data folder (default ./data/), GHV_ASSETS=dir the assets (default ./assets/)
 #include <SDL2/SDL.h>
 #include <GL/gl.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <sys/statvfs.h>
 #include <stdarg.h>
+#include "audio.h"
 #include "plat.h"
 #include "update_apply.h"
 
@@ -398,18 +400,58 @@ void plat_thread(const char * name, int (*fn)(void * arg), void * arg, int core)
     SDL_DetachThread(t);
 }
 
-// the tests sing through vocals.c's autoplay voice
+// the tests sing through vocals.c's autoplay voice; GHV_MIC=1: a test microphone, a tone gliding up and down an
+// octave at the mic's real pace (with GHV_PACE, so the song keeps time with it)
+static int mic_grain, mic_rate;
+static double mic_phase, mic_due, mic_late;
+static short * mic_file;           // GHV_MIC=<raw file>: that's what's sung
+static long mic_file_n;
+
 int plat_mic_open(int grain, int rate)
 {
-    (void)grain;
-    (void)rate;
-    return -1;
+    if (!getenv("GHV_MIC"))
+        return -1;
+    mic_grain = grain;
+    mic_rate = rate;
+    mic_due = 0;
+    const char * path = getenv("GHV_MIC");
+    mic_late = getenv("GHV_MIC_LATE") ? atof(getenv("GHV_MIC_LATE")) : 0;
+    FILE * f = strcmp(path, "1") && !mic_file ? fopen(path, "rb") : NULL;
+    if (f) {
+        fseek(f, 0, SEEK_END);
+        mic_file_n = ftell(f) / 2;
+        fseek(f, 0, SEEK_SET);
+        mic_file = malloc(mic_file_n * 2);
+        mic_file_n = fread(mic_file, 2, mic_file_n, f);
+        fclose(f);
+    }
+    return 0;
 }
 
 void plat_mic_read(int port, short * out)
 {
     (void)port;
-    (void)out;
+    if (!mic_grain)
+        return;
+    double now = SDL_GetPerformanceCounter() / (double)SDL_GetPerformanceFrequency();
+    if (mic_due < now - 0.2)
+        mic_due = now;
+    mic_due += (double)mic_grain / mic_rate;
+    if (mic_due > now)
+        SDL_Delay((Uint32)((mic_due - now) * 1000));
+    if (mic_file) {
+        // a recording (raw 16-bit mono at the mic's rate, song time 0 at its start), heard GHV_MIC_LATE s late
+        double t = audio_song_clock() - mic_late;
+        long at = (long)(t * mic_rate) - mic_grain;
+        for (int i = 0; i < mic_grain; i++)
+            out[i] = at + i >= 0 && at + i < mic_file_n ? mic_file[at + i] : 0;
+        return;
+    }
+    double hz = 196 * pow(2, (sin(now * 0.7) + 1) / 2);
+    for (int i = 0; i < mic_grain; i++) {
+        mic_phase += 2 * M_PI * hz / mic_rate;
+        out[i] = (short)(9000 * sin(mic_phase) + 3000 * sin(mic_phase * 2));
+    }
 }
 
 void plat_mic_close(int port)

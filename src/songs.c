@@ -876,6 +876,7 @@ void config_defaults(void)
     snprintf(cfg.highway, sizeof(cfg.highway), "judy");
     snprintf(cfg.venue, sizeof(cfg.venue), "song");
     cfg.tilt = true;
+    cfg.keep_singing = true;
     cfg.easy_sustains = true;
     cfg.highway_alpha = 10;
     cfg.venue_light = 10;
@@ -961,6 +962,8 @@ void config_load(void)
         }
         else if (strcmp(k, "note_steps") == 0)
             cfg.note_steps = n != 0;
+        else if (strcmp(k, "keep_singing") == 0)
+            cfg.keep_singing = n != 0;
         else if (strcmp(k, "metronome") == 0)
             cfg.metronome = n != 0;
         else if (strcmp(k, "song_speed") == 0)
@@ -1065,8 +1068,12 @@ void config_load(void)
         cfg.sing_along = false;     // lyrics over the top of the picture when you aren't singing: only if asked for
 }
 
+bool cfg_borrowed;
+
 void config_save(void)
 {
+    if (cfg_borrowed)
+        return;                 // a replay's settings stand in: yours are kept as they were
     char path[400], tmp[410];
     snprintf(path, sizeof(path), "%ssettings.txt", player_dir());
     snprintf(tmp, sizeof(tmp), "%s.tmp", path);
@@ -1094,7 +1101,7 @@ void config_save(void)
     fprintf(f, "still_camera = %d\nframe_rate = %d\n", cfg.still_camera, cfg.frame_rate);
     fprintf(f, "backdrop = %d\nhit_ratings = %d\nhw_length = %d\nsudden_death = %d\nhard_rock = %d\n",
             cfg.backdrop, cfg.hit_ratings, cfg.hw_length, cfg.sudden_death, cfg.hard_rock);
-    fprintf(f, "engine = %d\nnote_steps = %d\n", cfg.engine, cfg.note_steps);
+    fprintf(f, "engine = %d\nnote_steps = %d\nkeep_singing = %d\n", cfg.engine, cfg.note_steps, cfg.keep_singing);
     fclose(f);
     remove(path);
     rename(tmp, path);
