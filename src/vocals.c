@@ -61,6 +61,7 @@ static struct {
 #define REC_LATENCY 0.06        // what the mic hears now was sung this long ago
 static struct {
     int16_t * pcm;
+    int16_t * ref;              // what the speakers played meanwhile (the mixer writes it): the echo canceller's
     int cap, hi;                // samples allocated, written up to
     int at;                     // where the next grain goes
     double t0;                  // the song's time of pcm[0]
@@ -353,19 +354,28 @@ void vox_replay(bool on)
 void vox_record_start(double t0, double seconds)
 {
     rec.on = false;
+    audio_capture(NULL, 0, 0);
     int cap = (int)(seconds * RATE);
-    if (cap > rec.cap) {
+    if (cap > rec.cap || !rec.pcm) {
         int16_t * more = realloc(rec.pcm, (size_t)cap * sizeof(int16_t));
         if (!more)
             return;
         rec.pcm = more;
         rec.cap = cap;
+        free(rec.ref);
+        rec.ref = NULL;
     }
+    if (!rec.ref)
+        rec.ref = malloc((size_t)rec.cap * sizeof(int16_t));        // none: kept without the clean-up
     memset(rec.pcm, 0, (size_t)rec.cap * sizeof(int16_t));
+    if (rec.ref)
+        memset(rec.ref, 0, (size_t)rec.cap * sizeof(int16_t));
     rec.t0 = t0;
     rec.hi = 0;
     rec.at = -1;
     rec.on = !feeding;
+    if (rec.on && rec.ref)
+        audio_capture(rec.ref, rec.cap, t0);
 }
 
 int vox_target_at(double s, double margin)
@@ -394,20 +404,36 @@ int vox_target_at(double s, double margin)
 void vox_record_clear(void)
 {
     rec.on = false;
+    audio_capture(NULL, 0, 0);
     rec.hi = 0;
 }
 
 void vox_record_stop(void)
 {
     rec.on = false;
+    audio_capture(NULL, 0, 0);
 }
 
 const int16_t * vox_record_get(int * n, float * t0)
 {
-    rec.on = false;
+    vox_record_stop();
     *n = rec.hi;
     *t0 = (float)rec.t0;
     return rec.pcm && rec.hi > RATE ? rec.pcm : NULL;      // under a second: nothing sung
+}
+
+bool vox_record_take(int16_t ** pcm, int16_t ** ref, int * n, float * t0)
+{
+    vox_record_stop();
+    if (!rec.pcm || rec.hi <= RATE)
+        return false;
+    *pcm = rec.pcm;
+    *ref = rec.ref;
+    *n = rec.hi;
+    *t0 = (float)rec.t0;
+    rec.pcm = rec.ref = NULL;
+    rec.cap = rec.hi = 0;
+    return true;
 }
 
 void vox_autoplay(bool on)

@@ -48,5 +48,11 @@ void sound_volume(int voice, float volume);
 // samples stay the caller's till it's set to NULL
 void audio_voice(const int16_t * pcm, int n, int channels, int rate, double t0, float volume);
 void audio_voice_volume(float volume);
+// keep what the speakers play from now (16 kHz mono, buf[0] at song time t0, n samples), NULL to stop: the echo
+// canceller's reference. The buffer must outlive the capture
+void audio_capture(int16_t * buf, int n, double t0);
+#ifndef __vita__
+void audio_test_heard(double t, int16_t * out, int n);   // tests: what played at song time t (16 kHz mono)
+#endif
 // the song's time for threads other than the game's (-1e9: not playing)
 double audio_song_clock(void);

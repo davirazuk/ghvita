@@ -878,6 +878,7 @@ void config_defaults(void)
     cfg.tilt = true;
     cfg.keep_singing = true;
     cfg.voice_style = 1;
+    cfg.voice_level = 3;
     cfg.easy_sustains = true;
     cfg.highway_alpha = 10;
     cfg.venue_light = 10;
@@ -967,6 +968,8 @@ void config_load(void)
             cfg.keep_singing = n != 0;
         else if (strcmp(k, "voice_style") == 0)
             cfg.voice_style = n < 0 || n > 3 ? 1 : n;
+        else if (strcmp(k, "voice_level") == 0)
+            cfg.voice_level = n < 0 || n > 5 ? 3 : n;
         else if (strcmp(k, "metronome") == 0)
             cfg.metronome = n != 0;
         else if (strcmp(k, "song_speed") == 0)
@@ -1107,7 +1110,7 @@ void config_save(void)
     fprintf(f, "still_camera = %d\nframe_rate = %d\n", cfg.still_camera, cfg.frame_rate);
     fprintf(f, "backdrop = %d\nhit_ratings = %d\nhw_length = %d\nsudden_death = %d\nhard_rock = %d\n",
             cfg.backdrop, cfg.hit_ratings, cfg.hw_length, cfg.sudden_death, cfg.hard_rock);
-    fprintf(f, "engine = %d\nnote_steps = %d\nkeep_singing = %d\nvoice_style = %d\n", cfg.engine, cfg.note_steps, cfg.keep_singing, cfg.voice_style);
+    fprintf(f, "engine = %d\nnote_steps = %d\nkeep_singing = %d\nvoice_style = %d\nvoice_level = %d\n", cfg.engine, cfg.note_steps, cfg.keep_singing, cfg.voice_style, cfg.voice_level);
     fclose(f);
     remove(path);
     rename(tmp, path);

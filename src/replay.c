@@ -11,6 +11,7 @@
 #include "plat.h"
 #include "replay.h"
 #include "vocals.h"
+#include "aec.h"
 #include "voicefx.h"
 
 #define MAGIC "GHR1"
@@ -128,7 +129,8 @@ static void replay_dir(char * out, int size)
     mkdir(out, 0777);
 }
 
-static bool write_file(const char * path, const ReplayInfo * info, const RFrame * frames, const int16_t * voice)
+static bool write_file(const char * path, const ReplayInfo * info, const Config * c, const RFrame * frames,
+                       const int16_t * voice)
 {
     char tmp[420];
     snprintf(tmp, sizeof(tmp), "%s.tmp", path);
@@ -141,7 +143,7 @@ static bool write_file(const char * path, const ReplayInfo * info, const RFrame 
     h.cfg_size = sizeof(Config);
     h.frame_size = sizeof(RFrame);
     h.info = *info;
-    bool ok = fwrite(&h, sizeof(h), 1, f) == 1 && fwrite(&cfg, sizeof(Config), 1, f) == 1 &&
+    bool ok = fwrite(&h, sizeof(h), 1, f) == 1 && fwrite(c, sizeof(Config), 1, f) == 1 &&
               fwrite(frames, sizeof(RFrame), (size_t)info->frames, f) == (size_t)info->frames;
     if (ok && info->voice_n > 0) {
         Adpcm s = {0, 0};
@@ -180,10 +182,71 @@ bool replay_read_info(const char * path, ReplayInfo * info)
     return ok;
 }
 
+// the singing cleaned of the song (the speakers heard by the mic) after it's saved, on a quiet thread; the files are
+// written again when it's done. A replay of them waits for it (replay_wait)
+static struct {
+    ReplayInfo info;
+    Config cfg;
+    RFrame * f;
+    int16_t * voice, * ref;
+    char path[420], best[420];
+    bool to_best;
+    volatile bool busy;
+} clean;
+
+static int clean_thread(void * arg)
+{
+    (void)arg;
+    const char * dump = getenv("GHV_AEC_DUMP");             // tests: the singing before and after, and the speakers
+    if (dump) {
+        char p[440];
+        const int16_t * what[2] = {clean.voice, clean.ref};
+        for (int k = 0; k < 2; k++) {
+            snprintf(p, sizeof(p), "%s.%s.raw", dump, k ? "ref" : "mic");
+            FILE * f = fopen(p, "wb");
+            if (f)
+                fwrite(what[k], 2, (size_t)clean.info.voice_n, f), fclose(f);
+        }
+    }
+    float db = aec_clean(clean.voice, clean.ref, clean.info.voice_n);
+    if (dump) {
+        char p[440];
+        snprintf(p, sizeof(p), "%s.clean.raw", dump);
+        FILE * f = fopen(p, "wb");
+        if (f)
+            fwrite(clean.voice, 2, (size_t)clean.info.voice_n, f), fclose(f);
+    }
+    if (db > 0) {
+        bool ok = write_file(clean.path, &clean.info, &clean.cfg, clean.f, clean.voice);
+        if (ok && clean.to_best)
+            write_file(clean.best, &clean.info, &clean.cfg, clean.f, clean.voice);
+        plat_log("replay: singing cleaned of the song, %s", ok ? "kept" : "couldn't keep it");
+    }
+    free(clean.f);
+    free(clean.voice);
+    free(clean.ref);
+    clean.f = NULL, clean.voice = clean.ref = NULL;
+    __sync_synchronize();
+    clean.busy = false;
+    return 0;
+}
+
+bool replay_busy(void)
+{
+    return clean.busy;
+}
+
+void replay_wait(void)
+{
+    while (clean.busy)
+        plat_sleep_us(20000);
+}
+
 bool replay_save(const Song * song, const ReplayInfo * in)
 {
     if (!replay_rec_ok() || !song)
         return false;
+    replay_wait();
     ReplayInfo info = *in;
     snprintf(info.song, sizeof(info.song), "%s", song->folder);
     snprintf(info.name, sizeof(info.name), "%s", song->name);
@@ -193,10 +256,11 @@ bool replay_save(const Song * song, const ReplayInfo * in)
 #ifdef GHV_BUILD
     info.build = GHV_BUILD;
 #endif
-    const int16_t * voice = NULL;
+    int16_t * voice = NULL, * ref = NULL;
     int vn = 0;
     float t0 = 0;
-    voice = vox_record_get(&vn, &t0);
+    if (!vox_record_take(&voice, &ref, &vn, &t0))
+        voice = ref = NULL;
     info.voice_n = voice ? vn : 0;
     info.voice_t0 = t0;
     char dir[400], path[420], best[420];
@@ -204,11 +268,30 @@ bool replay_save(const Song * song, const ReplayInfo * in)
     uint32_t h = song_hash(song->folder);
     snprintf(path, sizeof(path), "%s/%08x_%d%d_last.ghr", dir, (unsigned)h, info.part, info.diff);
     snprintf(best, sizeof(best), "%s/%08x_%d%d_best.ghr", dir, (unsigned)h, info.part, info.diff);
-    bool ok = write_file(path, &info, rec.f, voice);
+    bool ok = write_file(path, &info, &cfg, rec.f, voice);
     ReplayInfo old;
-    if (ok && !info.failed && (!replay_read_info(best, &old) || info.score > old.score))
-        write_file(best, &info, rec.f, voice);
+    bool to_best = ok && !info.failed && (!replay_read_info(best, &old) || info.score > old.score);
+    if (to_best)
+        write_file(best, &info, &cfg, rec.f, voice);
     plat_log("replay: %s %d frames, %d s of singing", ok ? "kept" : "couldn't keep", rec.n, info.voice_n / VOICE_RATE);
+    // with the speakers kept, the song comes out of the singing on a thread (and the files are written again)
+    RFrame * f = ok && voice && ref ? malloc((size_t)rec.n * sizeof(RFrame)) : NULL;
+    if (f) {
+        memcpy(f, rec.f, (size_t)rec.n * sizeof(RFrame));
+        clean.info = info;
+        clean.cfg = cfg;
+        clean.f = f;
+        clean.voice = voice;
+        clean.ref = ref;
+        snprintf(clean.path, sizeof(clean.path), "%s", path);
+        snprintf(clean.best, sizeof(clean.best), "%s", best);
+        clean.to_best = to_best;
+        clean.busy = true;
+        plat_thread("replay_clean", clean_thread, NULL, PLAT_BACKGROUND);
+    } else {
+        free(voice);
+        free(ref);
+    }
     return ok;
 }
 
@@ -271,6 +354,7 @@ static struct {
 
 bool replay_load(const char * path)
 {
+    replay_wait();                          // its singing may still be being cleaned (and written)
     replay_unload();
     FILE * f = fopen(path, "rb");
     if (!f)

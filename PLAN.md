@@ -593,3 +593,25 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   mono to re-mix; game_replay_voice_style detaches the mixer first). Clean view (G.view_mode, replay pause VIEW:
   everything / stage + lyrics / stage only). voicefx: +1e-18 against denormals (4x faster), sin^2 table, compressor
   gain every 16 samples: 130 s mixes in 0.1 s on PC.
+- v255: speakers' echo out of the singing (user, Vita speakers + built-in mic: "issues with the vocal recording like
+  the mixing the replay and volume"). The mic heard the song; voicefx then gated/aligned/boosted the song along with
+  the voice. audio.c mix() keeps what's played (audio_capture: 16 kHz mono, clipped as played, under mix_lock,
+  song-time indexed like the mic buffer); vocals.c rec.ref beside rec.pcm; replay_save writes the raw file at once,
+  then a PLAT_BACKGROUND thread runs aec_clean and writes last/best again (own copies of info, cfg, frames);
+  replay_load / start_replay wait for it ("CLEANING UP YOUR SINGING"). src/aec.c: lag by GCC-PHAT (8192-pt, up to
+  64 loud blocks, +-250 ms; peak/mean < 8 = no song in the mic (headphones): left alone); partitioned block
+  frequency-domain filter (256-sample blocks, 8 parts = 128 ms, main path 320 samples in), round-robin gradient
+  constraint, learning rate from Speex's "leak" (error power vs echo-estimate power regression) so singing doesn't
+  teach it the voice; 20 s learning pre-pass; sqrt-Hann spectral post-filter, gain 1 - 2*leak*Py/Pe, floor 0.08.
+  Sim (~/.cache/ghv-work/aec: sim.py speaker model, ev.py): song-only parts -33 dB, voice kept x0.99, leftover song
+  ~18 dB under the voice while singing; headphones untouched; lags -50..+200 ms, a 20 ms slip recovers in ~10 s.
+  0.27 s for 130 s on PC (aec.c -O2 -ffast-math; -O3 broke the Vita link: replay.c went -Os too and segment 0 now
+  ends 0x34e9d8, ~220 bytes of room; Vita time unmeasured: log "aec:"). PC test mic: GHV_MIC_ECHO=<gain>
+  (+GHV_MIC_ECHO_MS) hears the game's own output (audio_test_heard, song-time history, PC only; the test mic now
+  streams grain after grain like hardware); GHV_AEC_DUMP=<prefix> writes mic/ref/clean raw. In-game PC run
+  (All They Wanted, NeilSSong vocals as the singer, echo 0.7): lag found steady, song-only parts -10.5 dB, voice kept
+  x0.97; the rig's own ceiling for any linear filter is 7-9 dB (its fake speaker clips hard and its clock jitters),
+  so the clean figure is the offline sim's. Speaker bleed also confuses the live pitch judge (not fixed: needs this
+  in real time).
+  Replay "Your singing" is cfg.voice_level (Off/50/75/100/150/200%, saved). voicefx's alignment search started from
+  -(1L<<40): long is 32 bits on the Vita, so alignment never moved there; now LONG_MIN.

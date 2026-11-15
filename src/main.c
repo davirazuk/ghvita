@@ -3277,7 +3277,7 @@ static bool result_replay;              // the run on the results screen was kep
 static int replay_back = S_RESULTS;     // where a replay goes when it's over
 static Config cfg_mine;                 // yours, while a replay's settings stand in
 static int replay_song_vox = 2;          // the song's own vocals: 2 full, 1 low, 0 off
-static bool replay_my_vox = true;
+#define MY_VOX game_my_voice_volume()
 static int replay_view;                 // 0 all, 1 stage + lyrics, 2 stage only
 enum { RL_MAX = 24 };
 static char rl_paths[RL_MAX][400];
@@ -3296,8 +3296,9 @@ static void end_replay(void)
     game_stop();
     replay_unload();
     if (cfg_borrowed) {
-        bool style_changed = cfg_mine.voice_style != cfg.voice_style;
+        bool style_changed = cfg_mine.voice_style != cfg.voice_style || cfg_mine.voice_level != cfg.voice_level;
         cfg_mine.voice_style = cfg.voice_style;
+        cfg_mine.voice_level = cfg.voice_level;
         cfg = cfg_mine;
         cfg_borrowed = false;
         if (style_changed)
@@ -3307,8 +3308,23 @@ static void end_replay(void)
     sel_t = now_s;
 }
 
+static void replay_note(const char * text)
+{
+    gfx_begin(0, 0, 0);
+    gfx_2d();
+    draw_background(res.bg_menu, WHITE);
+    gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(0, 0, 0, 150));
+    font_draw_shadow(res.title, text, SCREEN_W / 2, SCREEN_H / 2 - 24, 40, RGBA(255, 225, 160, 255), ALIGN_CENTER);
+    gfx_end();
+}
+
 static bool start_replay(const char * path, int back)
 {
+    if (replay_busy()) {
+        // the song still being taken out of the singing (the speakers were on): a few seconds
+        replay_note("CLEANING UP YOUR SINGING");
+        replay_wait();
+    }
     if (!replay_load(path)) {
         say("That replay can't be played (made by another version?)");
         return false;
@@ -3332,18 +3348,11 @@ static bool start_replay(const char * path, int back)
     cfg.light_fx = cfg_mine.light_fx;
     cfg.show_fps = cfg_mine.show_fps;
     cfg.voice_style = cfg_mine.voice_style;
+    cfg.voice_level = cfg_mine.voice_level;
     cfg_borrowed = true;
     sel = idx;
-    if (in->voice_n) {
-        // the singing's mixed into the song first: a moment
-        gfx_begin(0, 0, 0);
-        gfx_2d();
-        draw_background(res.bg_menu, WHITE);
-        gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(0, 0, 0, 150));
-        font_draw_shadow(res.title, "MIXING YOUR SINGING", SCREEN_W / 2, SCREEN_H / 2 - 24, 40,
-                         RGBA(255, 225, 160, 255), ALIGN_CENTER);
-        gfx_end();
-    }
+    if (in->voice_n)
+        replay_note("MIXING YOUR SINGING");           // the singing's mixed into the song first: a moment
     if (!game_start_replay(s)) {
         replay_unload();
         cfg = cfg_mine;
@@ -3352,7 +3361,6 @@ static bool start_replay(const char * path, int back)
         return false;
     }
     // under your singing the song's own is a quiet guide; muted or full from the pause menu
-    replay_my_vox = true;
     replay_view = 0;
     replay_song_vox = in->voice_n && game_replay_song_vocals(1) ? 1 : 2;
     replay_back = back;
@@ -3423,9 +3431,13 @@ static void replay_pause_screen(void)
                  id == R_RESUME ? "RESUME" : id == R_RESTART ? "FROM THE START"
                  : id == R_SONGVOX ? (replay_song_vox == 2 ? "SONG'S VOCALS: FULL"
                                       : replay_song_vox == 1 ? "SONG'S VOCALS: LOW" : "SONG'S VOCALS: OFF")
-                 : id == R_MYVOX ? (replay_my_vox ? "YOUR SINGING: ON" : "YOUR SINGING: OFF")
+                 : id == R_MYVOX ? "YOUR SINGING: "
                  : id == R_STYLE ? "VOICE: " : id == R_VIEW ? views[replay_view]
                  : id == R_WAV ? "SAVE YOUR SINGING" : "END REPLAY");
+        if (id == R_MYVOX) {
+            static const char * const lv[6] = {"OFF", "50%", "75%", "100%", "150%", "200%"};
+            snprintf(rows[i], sizeof(rows[i]), "YOUR SINGING: %s", lv[cfg.voice_level < 0 || cfg.voice_level > 5 ? 3 : cfg.voice_level]);
+        }
         if (id == R_STYLE) {
             char up[24];
             snprintf(up, sizeof(up), "%s", voicefx_name(cfg.voice_style));
@@ -3455,7 +3467,7 @@ static void replay_pause_screen(void)
             game_pause(false);
             game_restart();
             game_replay_song_vocals(replay_song_vox);
-            game_replay_my_voice(replay_my_vox);
+            game_replay_my_voice(MY_VOX);
             go(S_PLAY);
             return;
         } else if (id == R_SONGVOX) {
@@ -3466,11 +3478,12 @@ static void replay_pause_screen(void)
                 say("This song's vocals aren't a track of their own: they can't be muted");
             }
         } else if (id == R_MYVOX) {
-            replay_my_vox = !replay_my_vox;
-            game_replay_my_voice(replay_my_vox);
+            // right / X: louder (round to off after twice), left: quieter
+            cfg.voice_level = (cfg.voice_level + (repeat & BTN_LEFT ? 5 : 1)) % 6;
+            game_replay_my_voice(MY_VOX);
         } else if (id == R_STYLE) {
             cfg.voice_style = (cfg.voice_style + (repeat & BTN_LEFT ? VOICE_STYLES - 1 : 1)) % VOICE_STYLES;
-            game_replay_voice_style(cfg.voice_style, replay_my_vox);
+            game_replay_voice_style(cfg.voice_style, MY_VOX);
         } else if (id == R_VIEW) {
             replay_view = (replay_view + (repeat & BTN_LEFT ? 2 : 1)) % 3;
             game_set_view(replay_view);
@@ -6028,6 +6041,9 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "Singing with the Vita's speakers on: the mic heard the song too, and the replay played that copy back as a muddy echo. Now the game keeps what the speakers played and takes it back out of your singing after the song (a few seconds).",
+        "Replay START menu, Your singing: Off, 50%, 75%, 100%, 150% or 200% (it's remembered), instead of just on or off.",
+        "Fixed: on the Vita your singing wasn't being lined up with the beat in replays.",
         "Your singing's voice in replays: Natural, Studio, Big hall or Hard tune (snapped to the notes). Change it live from the replay's START menu, or Options > Sound.",
         "Replays have a clean view (START > View): the stage and the lyrics, or the stage alone, no highway or meters. Good for recording.",
         "Replays: every song you finish is kept. START on the results screen watches it, played back exactly as you played it.",
