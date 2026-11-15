@@ -17,8 +17,9 @@ set_source_files_properties(src/main.c src/shrink.c src/rbcon.c src/moggdec.c sr
 set_source_files_properties(src/aec.c PROPERTIES COMPILE_OPTIONS "-O2;-ffast-math")
 # its memory is one block read as whatever's in it
 set_source_files_properties(src/ppmd7.c PROPERTIES COMPILE_FLAGS -fno-strict-aliasing)
+set_source_files_properties(src/band3d.c PROPERTIES COMPILE_OPTIONS "-O3;-ffast-math")   # the band's CPU skinning
 set(SRCS src/main.c src/player.c src/achieve.c src/game.c src/gfx.c src/font.c src/audio.c src/decoder.c src/resamp.c src/cues.c src/chart.c src/songs.c src/career.c src/songconv.c
-         src/res.c src/json.c src/net.c src/dl.c src/mega.c src/aes128.c src/moggdec.c src/rar.c src/ppmd7.c src/tour.c src/vocals.c src/rbcon.c src/shrink.c src/replay.c src/voicefx.c src/aec.c
+         src/res.c src/json.c src/net.c src/dl.c src/mega.c src/aes128.c src/moggdec.c src/rar.c src/ppmd7.c src/tour.c src/vocals.c src/rbcon.c src/shrink.c src/band3d.c src/replay.c src/voicefx.c src/aec.c
          src/update.c src/update_apply.c)
 
 # the build's number is how many commits it has: a release is tagged with the same one (tools/release.py)

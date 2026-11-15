@@ -1022,6 +1022,8 @@ void config_load(void)
             cfg.five_pads = n != 0;
         else if (strcmp(k, "no_band") == 0)
             cfg.no_band = atoi(v) != 0;
+        else if (strcmp(k, "band_pictures") == 0)
+            cfg.band_pictures = atoi(v) != 0;
         else if (strncmp(k, "band_pick", 9) == 0 && k[9] >= '0' && k[9] <= '3' && !k[10])
             snprintf(cfg.band_pick[k[9] - '0'], sizeof(cfg.band_pick[0]), "%s", strcmp(v, "song") ? v : "");
         else if (strcmp(k, "sing_along") == 0)
@@ -1093,6 +1095,7 @@ void config_save(void)
             cfg.crowd_vol, cfg.lefty, cfg.show_fps, cfg.last_part, cfg.last_diff, cfg.sort, cfg.last_song, cfg.venue, cfg.no_band, cfg.sing_along, cfg.drum_layout, cfg.drum_hits);
     fprintf(f, "board_look = 1\nno_lyrics = %d\nauto_repress = %d\nflat_notes = %d\nno_wobble = %d\nfire = %d\nnote_size = %d\nno_crowd = %d\nno_vignette = %d\nno_menu_music = %d\nsing_diff = %d\n",
             cfg.no_lyrics, cfg.auto_repress, cfg.flat_notes, cfg.no_wobble, cfg.fire, cfg.note_size, cfg.no_crowd, cfg.no_vignette, cfg.no_menu_music, cfg.sing_diff);
+    fprintf(f, "band_pictures = %d\n", cfg.band_pictures);
     for (int r = 0; r < 4; r++)
         fprintf(f, "band_pick%d = %s\n", r, cfg.band_pick[r][0] ? cfg.band_pick[r] : "song");
     fprintf(f, "camera = %d\nhighway_alpha = %d\nvenue_light = %d\nflashes = %d\n",
