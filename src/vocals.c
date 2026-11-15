@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "audio.h"
 #include "font.h"
 #include "gfx.h"
 #include "plat.h"
@@ -51,7 +52,21 @@ static struct {
     volatile int target;        // autoplay's: what its voice sings
     volatile bool run, running, mic_ok, autoplay;
     bool sung_now;              // a note is being sung right, this frame (singing starts Star Power with it)
+    bool use_fed;               // judged on what the game handed over this frame (vox_feed), not the mic's latest
+    float fed_pitch, fed_level;
 } V;
+
+// the singing kept for the replay: the mic's grains where the song was when they were heard (outside V: it outlives
+// the vocals)
+#define REC_LATENCY 0.06        // what the mic hears now was sung this long ago
+static struct {
+    int16_t * pcm;
+    int cap, hi;                // samples allocated, written up to
+    int at;                     // where the next grain goes
+    double t0;                  // the song's time of pcm[0]
+    volatile bool on;
+} rec;
+static volatile bool feeding;   // a replay: no microphone, the pitch comes from it
 
 float vox_pitch(const short * in, int n)
 {
@@ -105,7 +120,7 @@ static int mic_thread(void * arg)
     int64_t total_us = 0;
     bool tried = false;
     while (V.run) {
-        if (!V.autoplay && !tried) {
+        if (!V.autoplay && !feeding && !tried) {
             tried = true;
             port = plat_mic_open(GRAIN, RATE);
             V.mic_ok = port >= 0;
@@ -122,9 +137,24 @@ static int mic_thread(void * arg)
                 grain[i] = hz > 0 ? (short)(9000 * sinf(p) + 3500 * sinf(2 * p) + 1500 * sinf(3 * p)) : 0;
             }
             plat_sleep_us(GRAIN * 1000000 / RATE);
-        } else if (port >= 0)
+        } else if (port >= 0 && !feeding) {
             plat_mic_read(port, grain);
-        else {
+            if (rec.on && rec.pcm) {
+                // kept where the song was, one grain after the other; back in step if the two drift apart
+                double now = audio_song_clock();
+                if (now > -1e8) {
+                    int want = (int)((now - REC_LATENCY - rec.t0) * RATE) - GRAIN;
+                    if (rec.at < 0 || abs(want - rec.at) > RATE / 10)
+                        rec.at = want;
+                    if (rec.at >= 0 && rec.at + GRAIN <= rec.cap) {
+                        memcpy(rec.pcm + rec.at, grain, sizeof(grain));
+                        rec.at += GRAIN;
+                        if (rec.at > rec.hi)
+                            rec.hi = rec.at;
+                    }
+                }
+            }
+        } else {
             plat_sleep_us(50000);
             continue;
         }
@@ -302,6 +332,84 @@ void vox_seek(double t)
         V.cur++;
 }
 
+void vox_heard(float * pitch, float * level)
+{
+    *pitch = V.mic_pitch;
+    *level = V.mic_level;
+}
+
+void vox_feed(float pitch, float level)
+{
+    V.use_fed = true;
+    V.fed_pitch = pitch;
+    V.fed_level = level;
+}
+
+void vox_replay(bool on)
+{
+    feeding = on;
+}
+
+void vox_record_start(double t0, double seconds)
+{
+    rec.on = false;
+    int cap = (int)(seconds * RATE);
+    if (cap > rec.cap) {
+        int16_t * more = realloc(rec.pcm, (size_t)cap * sizeof(int16_t));
+        if (!more)
+            return;
+        rec.pcm = more;
+        rec.cap = cap;
+    }
+    memset(rec.pcm, 0, (size_t)rec.cap * sizeof(int16_t));
+    rec.t0 = t0;
+    rec.hi = 0;
+    rec.at = -1;
+    rec.on = !feeding;
+}
+
+int vox_target_at(double s, double margin)
+{
+    if (!V.note_count)
+        return -1;
+    int ms = (int)(s * 1000), m = (int)(margin * 1000);
+    // the last note starting by then (and a margin)
+    int lo = 0, hi = V.note_count - 1, at = -1;
+    while (lo <= hi) {
+        int mid = (lo + hi) / 2;
+        if (V.notes[mid].t <= ms + m) {
+            at = mid;
+            lo = mid + 1;
+        } else
+            hi = mid - 1;
+    }
+    for (int i = at; i >= 0 && i > at - 4; i--) {
+        const VNote * n = &V.notes[i];
+        if (ms >= n->t - m && ms < n->t + n->len + m)
+            return n->perc ? 0 : n->pitch;
+    }
+    return -1;
+}
+
+void vox_record_clear(void)
+{
+    rec.on = false;
+    rec.hi = 0;
+}
+
+void vox_record_stop(void)
+{
+    rec.on = false;
+}
+
+const int16_t * vox_record_get(int * n, float * t0)
+{
+    rec.on = false;
+    *n = rec.hi;
+    *t0 = (float)rec.t0;
+    return rec.pcm && rec.hi > RATE ? rec.pcm : NULL;      // under a second: nothing sung
+}
+
 void vox_autoplay(bool on)
 {
     V.autoplay = on;
@@ -376,7 +484,7 @@ bool vox_update(double t, float * grade, float * points)
         return false;
     }
     VPhrase * ph = &V.phrases[V.cur];
-    float voice = V.mic_pitch;
+    float voice = V.use_fed ? V.fed_pitch : V.mic_pitch, level = V.use_fed ? V.fed_level : V.mic_level;
     int want = 0;
     for (int i = ph->first; i < ph->first + ph->count; i++) {
         const VNote * n = &V.notes[i];
@@ -387,7 +495,7 @@ bool vox_update(double t, float * grade, float * points)
         // a clap is any noise at all, a spoken line any voice, the rest the note in tune
         bool ok;
         if (n->perc)
-            ok = voice >= 0 || V.mic_level > 600;
+            ok = voice >= 0 || level > 600;
         else if (!n->pitch)
             ok = voice >= 0;
         else
@@ -539,7 +647,7 @@ void vox_draw(double t)
     gfx_rect(NOW_X - 1, LANE_Y + 1, 2, LANE_H - 2, RGBA(255, 255, 255, 230));
 
     // the voice, a point on the now line: folded to the octave of the note being asked for
-    float voice = V.mic_pitch;
+    float voice = V.use_fed ? V.fed_pitch : V.mic_pitch;
     bool hit = false;
     float voice_y = -1;
     if (voice >= 0) {

@@ -17,7 +17,7 @@ set_source_files_properties(src/main.c src/shrink.c src/rbcon.c src/moggdec.c sr
 set_source_files_properties(src/ppmd7.c PROPERTIES COMPILE_FLAGS -fno-strict-aliasing)
 set_source_files_properties(src/band3d.c PROPERTIES COMPILE_OPTIONS "-O3;-ffast-math")   # the band's CPU skinning
 set(SRCS src/main.c src/player.c src/achieve.c src/game.c src/gfx.c src/font.c src/audio.c src/decoder.c src/resamp.c src/cues.c src/chart.c src/songs.c src/career.c src/songconv.c
-         src/res.c src/json.c src/net.c src/dl.c src/mega.c src/aes128.c src/moggdec.c src/rar.c src/ppmd7.c src/tour.c src/vocals.c src/rbcon.c src/shrink.c src/band3d.c
+         src/res.c src/json.c src/net.c src/dl.c src/mega.c src/aes128.c src/moggdec.c src/rar.c src/ppmd7.c src/tour.c src/vocals.c src/rbcon.c src/shrink.c src/band3d.c src/replay.c src/voicefx.c
          src/update.c src/update_apply.c)
 
 # the build's number is how many commits it has: a release is tagged with the same one (tools/release.py)
@@ -25,7 +25,7 @@ execute_process(COMMAND git rev-list --count HEAD WORKING_DIRECTORY ${CMAKE_SOUR
 if (NOT GHV_BUILD)
     set(GHV_BUILD ${GHV_COMMITS})
 endif()
-set_source_files_properties(src/update.c src/main.c PROPERTIES COMPILE_DEFINITIONS GHV_BUILD=${GHV_BUILD})
+set_source_files_properties(src/update.c src/main.c src/replay.c PROPERTIES COMPILE_DEFINITIONS GHV_BUILD=${GHV_BUILD})
 
 if (VITA)
     set(VITA_APP_NAME "GH Vita")

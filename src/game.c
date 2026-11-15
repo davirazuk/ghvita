@@ -9,6 +9,7 @@
 #include "player.h"
 #include "achieve.h"
 #include "vocals.h"
+#include "replay.h"
 #include "res.h"
 #ifndef __vita__
 #include <SDL2/SDL.h>
@@ -174,6 +175,9 @@ static struct {
     // the venue and its light show
     Tex * venue, * venue_lights;
     const char * venue_title;
+    bool replaying;                     // a replay plays: the frames come from it, not the pad
+    int replay_last;                    // what its last frame came to
+    int view_mode;                      // 0 all, 1 the stage and the lyrics, 2 the stage alone (a replay's clean view)
     Tex * band[4];                      // drummer, vocalist, guitarist, bassist
     Tex * band_alt[4];                  // their wilder loops, for the big sections (NULL: none)
     Band3D * band3d[4];                 // their 3D models, drawn instead (NULL: the pictures)
@@ -2402,7 +2406,17 @@ static void reset_play(void)
         vox_start(G.vocal ? G.diff : cfg.sing_diff, G.autoplay);
         if (practice.on)
             vox_seek(G.t);
+        // the singing's kept for the replay, from the count-in to the end and a bit
+        if (!G.replaying && !practice.on && cfg.keep_singing)
+            vox_record_start(G.t - 0.5, G.song->length_ms / 1000.0 - G.t + 15);
     }
+    G.replay_last = GAME_PLAYING;
+    if (!G.sing || G.replaying || practice.on || !cfg.keep_singing)
+        vox_record_clear();
+    if (G.replaying)
+        replay_rewind();
+    else
+        replay_rec_begin();
     if (G.crowd_voice >= 0)
         sound_stop(G.crowd_voice);
     G.crowd_mood = SND_CROWD_NEUTRAL;
@@ -2580,6 +2594,12 @@ void game_stop(void)
     if (G.drums)
         plat_log("drums: %d freestyle hits", G.freestyle);
     practice.on = false;
+    G.view_mode = 0;
+    if (G.replaying) {
+        G.replaying = false;
+        vox_replay(false);
+        audio_voice(NULL, 0, 1, 0, 0, 0);
+    }
     audio_song_speed(1);
     memset(G.band, 0, sizeof(G.band));
     res_band_free();
@@ -2655,8 +2675,67 @@ void game_pause(bool pause)
         sound_volume(G.crowd_voice, pause ? 0 : cfg.crowd_vol * 0.03f);
 }
 
+// a replay (replay_load'ed) from the top: its part and difficulty, its singing over the song
+bool game_start_replay(Song * song)
+{
+    const ReplayInfo * in = replay_info();
+    if (!in)
+        return false;
+    G.replaying = true;
+    G.autoplay = false;
+    replay_rec_void();
+    vox_replay(true);
+    if (!game_start(song, in->part, in->diff)) {
+        G.replaying = false;
+        vox_replay(false);
+        return false;
+    }
+    G.autoplay = false;
+    vox_autoplay(false);
+    // the singing mixed into the song (once; the chart's notes are loaded now)
+    if (G.sing)
+        replay_mix_voice(cfg.voice_style);
+    int n, ch;
+    float t0;
+    const int16_t * v = replay_voice(&n, &t0, &ch);
+    audio_voice(v, n, ch, VOICE_RATE, t0, v ? 1 : 0);
+    return true;
+}
+
+// the song's own singing in a replay: 2 as it is, 1 low under yours, 0 muted; false when the song has no singing of
+// its own apart from the rest
+bool game_replay_song_vocals(int level)
+{
+    if (G.vox_stem < 0)
+        return false;
+    audio_stem_volume(G.vox_stem, level == 2 ? 1 : level == 1 ? 0.25f : 0);
+    return true;
+}
+
+void game_replay_my_voice(bool on)
+{
+    audio_voice_volume(on ? 1 : 0);
+}
+
+void game_replay_voice_style(int style, bool on)
+{
+    audio_voice(NULL, 0, 1, 0, 0, 0);
+    replay_mix_voice(style);
+    int n, ch;
+    float t0;
+    const int16_t * v = replay_voice(&n, &t0, &ch);
+    audio_voice(v, n, ch, VOICE_RATE, t0, v && on ? 1 : 0);
+}
+
+void game_set_view(int view)
+{
+    G.view_mode = view;
+}
+
 void game_set_autoplay(bool on)
 {
+    if (on)
+        replay_rec_void();      // the bot's run is nobody's
     vox_autoplay(on);
     G.autoplay = on;
 }
@@ -3649,12 +3728,13 @@ static int touch_lane_at(float x, float y)
 
 // Star Power by tilting: a quick turn of the Vita (about 25 degrees, any way) away from how it's been held. How it's
 // been held follows the accelerometer slowly, so drifting into a new grip doesn't count
-static void tilt(const float accel[3])
+static bool tilt(const float accel[3])
 {
+    bool fire = false;
     float a[3] = {accel[0], accel[1], accel[2]};
     float n = sqrtf(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]);
     if (n < 0.6f || n > 1.4f)
-        return;                 // shaking: no steady reading of which way is down
+        return false;           // shaking: no steady reading of which way is down
     for (int k = 0; k < 3; k++)
         a[k] /= n;
     if (!G.tilt_init) {
@@ -3664,7 +3744,7 @@ static void tilt(const float accel[3])
     float dot = a[0] * G.tilt_base[0] + a[1] * G.tilt_base[1] + a[2] * G.tilt_base[2];
     float angle = acosf(dot > 1 ? 1 : dot < -1 ? -1 : dot);
     if (G.tilt_armed && angle > 0.42f) {
-        activate_sp();
+        fire = true;
         G.tilt_armed = false;
     } else if (angle < 0.2f)
         G.tilt_armed = true;
@@ -3676,6 +3756,7 @@ static void tilt(const float accel[3])
     m = sqrtf(m);
     for (int k = 0; k < 3; k++)
         G.tilt_base[k] /= m;
+    return fire;
 }
 
 // both cymbals together: the hi-hat and the crash, unless the chart asks for the two just there
@@ -3777,11 +3858,39 @@ static void metronome(void)
     }
 }
 
+static int game_tick(const Pad * pad, uint32_t pressed, const RFrame * rf);
+
 int game_update(const Pad * pad, uint32_t pressed)
 {
     if (G.paused || !G.part)
         return GAME_PAUSE;
-    G.t = audio_song_time() - cfg.offset_ms / 1000.0;
+    if (!G.replaying)
+        return game_tick(pad, pressed, NULL);
+    // a replay: every frame it has up to where the song is now, through the same judging (a few at most at once)
+    if (pressed & BTN_START)
+        return GAME_PAUSE;
+    if (G.failed)
+        return game_tick(pad, 0, NULL);         // the run failed there: the song winds down as it did
+    double now = audio_song_time() - cfg.offset_ms / 1000.0;
+    const RFrame * f;
+    int steps = 0, r = G.replay_last;
+    static const Pad none;
+    while (steps < 8 && (f = replay_next(now + 0.0005))) {
+        r = game_tick(&none, 0, f);
+        steps++;
+        if (r == GAME_PAUSE)
+            r = GAME_PLAYING;
+        if (r != GAME_PLAYING)
+            break;
+    }
+    G.replay_last = r;
+    return r;
+}
+
+// one frame of the song: the pad's, or a replay's frame (rf: its time and what was held, struck, whammied and sung)
+static int game_tick(const Pad * pad, uint32_t pressed, const RFrame * rf)
+{
+    G.t = rf ? rf->t : audio_song_time() - cfg.offset_ms / 1000.0;
 #ifndef __vita__
     if (getenv("GHV_CLOCKLOG")) {
         static double lt, lw;
@@ -3888,6 +3997,10 @@ int game_update(const Pad * pad, uint32_t pressed)
             lanes_pressed &= ~bit;
         }
     }
+    if (rf) {
+        held = rf->held;
+        lanes_pressed = rf->pressed;
+    }
     uint32_t let_go = G.held & ~held;
     G.held = held;
     for (int lane = 0; lane < 6; lane++)
@@ -3904,6 +4017,10 @@ int game_update(const Pad * pad, uint32_t pressed)
         bar = 0.5f + 0.5f * sinf((float)G.t * 30);
         dw = 1;
     }
+    if (rf) {
+        bar = rf->bar;
+        dw = rf->dw;
+    }
     G.whammy = G.whammy * 0.9f + (dw > 0.02f ? 0.35f : 0);
     if (G.whammy > 1)
         G.whammy = 1;
@@ -3913,10 +4030,31 @@ int game_update(const Pad * pad, uint32_t pressed)
         audio_stem_bend(G.my_stem, G.bend > 0.003f && !cfg.no_bend && !stem_is_the_song() ? G.bend : 0);
 
     // Star Power: Select, a quick tilt, or on drums both cymbals at once, as in World Tour
-    if ((pressed & BTN_SELECT) || (G.drums && both_cymbals(lanes_pressed)))
+    bool sp_req = (pressed & BTN_SELECT) || (G.drums && both_cymbals(lanes_pressed));
+    if (cfg.tilt && pad->has_motion && !rf)
+        sp_req |= tilt(pad->accel);
+    if (rf)
+        sp_req = rf->flags & RF_SP;
+    if (sp_req)
         activate_sp();
-    if (cfg.tilt && pad->has_motion)
-        tilt(pad->accel);
+    // what the mic heard, once for the frame: judged on, and kept
+    float heard = -1, loud = 0;
+    if (G.sing) {
+        if (rf) {
+            heard = rf->pitch;
+            loud = rf->level;
+        } else
+            vox_heard(&heard, &loud);
+        vox_feed(heard, loud);
+    }
+    if (!rf) {
+        // the replay's frame: everything the judging below goes on
+        if (practice.on || battle.on || G.autoplay)
+            replay_rec_void();
+        RFrame fr = {G.t, (uint8_t)held, (uint8_t)lanes_pressed, (uint8_t)((sp_req ? RF_SP : 0) | (G.sing ? RF_SING : 0)), 0,
+                     bar, dw, heard, loud};
+        replay_rec_frame(&fr);
+    }
 
     if (G.sing)
         update_vocals();
@@ -5345,6 +5483,8 @@ static void draw_hud(void)
     }
     if (G.autoplay)
         font_draw_shadow(res.ui, "BOT", SCREEN_W - 70, 12, 24, RGBA(255, 255, 255, 200), ALIGN_LEFT);
+    if (G.replaying && !G.autoplay)
+        font_draw_shadow(res.ui, "REPLAY", SCREEN_W - 16, G.sing ? 76 : 12, 24, RGBA(255, 120, 110, 230), ALIGN_RIGHT);
     if (practice.on) {
         char t[32];
         if (practice.ramp && (int)(practice.speed * 100 + 0.5f) < practice.target)
@@ -5430,7 +5570,7 @@ void game_draw(void)
         if (fl >= 0 && fl < G.flare_len * 3 && cfg.flashes < 2)
             gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(255, 245, 225, (int)((cfg.flashes ? 35 : 120) * exp(-fl / G.flare_len))));
     }
-    if (G.rock < 0.2f && !G.failed && !G.autoplay && G.t > 0 && cfg.flashes < 2) {
+    if (G.rock < 0.2f && !G.failed && !G.autoplay && G.t > 0 && cfg.flashes < 2 && !G.view_mode) {
         // about to fail: the edges of the picture pulse red, faster the closer it gets
         float danger = (0.2f - G.rock) / 0.2f, beat = 0.5f + 0.5f * sinf((float)G.t * (6 + 6 * danger));
         int a = (int)((40 + 90 * danger) * beat);
@@ -5447,7 +5587,7 @@ void game_draw(void)
     }
     if (G.sp_flash > 0.02f && cfg.flashes < 2)
         gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(80, 160, 255, (int)(G.sp_flash * (cfg.flashes ? 25 : 70))));
-    if (!G.vocal) {
+    if (!G.vocal && !G.view_mode) {
         static float shook[16];
         proj_now = battle_proj(shook) ? shook : G.proj;
         gfx_3d(proj_now, G.view);
@@ -5463,7 +5603,8 @@ void game_draw(void)
         draw_flames();
         draw_rail_meter();
     }
-    draw_hud();
+    if (!G.view_mode)
+        draw_hud();
     if (G.fail_frames) {
         float f = (float)G.fail_frames / FAIL_FRAMES;
         gfx_2d();
@@ -5471,9 +5612,9 @@ void game_draw(void)
         font_draw_shadow(res.title, "SONG FAILED", SCREEN_W / 2, 210, 72, with_alpha(RGBA(255, 90, 70, 255), f > 0.3f ? 1 : f / 0.3f),
                          ALIGN_CENTER);
     }
-    if (G.sing)
+    if (G.sing && !G.view_mode)
         vox_draw(G.t);
-    else if (!cfg.no_lyrics)
+    else if ((!cfg.no_lyrics || G.sing) && G.view_mode < 2)
         vox_lyrics(G.t);
     gfx_end();
 }

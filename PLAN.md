@@ -570,3 +570,26 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   Option "Band look: 3D models / Pictures" (cfg.band_pictures). PC: 1.7 us a member on the main thread.
   Not seen on a Vita yet. assets/band3d is kept in ~/.cache/ghv-work/band3d_assets off the branch (assets/ is
   untracked and the VPK takes everything in it).
+- v253 replays + singing (main). src/replay.c: every game_update frame is an RFrame (G.t, held/pressed lanes after
+  lefty/touch, whammy bar+dw, SP request bit (select/cymbals/tilt; tilt() now returns the trigger), mic pitch+level
+  when singing). game_update -> game_tick(pad, pressed, rf); in a replay game_update runs every frame whose t <= audio
+  time (max 8 a frame) with the recorded inputs and t, so it judges and scores the same (PC: mash run 2513 = replay
+  2513). Not kept for the bot, practice, battle. Files <player>/replays/<fnv(folder)>_<part><diff>_last.ghr and
+  _best.ghr (best unfailed score): head + the Config played with (other sizes tolerated: fields are appended) +
+  frames + singing as IMA ADPCM. In a replay cfg is the replay's (your volumes/fps/lights kept), cfg_borrowed stops
+  config_save, end_replay restores.
+  Singing: vocals.c mic_thread copies grains into a song-time buffer (audio_song_clock, thread-safe, REC_LATENCY 60
+  ms); the judge uses vox_feed (the frame's sample) so replays feed the same values; vox_replay(true) = no mic.
+  voicefx.c (once at replay load, needs the vocals chart): 90 Hz HP, 6.8 kHz LP, +3 dB at 3 kHz; time shift +-250 ms
+  that best lines voiced 10 ms frames up with chart notes; gate (-20 dB) + -10 dB outside notes; tuning = two-head
+  delay pitch shifter (W 512) pulling 80% of the way to the note when within 1.5 semitones (octave folded), back to
+  a plain W/2 delay otherwise; 3:1 compressor; makeup to ~3600 RMS; 25 ms predelay Freeverb-lite (4 comb + 2
+  allpass, stereo spread 11) -> stereo, mixed by audio_voice in mix(). Song's vocals in a replay with singing start
+  LOW (0.25), pause menu FULL/LOW/OFF (needs a separate vocals stem). SAVE YOUR SINGING writes a 16 kHz stereo WAV
+  to <player>/recordings. Option "Keep my singing in replays" (keep_singing). PC test mic: GHV_MIC=1 (tone) or
+  GHV_MIC=<raw s16 16 kHz> + GHV_MIC_LATE=<s>.
+- v254: voice styles (voicefx styles[]: Natural/Studio/Big hall/Hard tune = tune strength, range, retune speed,
+  reverb wet/fb/damp/predelay; cfg.voice_style, Options > Sound and the replay pause menu; replay.c keeps the raw
+  mono to re-mix; game_replay_voice_style detaches the mixer first). Clean view (G.view_mode, replay pause VIEW:
+  everything / stage + lyrics / stage only). voicefx: +1e-18 against denormals (4x faster), sin^2 table, compressor
+  gain every 16 samples: 130 s mixes in 0.1 s on PC.

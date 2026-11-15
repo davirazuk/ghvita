@@ -142,11 +142,14 @@ typedef struct {
     int last_part, last_diff;
     int sort;
     char last_song[256];
+    bool keep_singing;      // the mic's kept with the replay (sing along, the vocals) to hear back
+    int voice_style;        // how it's mixed into the song: voicefx's Natural, Studio, Big hall, Hard tune
 } Config;
 
 extern Config cfg;
 void config_load(void);
 void config_save(void);
+extern bool cfg_borrowed;   // a replay's settings are in cfg for now: config_save leaves the file alone
 void config_defaults(void);
 // the buttons that play each lane (and the open note) in the current layout
 uint32_t lane_buttons(int lane);

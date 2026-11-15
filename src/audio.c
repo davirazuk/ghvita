@@ -361,6 +361,12 @@ static void mix_bent(Stream * st, uint32_t r, float * dst, int take, float v, fl
     st->bend = bend;
 }
 
+// a voice over the song (a replay's singing): mono, its first sample at song time voice_t0
+static const int16_t * voice_pcm;
+static int voice_n, voice_rate, voice_ch;
+static double voice_t0;
+static float voice_vol;
+
 static void mix(int16_t * out, int frames)
 {
     static float acc[MAX_MIX * 2];
@@ -422,6 +428,26 @@ static void mix(int16_t * out, int frames)
             __sync_synchronize();
             st->rpos = r + take;
             st->vol = st->vol_target;
+        }
+        if (voice_pcm && voice_vol > 0 && n > 0) {
+            double step = (double)voice_rate / AUDIO_RATE;
+            double pos = ((double)(song_frame + offset) / AUDIO_RATE - voice_t0) * voice_rate;
+            float v = voice_vol * music_vol * fade_vol;
+            for (int i = 0; i < n; i++, pos += step) {
+                int k = (int)pos;
+                if (pos < 0 || k + 1 >= voice_n)
+                    continue;
+                float f = (float)(pos - k);
+                if (voice_ch == 2) {
+                    const int16_t * a = voice_pcm + k * 2;
+                    dst[(offset + i) * 2] += (a[0] + (a[2] - a[0]) * f) * v;
+                    dst[(offset + i) * 2 + 1] += (a[1] + (a[3] - a[1]) * f) * v;
+                } else {
+                    float smp = (voice_pcm[k] + (voice_pcm[k + 1] - voice_pcm[k]) * f) * v;
+                    dst[(offset + i) * 2] += smp;
+                    dst[(offset + i) * 2 + 1] += smp;
+                }
+            }
         }
         song_frame += count;
         if (slow) {
@@ -718,6 +744,35 @@ void audio_song_pause(bool pause)
         last_time = now;
     }
     pthread_mutex_unlock(&mix_lock);
+}
+
+void audio_voice(const int16_t * pcm, int n, int channels, int rate, double t0, float volume)
+{
+    pthread_mutex_lock(&mix_lock);
+    voice_ch = channels == 2 ? 2 : 1;
+    voice_pcm = n > 1 && rate > 0 ? pcm : NULL;
+    voice_n = n;
+    voice_rate = rate;
+    voice_t0 = t0;
+    voice_vol = volume;
+    pthread_mutex_unlock(&mix_lock);
+}
+
+void audio_voice_volume(float volume)
+{
+    voice_vol = volume;
+}
+
+double audio_song_clock(void)
+{
+    // audio_song_time for other threads: no smoothing, nothing kept between calls
+    pthread_mutex_lock(&mix_lock);
+    int64_t af = anchor_frame, au = anchor_us;
+    bool playing = anchor_playing;
+    pthread_mutex_unlock(&mix_lock);
+    if (!playing)
+        return -1e9;
+    return af / (double)AUDIO_RATE + (plat_now_us() - au) / 1e6 * song_speed;
 }
 
 double audio_song_time(void)
