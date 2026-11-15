@@ -158,6 +158,7 @@ static struct {
     bool tilt_armed, tilt_init;
     int crowd_voice, crowd_mood;
     Tex * highway;
+    const float * band_rise[4];         // each member's Star Power jump heights (NULL: their sheet has none)
     bool autoplay;
     float view[16], proj[16];
     float right[3], up[3];
@@ -354,19 +355,22 @@ static void pick_band(const Song * song, uint32_t h)
 {
     static const char * roles[4] = {"drummer", "vocalist", "guitarist", "bassist"};
     for (int r = 0; r < 4; r++) {
-        const char * found[24];
+        int found[24];
         int n = 0;
         size_t len = strlen(roles[r]);
         for (int i = 0; i < res.band_count; i++)
             if (strncmp(res.band_names[i], roles[r], len) == 0)
-                found[n++] = res.band_names[i];
+                found[n++] = i;
         G.band[r] = NULL;
+        G.band_rise[r] = NULL;
         if (!n)
             continue;
         uint32_t k = h;
         for (const char * c = roles[r]; *c; c++)
             k = (k ^ (uint8_t)*c) * 16777619u;
-        G.band[r] = res_band_sheet(r, found[k % n]);
+        int pick = found[k % n];
+        G.band[r] = res_band_sheet(r, res.band_names[pick]);
+        G.band_rise[r] = res.band_has_rise[pick] ? res.band_rise[pick] : NULL;
     }
     (void)song;
 }
@@ -1679,14 +1683,28 @@ static void draw_band(double beat)
         // Star Power goes on and the front line spins round in the air, one after the other: a card turning about its
         // middle, edge-on halfway, its back (the picture mirrored) at the half turn
         float spun = (float)(G.t - G.sp_on_t) - (r == 1 ? 0.12f : r == 3 ? 0.24f : 0);
-        // the singer's sheet has World Tour's own Star Power jump (tools/band.py rows 6-7): that instead of the spin
-        bool jumps = r == 1 && t->h >= (int)ch * 8 && G.sp_on_t > 0;
+        // the sheets have World Tour's own Star Power jump (tools/band.py rows 6-7): that instead of the spin
+        bool rows8 = t->h >= (int)ch * 8;
+        const float * rise = G.band_rise[r] ? G.band_rise[r] : r == 1 ? singer_rise : NULL;
+        bool jumps = r && rows8 && rise && G.sp_on_t > 0;
         int jump_f = -1;
         if (jumps && spun > 0 && spun < SINGER_JUMP_S) {
             int k = (int)(spun / SINGER_JUMP_S * 16);
             k = k > 15 ? 15 : k;
             jump_f = 48 + k;
-            bottom -= singer_rise[k] * m[2];
+            // as high as the shot has room for above their heads (a third of it always shows)
+            float lift = rise[k] * m[2], room = bottom - 2.0f * m[2] - 6;
+            bottom -= fminf(lift, fmaxf(room, 0) + lift * 0.33f);
+            if (r >= 2)
+                f = jump_f;
+        }
+        if (r == 0 && rows8) {
+            // the drummer: clicking the sticks over the kit through the count-in and once the last chord rings (GHWT's
+            // armsup), its idle while their part rests
+            if (G.t < 0 || (G.t > G.last_note_end && G.last_note_end > 0))
+                f = 56 + (int)(fmod(fmod(beat, 2) + 2, 2) / 2 * 8) % 8;
+            else if (!playing)
+                f = 48 + (int)(fmod(beat * speed, 2) / 2 * 8) % 8;
         }
         if (r && !jumps && spun > 0 && spun < 0.6f) {
             float k = spun / 0.6f;
@@ -4196,7 +4214,7 @@ static void draw_rail_meter(void)
             base[k] = state == 0 ? dark[k] : hue[k] * (state == 1 ? 0.55f : 0.35f);
         gfx_tex(NULL);
         if (i == 4)
-            lamp_seat(seat_x, seat_r, z0 + lg * 0.5f - rb * 0.6f, z1 - lg * 0.5f + rb * 0.3f, seat_r);
+            lamp_seat(seat_x, seat_r, z0 + lg * 0.5f - rb * 0.9f, z1 - lg * 0.5f + rb * 0.9f, seat_r);
         lamp_bulb(seat_x - 0.045f, seat_r + rb * 0.7f, zc, rb, base, state == 2 ? 0.95f : state == 1 ? 0.3f : 0, hue);
         if (state == 2) {
             gfx_blend(BLEND_ADD);

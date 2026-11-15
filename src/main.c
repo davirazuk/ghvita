@@ -5590,6 +5590,8 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "The guitarist and bassist do World Tour's own Star Power jump: a crouch and a big leap, guitars in hand.",
+        "The drummer clicks the sticks over the kit through the count-in and after the last chord, and idles while their part rests.",
         "A real crowd: World Tour's own people stand in front of the stage, backlit, bored, nodding, cheering or going wild with the song.",
         "The singer has World Tour's own moves between lines, and leaps into the air when Star Power kicks in.",
         "The band is lit by the show: heads and shoulders catch the stage lights, every member has a rim of the light's colour.",

@@ -520,3 +520,9 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 - Near shots: draw_band shrinks a member (feet fixed) whose head (2.35 m standing, 2.0 the kit) would leave the top of
   the screen: the low SP shot cut heads off.
 - Rail lamps: the gold bar ends at the first and last bulbs (it poked out past them).
+- v247: every band sheet is 64 frames (8 rows; tools/band.py V_FRAMES). Guitarist/bassist rows 6-7 = spjump like the
+  singer (the clip jumps from ~1 m aside: pinned over their groove centre). Jump heights per sheet in
+  assets/band/rise.txt (name + 16 metres), read by res.c into res.band_rise; G.band_rise[r]; the lift is capped by
+  the room above the head in the shot (a third always shows). Drummer rows 6-7: 48-55 GHWT idle (32-frame loop that
+  closes best; while the drum part rests), 56-63 armsup_120 (stick clicks over the kit) looped per 2 beats in the
+  count-in and after the last note. Old builds' singer_rise table stays as the fallback.

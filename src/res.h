@@ -45,6 +45,8 @@ typedef struct {
     // the band's sprite sheets (assets/band, made by tools/band.py)
     int band_count;
     char band_names[24][16];
+    float band_rise[24][16];            // a sheet's Star Power jump: height off the floor per frame (band/rise.txt)
+    bool band_has_rise[24];
 } Res;
 
 extern Res res;

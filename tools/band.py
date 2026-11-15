@@ -18,7 +18,9 @@ wc = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(wc)
 
 FRAMES, COLS, ROWS = 48, 8, 6
-V_FRAMES, V_ROWS = 64, 8   # the singer's: 32 singing (t100), 16 between lines (ns_100), 16 of the Star Power jump (spjump)
+V_FRAMES, V_ROWS = 64, 8   # every sheet: 48 as before, then 16 more. Singer: 32 singing (t100), 16 between lines
+# (ns_100), 16 of the Star Power jump (spjump). Guitars: 48 groove x strum, 16 of the jump. Drummer: 48 strikes, 8 of
+# GHWT's idle (between parts), 8 of armsup (the last chord)
 REST, JUMP = 32, 48
 SING = 32               # the singer's sheet: this many frames of the loop with the mic at the mouth, the rest with it down
 CELLS = {'drummer': (266, 232, 88, -0.62)}
@@ -287,10 +289,24 @@ def bake(path, work, tex_dir):
         g0 = (np.linalg.inv(M0[N['bone_pelvis']]) @ M0[gi], np.linalg.inv(M0[N['bone_chest']]) @ M0[gi])
     anims = load_hands(tex_dir, sex_of(tex_dir, name)) if g0 is not None else None
     frames, centre, rises, stand_y = [], [], [], 0.0
-    nframes = V_FRAMES if role == 'vocalist' else FRAMES
+    nframes = V_FRAMES
+    byname = {c[0]: c for c in clips}
+    jp = None
+    if role == 'drummer':
+        idle = byname.get('idle')
+        if idle is not None:
+            i_span = 32
+            i0 = min(range(0, idle[2] - i_span - 1, 2), key=lambda k: float(np.abs(idle[4][k] - idle[4][k + i_span]).mean()))
+        arms = byname.get('armsup_120')
+    if role in ('guitarist', 'bassist'):
+        jp = byname.get('spjump')
+        if jp is not None:
+            ys = [wc.pose(bones, jp, k)[N['bone_pelvis']][1, 3] for k in range(jp[2])]
+            peak = int(np.argmax(ys))
+            j0 = max(0, min(jp[2] - 33, peak - 16))
+            print(name, 'spjump peak', peak, 'window', j0, j0 + 32)
     if role == 'vocalist':
         # between lines GHWT's singer has its own idle (ns_100), a loop of its own; Star Power starts with a jump
-        byname = {c[0]: c for c in clips}
         ns = byname.get('ns_100', clip)
         ns_span = int(round(BEATS * 60 / 100 * ns[1]))
         ns0 = loop_start(bones, ns, N, ns_span, role)
@@ -305,12 +321,21 @@ def bake(path, work, tex_dir):
         if role == 'vocalist':
             f = s0 + i * span // SING
         if g0 is not None:
-            f = s0 + (i // STRUMS) * span // GROOVE
+            f = s0 + (i // STRUMS) * span // GROOVE if i < JUMP else s0
         # the drummer keeps one pose (the chart moves the sticks); the guitars groove through the loop
         if role == 'vocalist' and REST <= i < JUMP:
             f = ns0 + (i - REST) * ns_span // (JUMP - REST)
             pose = blended(ns, f, (ns0, ns0 + ns_span))
-        elif role == 'vocalist' and i >= JUMP:
+        elif role == 'drummer' and i >= JUMP:
+            if i < JUMP + 8 and idle is not None:
+                k = i0 + (i - JUMP) * i_span // 8
+                pose = (idle[0], idle[1], 1, idle[3], idle[4][k][None], idle[5][k][None])
+            elif arms is not None:
+                k = min(arms[2] - 1, (i - JUMP - 8) * (arms[2] - 1) // 7)
+                pose = (arms[0], arms[1], 1, arms[3], arms[4][k][None], arms[5][k][None])
+            else:
+                pose = blended(clip, s0 + span - BLEND, (s0, s0 + span))
+        elif i >= JUMP:
             f = j0 + (i - JUMP) * 2 if jp is not None else s0
             # played once, not looped: the frames as they are
             pose = (jp[0], jp[1], 1, jp[3], jp[4][f][None], jp[5][f][None]) if jp is not None else blended(clip, s0, (s0, s0 + span))
@@ -318,10 +343,10 @@ def bake(path, work, tex_dir):
             pose = blended(clip, f if role != 'drummer' else s0 + span - BLEND, (s0, s0 + span))
         if g0 is not None:
             rig = wc.Rig(bones, pose_over(bones, pose, hand_pose(anims, role == 'bassist', sex_of(tex_dir, name) != 'f',
-                                                                 GROOVE_SHAPE, STRUM_K[i % STRUMS])))
+                                                                 GROOVE_SHAPE, STRUM_K[i % STRUMS if i < JUMP else 0])))
         else:
             rig = wc.Rig(bones, wc.pose(bones, pose, 0))
-        if role == 'drummer':
+        if role == 'drummer' and i < JUMP:
             for side, pad in STRIKES[i // HIT].items():
                 swing_stick(rig, side, pad, HIT_W[i % HIT], HIT_RAISE[i % HIT])
         if role != 'drummer' or 'bone_ik_hand_slave_l' in N:
@@ -338,7 +363,7 @@ def bake(path, work, tex_dir):
                 M[:3, :3] = rig.W[tg][:3, :3]
                 rig.set_world(pm, M)
         skin = [m @ b[4] for m, b in zip(rig.W, bones)]
-        if role == 'vocalist' and i >= JUMP:
+        if role != 'drummer' and i >= JUMP:
             # the jump: the stand isn't in it (it ran up through them), and they're brought down to the floor so the
             # cell holds them; game.c lifts the frame by SINGER_RISE, these numbers
             pel = rig.W[N['bone_pelvis']][:3, 3]
@@ -352,12 +377,15 @@ def bake(path, work, tex_dir):
                 stand_y = float(pel[1])     # from where the jump starts: the same curve for every singer
             rise = max(0.0, float(pel[1] - stand_y))
             rises.append(rise)
+            if i == JUMP:
+                jump_xz = pel[[0, 2]] - np.mean(centre, axis=0)[[0, 2]]  # the clip jumps from elsewhere on its stage
             for k in range(len(skin)):
                 D = np.eye(4)
                 D[1, 3] = -rise
+                D[0, 3], D[2, 3] = -jump_xz[0], -jump_xz[1]
                 skin[k] = D @ skin[k]
         frames.append(skinned(meshes, skin))
-        if role != 'vocalist' or i < JUMP:
+        if i < JUMP:
             centre.append(rig.W[N['bone_pelvis']][:3, 3])
 
     c = np.mean(centre, axis=0)
@@ -382,14 +410,19 @@ def bake(path, work, tex_dir):
     CW, CH, PPM, Y0 = CELLS.get(role, STAND)
     subprocess.run([RENDER, tex_dir, binp, pre, str(CW * SS), str(CH * SS), str(PPM * SS), str(Y0)], check=True)
     os.remove(binp)
-    sheet = Image.new('RGBA', (CW * COLS, CH * (V_ROWS if role == 'vocalist' else ROWS)), (0, 0, 0, 0))
+    sheet = Image.new('RGBA', (CW * COLS, CH * V_ROWS), (0, 0, 0, 0))
     for i in range(nframes):
         im = Image.open('%s_%02d.png' % (pre, i)).convert('RGBa').resize((CW, CH), Image.BOX).convert('RGBA')
         sheet.paste(im, ((i % COLS) * CW, (i // COLS) * CH))
     out = os.path.join(OUT, name + '.png')
     sheet.quantize(256, method=Image.Quantize.FASTOCTREE, dither=Image.Dither.NONE).save(out, optimize=True)
     if rises:
-        print(name, 'SINGER_RISE', ', '.join('%.3ff' % r for r in rises))
+        # game.c lifts the jump's frames back up by these (assets/band/rise.txt: name and 16 heights in metres)
+        rp = os.path.join(OUT, 'rise.txt')
+        old = [l for l in open(rp).read().splitlines() if l.split(' ')[0] != name] if os.path.exists(rp) else []
+        with open(rp, 'w') as rf:
+            rf.write('\n'.join(sorted(old + [name + ' ' + ' '.join('%.3f' % r for r in rises)])) + '\n')
+        print(name, 'rise', ' '.join('%.3f' % r for r in rises))
     print(name, clip[0], 'from frame', s0, 'span', span, os.path.getsize(out) // 1024, 'KB')
 
 

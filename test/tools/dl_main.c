@@ -69,6 +69,18 @@ int main(int c, char ** v)
         dl_status(status, sizeof(status));
         printf("search: %s\n", status);
         dl_lock();
+        if (getenv("GHV_LIST")) {
+            // every hit and its parts (guitar bass rhythm coop keys drums vocals), then stop
+            for (int i = 0; i < dl_count(); i++) {
+                DlHit * h = dl_hit(i);
+                printf("%-34.34s %-18.18s %-16.16s rb=%d parts", h->name, h->artist, h->charter, h->rock_band);
+                for (int p = 0; p < PART_COUNT; p++)
+                    printf(" %2d", h->parts[p]);
+                printf("  %s %s\n", h->id, h->unplayable);
+            }
+            dl_unlock();
+            return 0;
+        }
         bool found = false;
         for (int i = 0; i < dl_count() && !found; i++) {
             DlHit * h = dl_hit(i);

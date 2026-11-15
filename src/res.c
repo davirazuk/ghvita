@@ -289,6 +289,22 @@ void res_load(void)
     }
     if (f)
         fclose(f);
+    snprintf(path, sizeof(path), "%sband/rise.txt", dir);
+    f = fopen(path, "r");
+    while (f && fgets(line, sizeof(line), f)) {
+        char nm[32];
+        float v[16];
+        if (sscanf(line, "%31s %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f", nm, &v[0], &v[1], &v[2], &v[3], &v[4],
+                   &v[5], &v[6], &v[7], &v[8], &v[9], &v[10], &v[11], &v[12], &v[13], &v[14], &v[15]) != 17)
+            continue;
+        for (int i = 0; i < res.band_count; i++)
+            if (strcmp(res.band_names[i], nm) == 0) {
+                memcpy(res.band_rise[i], v, sizeof(v));
+                res.band_has_rise[i] = true;
+            }
+    }
+    if (f)
+        fclose(f);
 }
 
 Tex * res_highway(const char * name)
