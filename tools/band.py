@@ -278,6 +278,106 @@ ALT = {'guitarist': ['horse_100', 'jimi_100', 'areyou_100', 'joker_100', 'bleed_
        'vocalist': ['today_100', 'areyou_100', 'dammit_100']}
 
 
+THREED = False          # --3d: the member as a model for the game to draw (assets/band3d), not a picture sheet
+TRI_BUDGET = 3500       # a member's triangles after decimation: they're a few hundred pixels tall at most
+DRUM_BUDGET = 5500      # the drummer's, the kit included
+TEX_MAX = 256
+
+
+def find_tex(tex_dir, name):
+    p = os.path.join(tex_dir, name + '.png')
+    if os.path.exists(p):
+        return p
+    if len(name) == 31:
+        for f in sorted(os.listdir(tex_dir)):
+            if f.startswith(name) and f.endswith('.png'):
+                return os.path.join(tex_dir, f)
+    return None
+
+
+def export3d(name, meshes, skins, c, alt, tex_dir):
+    # assets/band3d/<name>.b3d: the mesh (decimated, bone weights kept) and every frame's skin matrices, the sheet's
+    # frames in the sheet's order; alt/<name>.b3a: the wilder loop's matrices for the same mesh. game.c's band3d draws
+    # them as the sheets would be: x from the loop's centre, y up from the feet, z toward the camera is -z here
+    out = os.path.join(HERE, '..', 'assets', 'band3d')
+    os.makedirs(os.path.join(out, 'tex'), exist_ok=True)
+    os.makedirs(os.path.join(out, 'alt'), exist_ok=True)
+    S = np.stack([np.stack(sk)[:, :3, :] for sk in skins]).astype('<f4')      # frames x bones x 3 x 4
+    S[:, :, 0, 3] -= c[0]      # the loop's centre at x = z = 0, as each sheet is centred on its own loop
+    S[:, :, 2, 3] -= c[2]
+    if alt:
+        with open(os.path.join(out, 'alt', name + '.b3a'), 'wb') as o:
+            o.write(b'B3A1' + struct.pack('<ii', S.shape[1], S.shape[0]))
+            o.write(S.tobytes())
+        print(name, '3d alt', S.shape[0], 'frames')
+        return
+    import pyfqmr
+    from scipy.spatial import cKDTree
+    total = sum(len(T) for _, _, T in meshes)
+    # small parts (drums, cymbals, sticks, the mic) kept whole: they fall apart decimated; the bodies take the cut
+    budget = DRUM_BUDGET if name.startswith('drummer') else TRI_BUDGET
+    SMALL = 500
+    small = sum(len(T) for _, _, T in meshes if len(T) <= SMALL)
+    big = total - small
+    ratio = min(1.0, max(budget - small, big * 0.15) / max(big, 1))
+    parts = []
+    for tex, V, T in meshes:
+        P0 = np.asarray(V['p'], np.float64)
+        T0 = np.asarray(T, np.int64)
+        if ratio < 1 and len(T0) > SMALL:
+            m = pyfqmr.Simplify()
+            m.setMesh(P0, T0)
+            m.simplify_mesh(target_count=max(24, int(len(T0) * ratio)), aggressiveness=5, preserve_border=False, verbose=0)
+            P1, T1, _ = m.getMesh()
+            # each new vertex takes what the nearest old one had: its texture place, normal and bones
+            near = cKDTree(P0).query(P1)[1]
+        else:
+            P1, T1, near = P0, T0, np.arange(len(P0))
+        if len(T1) == 0:
+            continue
+        j = np.asarray(V['j'])[near].copy()
+        w = np.asarray(V['w'])[near].copy()
+        # the two strongest bones only (the game skins on the CPU): the rest are slivers
+        o_ = np.argsort(-w, axis=1)
+        j = np.take_along_axis(j, o_, 1)
+        w = np.take_along_axis(w, o_, 1)
+        w[:, 2:] = 0
+        j[:, 2:] = 0
+        w = w / np.maximum(w.sum(1, keepdims=True), 1e-6)
+        wq = np.round(w * 255).astype(np.int32)
+        wq[:, 0] += 255 - wq.sum(1)
+        n = np.asarray(V['n'])[near]
+        n = n / (np.linalg.norm(n, axis=1, keepdims=True) + 1e-9)
+        rec = np.zeros(len(P1), np.dtype([('p', '<f4', 3), ('n', '<f4', 3), ('uv', '<f4', 2), ('j', 'u1', 4), ('w', 'u1', 4)]))
+        rec['p'] = P1
+        rec['n'] = n
+        rec['uv'] = np.asarray(V['uv'])[near]
+        rec['j'] = j
+        rec['w'] = np.clip(wq, 0, 255)
+        tname = ''
+        src = find_tex(tex_dir, tex) if tex else None
+        if src:
+            tname = os.path.basename(src)[:-4][:31]
+            dst = os.path.join(out, 'tex', tname + '.png')
+            if not os.path.exists(dst):
+                im = Image.open(src).convert('RGBA')
+                k = max(im.width, im.height) / TEX_MAX
+                if k > 1:
+                    im = im.resize((max(1, int(im.width / k)), max(1, int(im.height / k))), Image.LANCZOS)
+                im.save(dst, optimize=True)
+        parts.append((tname, rec, np.asarray(T1, '<u2')))
+    with open(os.path.join(out, name + '.b3d'), 'wb') as o:
+        o.write(b'B3D1' + struct.pack('<iiiff', len(parts), S.shape[1], S.shape[0], 0.0, 0.0))
+        for tname, rec, T1 in parts:
+            o.write(tname.encode().ljust(32, b'\0'))
+            o.write(struct.pack('<ii', len(rec), len(T1)))
+            o.write(rec.tobytes())
+            o.write(T1.tobytes())
+        o.write(S.tobytes())
+    print(name, '3d', sum(len(r) for _, r, _ in parts), 'verts', sum(len(t) for _, _, t in parts), 'tris (from', total,
+          ')', os.path.getsize(os.path.join(out, name + '.b3d')) // 1024, 'KB')
+
+
 def bake(path, work, tex_dir, alt=False):
     # alt: the member's other GHWT loop (the wilder one, for choruses and solos) into assets/band/alt/<name>.png: the
     # guitars' 48 groove frames, the singer's 32 singing ones, laid out as the main sheet's first rows
@@ -302,7 +402,7 @@ def bake(path, work, tex_dir, alt=False):
         gi = N['bone_guitar_body']
         g0 = (np.linalg.inv(M0[N['bone_pelvis']]) @ M0[gi], np.linalg.inv(M0[N['bone_chest']]) @ M0[gi])
     anims = load_hands(tex_dir, sex_of(tex_dir, name)) if g0 is not None else None
-    frames, centre, rises, stand_y = [], [], [], 0.0
+    frames, centre, rises, stand_y, skins = [], [], [], 0.0, []
     nframes = (SING if role == 'vocalist' else FRAMES) if alt else V_FRAMES
     byname = {c[0]: c for c in clips}
     jp = None
@@ -398,11 +498,16 @@ def bake(path, work, tex_dir, alt=False):
                 D[1, 3] = -rise
                 D[0, 3], D[2, 3] = -jump_xz[0], -jump_xz[1]
                 skin[k] = D @ skin[k]
-        frames.append(skinned(meshes, skin))
+        skins.append(skin)
+        if not THREED:
+            frames.append(skinned(meshes, skin))
         if i < JUMP:
             centre.append(rig.W[N['bone_pelvis']][:3, 3])
 
-    c = np.mean(centre, axis=0)
+    c = np.mean(centre, axis=0) if centre else np.zeros(3)
+    if THREED:
+        export3d(name, meshes, skins, c, alt, tex_dir)
+        return
     binp = os.path.join(work, name + '.bin')
     ca, sa = math.cos(PITCH), math.sin(PITCH)
     with open(binp, 'wb') as o:
@@ -444,8 +549,10 @@ def bake(path, work, tex_dir, alt=False):
 
 
 def main():
+    global THREED
     alt = '--alt' in sys.argv
-    args = [a for a in sys.argv[1:] if a != '--alt']
+    THREED = '--3d' in sys.argv
+    args = [a for a in sys.argv[1:] if a not in ('--alt', '--3d')]
     tex_dir, work = args[0], args[1]
     os.makedirs(OUT, exist_ok=True)
     os.makedirs(work, exist_ok=True)
@@ -453,7 +560,7 @@ def main():
     for p in sorted(glob.glob(os.path.join(tex_dir, 'band_*.wtch'))):
         if not picks or os.path.basename(p)[5:-5] in picks:
             bake(p, work, tex_dir, alt)
-    if not picks and not alt:
+    if not picks and not alt and not THREED:
         with open(os.path.join(OUT, 'band.txt'), 'w') as f:
             f.write('\n'.join(sorted(x[:-4] for x in os.listdir(OUT) if x.endswith('.png'))) + '\n')
 

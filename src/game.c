@@ -10,6 +10,9 @@
 #include "achieve.h"
 #include "vocals.h"
 #include "res.h"
+#ifndef __vita__
+#include <SDL2/SDL.h>
+#endif
 #include "audio.h"
 #include "whammybar.h"
 #include "cues.h"
@@ -173,6 +176,7 @@ static struct {
     const char * venue_title;
     Tex * band[4];                      // drummer, vocalist, guitarist, bassist
     Tex * band_alt[4];                  // their wilder loops, for the big sections (NULL: none)
+    Band3D * band3d[4];                 // their 3D models, drawn instead (NULL: the pictures)
     const float (*marks)[3];
     // the camera's shots of the venue (tools/venues.py SHOTS): 0 the wide one, then stage left, stage right, low front
     Tex * shot_tex[VENUE_SHOTS], * shot_glow[VENUE_SHOTS];
@@ -365,6 +369,7 @@ static void pick_band(const Song * song, uint32_t h)
                 found[n++] = i;
         G.band[r] = NULL;
         G.band_alt[r] = NULL;
+        G.band3d[r] = NULL;
         G.band_rise[r] = NULL;
         if (!n)
             continue;
@@ -377,6 +382,7 @@ static void pick_band(const Song * song, uint32_t h)
                 pick = found[j];            // chosen in the options
         G.band[r] = res_band_sheet(r, res.band_names[pick]);
         G.band_alt[r] = res_band_alt(r);
+        G.band3d[r] = cfg.band_pictures ? NULL : res_band3d(r, res.band_names[pick]);
         G.band_rise[r] = res.band_has_rise[pick] ? res.band_rise[pick] : NULL;
     }
     (void)song;
@@ -1681,6 +1687,7 @@ static void draw_band(double beat)
         strip_top[i] = 1.12f + G.key_col[i] * 0.4f * (0.6f + 0.4f * G.band_loud);
         strip_bot[i] = 0.6f + G.stage_col[i] * 0.15f;
     }
+    bool drew3d = false;
     for (int i = 0; i < 4; i++) {
         int r = order[i & 3];
         Tex * t = G.band[r];
@@ -1746,8 +1753,9 @@ static void draw_band(double beat)
         }
         // the big sections (choruses, solos, the outro, the chart's chorus and frenzy looks, Star Power) in each one's
         // wilder GHWT loop: the same cells on its other sheet
-        bool wild = G.band_alt[r] && (G.big_section || G.show_mode == CUE_CHORUS || G.show_mode == CUE_FRENZY ||
-                                      G.sp_active || (r >= 2 && band_soloing(r)));
+        bool wild_now = G.big_section || G.show_mode == CUE_CHORUS || G.show_mode == CUE_FRENZY || G.sp_active ||
+                        (r >= 2 && band_soloing(r));
+        bool wild = G.band_alt[r] && wild_now;
         Tex * ts = wild ? G.band_alt[r] : t;                // the singer's singing frames
         if (wild && r >= 2 && jump_f < 0 && f < 48)
             t = G.band_alt[r];
@@ -1783,6 +1791,80 @@ static void draw_band(double beat)
                 tint = RGBA(255, 110, 90, 255);
         }
         bp->pulse *= powf(0.82f, G.fstep);
+        Band3D * m3 = G.band3d[r];
+        if (m3) {
+            // World Tour's model, posed by the same frames the sheet has, two of them blended so it moves smoothly
+            Band3DDraw d3 = {0};
+            bool alt3 = wild_now && band3d_frames(m3, true) > 0;
+            d3.fa = d3.fb = f;
+            if (r >= 2 && jump_f < 0 && f < 48) {
+                d3.alt_a = d3.alt_b = alt3;
+                d3.fb = ((f / 3 + 1) % 16) * 3 + f % 3;          // the groove's next step
+                d3.wb = (float)fmod(phase * 16, 1);
+            } else if (r == 1) {
+                if (jump_f >= 0)
+                    d3.fa = d3.fb = jump_f;
+                else {
+                    d3.fa = 32 + (int)(phase * 16) % 16;          // mic down
+                    d3.fb = (int)(phase * 32) % 32;               // singing
+                    d3.alt_b = alt3;
+                    d3.wb = bp->mic;
+                }
+            }
+            d3.x = m[0];
+            d3.feet = bottom + y0 * m[2];
+            d3.ppm = m[2];
+            d3.squash = 1;
+            if (r && !jumps && spun > 0 && spun < 0.6f) {
+                // the Star Power spin, really round this time
+                float k = spun / 0.6f;
+                d3.yaw = k * k * (3 - 2 * k) * 2 * pi;
+            } else if (r >= 2)
+                d3.yaw = bp->turn * 0.5f * (i & 1 ? 1 : -1);
+            d3.lean = lean;
+            d3.dip = dip;
+            memcpy(d3.top, strip_top, sizeof(d3.top));
+            memcpy(d3.bot, strip_bot, sizeof(d3.bot));
+            d3.tint = tint;
+            bool strong = G.focus == r || G.sp_active;
+            if (!cfg.light_fx) {
+                for (int c = 0; c < 3; c++)
+                    d3.rim[c] = G.sp_active ? 0.35f + 0.65f * G.key_col[c] * 0.3f : G.key_col[c];
+                d3.rim_k = (strong ? 0.6f : 0.25f) * (0.6f + 0.6f * on_beat * G.band_loud);
+            }
+            d3.depth = (float)i;
+            d3.ink = true;
+            d3.shadow = r != 1;
+            if (r != 1) {
+                const Sprite * pool = atlas_get(res.stage, "dot");
+                float pw = cw * (m[2] / ppm) * 1.5f, ph = pw * 0.26f;
+                gfx_blend(BLEND_ADD);
+                gfx_sprite(pool, m[0] - pw / 2, d3.feet - ph / 2, pw, ph, col3(G.key_col, G.focus == r ? 0.75f : 0.3f + 0.2f * G.band_loud));
+                gfx_blend(BLEND_ALPHA);
+            }
+            band3d_begin(!drew3d);
+#ifndef __vita__
+            uint64_t t3 = (uint64_t)SDL_GetPerformanceCounter() / (SDL_GetPerformanceFrequency() / 1000000);
+#endif
+            band3d_draw(m3, &d3);
+#ifndef __vita__
+            {
+                static uint64_t sum;
+                static int n3;
+                sum += (uint64_t)SDL_GetPerformanceCounter() / (SDL_GetPerformanceFrequency() / 1000000) - t3;
+                if (++n3 == 2000) {
+                    extern double band3d_skin_us;
+                    plat_log("band3d: %.1f us a member, %.1f of it skinning", sum / 2000.0, band3d_skin_us / 2000);
+                    band3d_skin_us = 0;
+                    sum = 0;
+                    n3 = 0;
+                }
+            }
+#endif
+            band3d_end();
+            drew3d = true;
+            continue;
+        }
         if (r == 1) {
             // the singer keeps moving: 32 frames with the mic at the mouth for a line, 16 with it down for the rests,
             // one over the other for the moment it comes up

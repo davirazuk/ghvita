@@ -435,6 +435,66 @@ void gfx_tex(Tex * t)
     current_tex = t;
 }
 
+// a mesh in screen space with depth (src/band3d.c): xyz per vertex (z -1 near .. 1 far, as gfx_2d's ortho), uv with
+// its own stride, colours; cut out where the texture's alpha is under half
+void gfx_mesh_begin(bool clear_depth)
+{
+    gfx_flush();
+    if (clear_depth) {
+        glDepthMask(GL_TRUE);
+        glClear(GL_DEPTH_BUFFER_BIT);
+    }
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LEQUAL);
+    glDepthMask(GL_TRUE);
+    glEnable(GL_ALPHA_TEST);
+    glAlphaFunc(GL_GREATER, 0.45f);
+}
+
+void gfx_mesh(Tex * t, const float * xyz, const float * uv, int uv_stride, const uint32_t * col, const uint16_t * idx,
+              int n)
+{
+#ifndef __vita__
+    static int skip = -1;
+    if (skip < 0)
+        skip = getenv("GHV_NO_MESH") != NULL;   // tests: the CPU's share of the 3D band, without the drawing
+    if (skip)
+        return;
+#endif
+    glBindTexture(GL_TEXTURE_2D, (t ? t : white)->id);
+    glVertexPointer(3, GL_FLOAT, 12, xyz);
+    glTexCoordPointer(2, GL_FLOAT, uv_stride, uv);
+    glColorPointer(4, GL_UNSIGNED_BYTE, 4, col);
+    glDrawElements(GL_TRIANGLES, n, GL_UNSIGNED_SHORT, idx);
+    draw_calls++;
+    current_tex = NULL;
+}
+
+// what a mesh drawn next does to the depth buffer, and how much of its alpha it needs to show
+void gfx_mesh_state(bool depth_write, float alpha_ref)
+{
+    glDepthMask(depth_write ? GL_TRUE : GL_FALSE);
+    glAlphaFunc(GL_GREATER, alpha_ref);
+}
+
+// the same with a modelview matrix (column-major) taking xyz onto the screen
+void gfx_mesh_xf(const float mv[16], Tex * t, const float * xyz, const float * uv, int uv_stride, const uint32_t * col,
+                 const uint16_t * idx, int n)
+{
+    glMatrixMode(GL_MODELVIEW);
+    glLoadMatrixf(mv);
+    gfx_mesh(t, xyz, uv, uv_stride, col, idx, n);
+    glLoadIdentity();
+}
+
+void gfx_mesh_end(void)
+{
+    glDisable(GL_ALPHA_TEST);
+    glDisable(GL_DEPTH_TEST);
+    glDepthMask(GL_FALSE);
+    current_tex = NULL;
+}
+
 void gfx_quad(const float p[4][3], const float uv[4][2], const uint32_t c[4])
 {
     if (quad_count == MAX_QUADS)

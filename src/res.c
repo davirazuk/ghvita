@@ -478,6 +478,27 @@ Tex * res_band_thumb(const char * name)
     return t;
 }
 
+// a member's 3D model (assets/band3d), one per role kept
+Band3D * res_band3d(int role, const char * name)
+{
+    static Band3D * model[4];
+    static char names[4][16];
+    if (role < 0 || role > 3)
+        return NULL;
+    if (!name) {
+        band3d_free(model[role]);
+        model[role] = NULL;
+        names[role][0] = 0;
+        return NULL;
+    }
+    if (strcmp(names[role], name) != 0) {
+        band3d_free(model[role]);
+        model[role] = band3d_load(name);
+        snprintf(names[role], sizeof(names[role]), "%s", name);
+    }
+    return model[role];
+}
+
 Tex * res_band_alt(int role)
 {
     return role >= 0 && role < 4 ? alt_sheet[role] : NULL;

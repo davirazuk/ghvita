@@ -4114,7 +4114,7 @@ enum { O_SPEED, O_HIGHWAY, O_VENUE, O_BAND, O_SING, O_SINGDIFF, O_OFFSET, O_LAYO
        O_CAMERA, O_HWALPHA, O_VLIGHT, O_FLASH, O_POPUPS, O_TIMING, O_LIVE, O_VANISH, O_MISSSND, O_REAR, O_BEND, O_COUNTDOWN,
        O_RESET, O_FIVEPADS, O_DOUBLEKICK, O_EASYSUS, O_COUNTIN, O_SCREENS, O_PROGRESS, O_CUPS, O_AUTOREPRESS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, O_CROWDHANDS, O_VIGNETTE, O_LYRICS, O_MENUMUSIC, O_SINGSP, O_SHRINKCHECK, O_GHOST, O_RIVAL, O_WINDOW, O_LIGHTFX, O_SONGSPEED,
        O_FRAMERATE, O_STILLCAM, O_PRESET,
-       O_BACKDROP, O_RATINGS, O_HWLEN, O_SUDDEN, O_HARDROCK, O_ENGINE, O_STEPS, O_PICK0, O_PICK1, O_PICK2, O_PICK3, O_COUNT };
+       O_BACKDROP, O_RATINGS, O_HWLEN, O_SUDDEN, O_HARDROCK, O_ENGINE, O_STEPS, O_PICK0, O_PICK1, O_PICK2, O_PICK3, O_BAND3D, O_COUNT };
 
 // the options by subject, L and R between them
 enum { OPT_TABS = 8, OPT_TAB_MAX = 18 };
@@ -4123,7 +4123,7 @@ static const int opt_tabs[OPT_TABS][OPT_TAB_MAX + 1] = {
     {O_SPEED, O_SONGSPEED, O_OFFSET, O_WINDOW, O_ENGINE, O_STEPS, O_SUDDEN, O_HARDROCK, O_NOFAIL, O_EASYSUS, O_AUTOREPRESS, O_VANISH, O_COUNTDOWN, O_SING, O_SINGDIFF, O_RIVAL, O_RESET, -1},
     {O_LAYOUT, O_DRUMKEYS, O_FIVEPADS, O_DOUBLEKICK, O_LEFTY, O_TILT, O_REAR, O_SINGSP, -1},
     {O_HIGHWAY, O_HWALPHA, O_CAMERA, O_CUPS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, -1},
-    {O_VENUE, O_VLIGHT, O_BAND, O_PICK1, O_PICK2, O_PICK3, O_PICK0, O_CROWDHANDS, O_VIGNETTE, O_SCREENS, O_FLASH, -1},
+    {O_VENUE, O_VLIGHT, O_BAND, O_BAND3D, O_PICK1, O_PICK2, O_PICK3, O_PICK0, O_CROWDHANDS, O_VIGNETTE, O_SCREENS, O_FLASH, -1},
     {O_LYRICS, O_POPUPS, O_PROGRESS, O_TIMING, O_LIVE, O_GHOST, O_LIGHTFX, O_FPS, -1},
     {O_PRESET, O_FRAMERATE, O_FPS, O_BACKDROP, O_RATINGS, O_HWLEN, O_STILLCAM, O_LIGHTFX, O_BAND, O_FIRE, O_FLASH, O_CROWDHANDS, O_VIGNETTE, -1},
     {O_MUSIC, O_SFX, O_CROWD, O_MENUMUSIC, O_COUNTIN, O_DRUMHITS, O_MISSSND, O_BEND, -1},
@@ -4213,6 +4213,7 @@ static void option_text(int i, char * name, char * value, size_t n)
                                  : res_venue_title(cfg.venue));
         break;
     case O_BAND: strcpy(name, "Band on stage"); snprintf(value, n, "%s", cfg.no_band ? "Off" : "On"); break;
+    case O_BAND3D: strcpy(name, "Band look"); snprintf(value, n, "%s", cfg.band_pictures ? "Pictures" : "3D models"); break;
     case O_PICK0: case O_PICK1: case O_PICK2: case O_PICK3: {
         static const char * roles[4] = {"Drummer", "Singer", "Guitarist", "Bassist"};
         int r = i - O_PICK0;
@@ -4380,6 +4381,7 @@ static void change_option(int i, int d)
         break;
     }
     case O_BAND: cfg.no_band = !cfg.no_band; break;
+    case O_BAND3D: cfg.band_pictures = !cfg.band_pictures; break;
     case O_PICK0: case O_PICK1: case O_PICK2: case O_PICK3: {
         // each song's own, then every one of that role
         static const char * roles[4] = {"drummer", "vocalist", "guitarist", "bassist"};
