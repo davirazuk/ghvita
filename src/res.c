@@ -457,6 +457,27 @@ void res_band_free(void)
     }
 }
 
+// a member's picture for the options (assets/band/thumb/<name>.png), the last few kept
+Tex * res_band_thumb(const char * name)
+{
+    static Tex * cache[4];
+    static char names[4][16];
+    static int next;
+    for (int i = 0; i < 4; i++)
+        if (cache[i] && strcmp(names[i], name) == 0)
+            return cache[i];
+    char path[64];
+    snprintf(path, sizeof(path), "band/thumb/%s.png", name);
+    Tex * t = load_tex(path, 0);
+    if (!t)
+        return NULL;
+    tex_free(cache[next]);
+    cache[next] = t;
+    snprintf(names[next], sizeof(names[next]), "%s", name);
+    next = (next + 1) % 4;
+    return t;
+}
+
 Tex * res_band_alt(int role)
 {
     return role >= 0 && role < 4 ? alt_sheet[role] : NULL;

@@ -372,6 +372,9 @@ static void pick_band(const Song * song, uint32_t h)
         for (const char * c = roles[r]; *c; c++)
             k = (k ^ (uint8_t)*c) * 16777619u;
         int pick = found[k % n];
+        for (int j = 0; j < n; j++)
+            if (cfg.band_pick[r][0] && strcmp(res.band_names[found[j]], cfg.band_pick[r]) == 0)
+                pick = found[j];            // chosen in the options
         G.band[r] = res_band_sheet(r, res.band_names[pick]);
         G.band_alt[r] = res_band_alt(r);
         G.band_rise[r] = res.band_has_rise[pick] ? res.band_rise[pick] : NULL;
@@ -1326,6 +1329,12 @@ static void draw_stage(void)
         G.focus = turns[(slot / 2) & 3];
     if (G.focus >= 0 && !G.band[G.focus])
         G.focus = -1;
+#ifndef __vita__
+    static int was_focus = -2;
+    if (G.focus != was_focus)
+        plat_log("cam: focus %d at %.2f", G.focus, G.t);
+    was_focus = G.focus;
+#endif
     float zoom = 1.04f + 0.012f * G.band_loud, aim_x = 0, aim_y = 0;
     if (intro) {
         // held about the middle of the band, at chest height, so nobody slides off the edges as it widens
@@ -1334,9 +1343,12 @@ static void draw_stage(void)
     } else if (G.focus >= 0) {
         float m[3];
         member_spot(G.focus, m);
-        zoom = 1.2f;
+        // a close-up as World Tour cuts to: from the head down, tighter for whoever has the solo. They stay where they
+        // are across the screen (nobody behind the highway); the head stays in the picture, the feet may go out of it
+        zoom = G.focus < 2 ? 1.2f : solo ? 1.55f : 1.42f;     // the singer and drummer are behind the board: not them
         aim_x = (480 - m[0]) * (zoom - 1);
-        aim_y = (272 - (m[1] - m[2])) * (zoom - 1);
+        float head = m[1] - 2.25f * m[2];
+        aim_y = G.focus < 2 ? (272 - (m[1] - m[2])) * (zoom - 1) : 34 - 272 - (head - 272) * zoom;
         float rx = 480 * (zoom - 1) - 14, ry = 272 * (zoom - 1) - 8;
         aim_x = aim_x > rx ? rx : aim_x < -rx ? -rx : aim_x;
         aim_y = aim_y > ry ? ry : aim_y < -ry ? -ry : aim_y;
@@ -1414,6 +1426,11 @@ static void draw_stage(void)
         draw_screens(pulse);
     draw_haze();
     draw_lasers(beat, pulse);
+    if (G.cam_z > 1.25f) {
+        // a close-up: the stage behind falls back into the dark, the one the camera's on stands out of it
+        float k = fminf((G.cam_z - 1.25f) / 0.25f, 1);
+        gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(4, 2, 10, (int)(110 * k)));
+    }
     draw_band(beat);
     draw_rig(beat, pulse);
     draw_pyro();
@@ -1478,15 +1495,18 @@ static int kit_pads(const Note * n)
 // guitars and bass (tools/band.py GROOVE, STRUMS): the body grooves through its 4-beat loop in 16 steps, locked to
 // the song's beat; each step has 3 frames of a strum (ready, struck, through) the chart drives. Between their parts
 // they keep grooving, hand ready, as GH's band does
-static int band_groove_cell(const BandPart * b, double phase, bool playing)
+static int band_groove_cell(const BandPart * b, double phase, bool playing, bool mine)
 {
     int step = (int)(phase * 16) & 15, strum = 0;
     if (b->part && playing) {
         double since = G.t - b->last_hit;
         if (since >= 0 && since < 0.07)
             strum = 1;
-        else if (since >= 0 && since < 0.2 && !(G.t > b->hit_t - 0.05))
-            strum = 2;
+        else if (since >= 0 && (since < 0.2 || G.t < b->held - 0.05) && !(G.t > b->hit_t - 0.05))
+            strum = 2;                  // through, and held there while the note rings
+        if (mine && G.miss_pulse > 0.5f)
+            strum = 0;                  // you missed it: so did they
+
     } else if (!b->part && playing) {
         // no chart for them: strumming eighths
         double e = fmod(phase * 8, 1);
@@ -1594,6 +1614,11 @@ static void band_strip(Tex * t, float x, float bottom, float w, float h, const f
 static void band_frame(Tex * t, int f, float cw, float ch, float x, float bottom, float w, float h, float lean,
                        float dip, uint32_t tint)
 {
+    if (t->w != (int)(cw * 8 + 0.5f)) {
+        // a sheet of the other size (an alt loop baked apart): its own cells, the same body in them
+        ch *= t->w / (cw * 8);
+        cw = t->w / 8.0f;
+    }
     float u0 = (f % 8) * cw / t->w, v0 = (f / 8) * ch / t->h;
     const float uv[4] = {u0, v0, u0 + cw / t->w, v0 + ch / t->h};
     band_strip(t, x, bottom, w, h, uv, lean, dip, tint);
@@ -1664,7 +1689,9 @@ static void draw_band(double beat)
         float m[3];
         member_spot(r, m);
         // cell size, pixels per metre and the cell's bottom edge in metres, as in tools/band.py
-        float cw = r == 0 ? 266 : 170, ch = r == 0 ? 232 : 256, ppm = r == 0 ? 88 : 120, y0 = r == 0 ? -0.62f : -0.08f;
+        // (the standing members' sheets come in more than one size: cells 170 x 256 at 120 px/m, or 1.5 times that)
+        float cw = r == 0 ? 266 : t->w / 8.0f, ch = r == 0 ? 232 : cw * (256.0f / 170), ppm = r == 0 ? 88 : 120 * cw / 170;
+        float y0 = r == 0 ? -0.62f : -0.08f;
         // each plays when their part does (no music, no playing), and between parts holds still
         BandPart * bp = &G.band_part[r & 3];
         bool playing = band_playing(r, beat_len) && G.band_loud > 0.03f;
@@ -1674,7 +1701,7 @@ static void draw_band(double beat)
         bp->was = playing;
 #endif
         if (r >= 2)
-            bp->cell = band_groove_cell(bp, phase, playing);
+            bp->cell = band_groove_cell(bp, phase, playing, r == me);
         else if (playing && r != 1)
             bp->cell = band_cell(r, bp, beat);
         int f = bp->cell;
@@ -1741,6 +1768,11 @@ static void draw_band(double beat)
             dip += going * fabsf(sinf((float)G.t * 9)) * 0.05f * m[2];
             lean += going * sinf((float)G.t * 9) * 0.035f * m[2];
             lean += bp->front * (i & 1 ? 0.14f : -0.14f) * m[2];
+            // your whammy on a ringing note: they shake the neck with it
+            if (r == me && G.whammy > 0.15f && G.t < bp->held) {
+                lean += sinf((float)G.t * 34) * G.whammy * 0.045f * m[2];
+                dip += fabsf(sinf((float)G.t * 17)) * G.whammy * 0.03f * m[2];
+            }
         }
         uint32_t tint = col;
         if (r == me) {

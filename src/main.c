@@ -4114,7 +4114,7 @@ enum { O_SPEED, O_HIGHWAY, O_VENUE, O_BAND, O_SING, O_SINGDIFF, O_OFFSET, O_LAYO
        O_CAMERA, O_HWALPHA, O_VLIGHT, O_FLASH, O_POPUPS, O_TIMING, O_LIVE, O_VANISH, O_MISSSND, O_REAR, O_BEND, O_COUNTDOWN,
        O_RESET, O_FIVEPADS, O_DOUBLEKICK, O_EASYSUS, O_COUNTIN, O_SCREENS, O_PROGRESS, O_CUPS, O_AUTOREPRESS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, O_CROWDHANDS, O_VIGNETTE, O_LYRICS, O_MENUMUSIC, O_SINGSP, O_SHRINKCHECK, O_GHOST, O_RIVAL, O_WINDOW, O_LIGHTFX, O_SONGSPEED,
        O_FRAMERATE, O_STILLCAM, O_PRESET,
-       O_BACKDROP, O_RATINGS, O_HWLEN, O_SUDDEN, O_HARDROCK, O_ENGINE, O_STEPS, O_COUNT };
+       O_BACKDROP, O_RATINGS, O_HWLEN, O_SUDDEN, O_HARDROCK, O_ENGINE, O_STEPS, O_PICK0, O_PICK1, O_PICK2, O_PICK3, O_COUNT };
 
 // the options by subject, L and R between them
 enum { OPT_TABS = 8, OPT_TAB_MAX = 18 };
@@ -4123,7 +4123,7 @@ static const int opt_tabs[OPT_TABS][OPT_TAB_MAX + 1] = {
     {O_SPEED, O_SONGSPEED, O_OFFSET, O_WINDOW, O_ENGINE, O_STEPS, O_SUDDEN, O_HARDROCK, O_NOFAIL, O_EASYSUS, O_AUTOREPRESS, O_VANISH, O_COUNTDOWN, O_SING, O_SINGDIFF, O_RIVAL, O_RESET, -1},
     {O_LAYOUT, O_DRUMKEYS, O_FIVEPADS, O_DOUBLEKICK, O_LEFTY, O_TILT, O_REAR, O_SINGSP, -1},
     {O_HIGHWAY, O_HWALPHA, O_CAMERA, O_CUPS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, -1},
-    {O_VENUE, O_VLIGHT, O_BAND, O_CROWDHANDS, O_VIGNETTE, O_SCREENS, O_FLASH, -1},
+    {O_VENUE, O_VLIGHT, O_BAND, O_PICK1, O_PICK2, O_PICK3, O_PICK0, O_CROWDHANDS, O_VIGNETTE, O_SCREENS, O_FLASH, -1},
     {O_LYRICS, O_POPUPS, O_PROGRESS, O_TIMING, O_LIVE, O_GHOST, O_LIGHTFX, O_FPS, -1},
     {O_PRESET, O_FRAMERATE, O_FPS, O_BACKDROP, O_RATINGS, O_HWLEN, O_STILLCAM, O_LIGHTFX, O_BAND, O_FIRE, O_FLASH, O_CROWDHANDS, O_VIGNETTE, -1},
     {O_MUSIC, O_SFX, O_CROWD, O_MENUMUSIC, O_COUNTIN, O_DRUMHITS, O_MISSSND, O_BEND, -1},
@@ -4213,6 +4213,17 @@ static void option_text(int i, char * name, char * value, size_t n)
                                  : res_venue_title(cfg.venue));
         break;
     case O_BAND: strcpy(name, "Band on stage"); snprintf(value, n, "%s", cfg.no_band ? "Off" : "On"); break;
+    case O_PICK0: case O_PICK1: case O_PICK2: case O_PICK3: {
+        static const char * roles[4] = {"Drummer", "Singer", "Guitarist", "Bassist"};
+        int r = i - O_PICK0;
+        strcpy(name, roles[r]);
+        const char * p = cfg.band_pick[r], * u = strchr(p, '_');
+        if (!p[0])
+            snprintf(value, n, "A different one each song");
+        else
+            snprintf(value, n, "%s %s", roles[r], u ? u + 1 : "1");
+        break;
+    }
     case O_SING: strcpy(name, "Sing along"); snprintf(value, n, "%s", cfg.sing_along ? "On" : "Off"); break;
     case O_SINGDIFF:
         strcpy(name, "Sing along vocals");
@@ -4369,6 +4380,21 @@ static void change_option(int i, int d)
         break;
     }
     case O_BAND: cfg.no_band = !cfg.no_band; break;
+    case O_PICK0: case O_PICK1: case O_PICK2: case O_PICK3: {
+        // each song's own, then every one of that role
+        static const char * roles[4] = {"drummer", "vocalist", "guitarist", "bassist"};
+        int r = i - O_PICK0, found[24], cnt = 0, cur = 0;
+        size_t len = strlen(roles[r]);
+        for (int i = 0; i < res.band_count && cnt < 24; i++)
+            if (strncmp(res.band_names[i], roles[r], len) == 0 && (!res.band_names[i][len] || res.band_names[i][len] == '_')) {
+                found[cnt++] = i;
+                if (strcmp(res.band_names[i], cfg.band_pick[r]) == 0)
+                    cur = cnt;
+            }
+        cur = (cur + d + cnt + 1) % (cnt + 1);
+        snprintf(cfg.band_pick[r], sizeof(cfg.band_pick[r]), "%s", cur ? res.band_names[found[cur - 1]] : "");
+        break;
+    }
     case O_SING: cfg.sing_along = !cfg.sing_along; break;
     case O_SINGDIFF: cfg.sing_diff = (cfg.sing_diff + d + DIFF_COUNT) % DIFF_COUNT; break;
     case O_SINGSP: cfg.sing_sp = !cfg.sing_sp; break;
@@ -4550,6 +4576,14 @@ static void options_screen(void)
             const float w = 128, h = 73, x = 820 - w, y = 372;
             gfx_rect(x - 3, y - 3, w + 6, h + 6, RGBA(255, 210, 90, 255));
             gfx_sprite(&(Sprite){v, 0, 0, 1, 1, 960, 544}, x, y, w, h, WHITE);
+        }
+    }
+    if (opt >= O_PICK0 && opt <= O_PICK3 && cfg.band_pick[opt - O_PICK0][0]) {
+        // who it is: their picture beside the panel
+        Tex * th = res_band_thumb(cfg.band_pick[opt - O_PICK0]);
+        if (th) {
+            float h = 250, w = h * th->w / th->h, x = fminf(894 - w / 2, 950 - w), y = 150;
+            gfx_sprite(&(Sprite){th, 0, 0, 1, 1, th->w, th->h}, x, y, w, h, WHITE);
         }
     }
     if (opt == O_HIGHWAY) {
@@ -5605,6 +5639,10 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "Pick your band: Options > Stage has Singer, Guitarist, Bassist and Drummer, each a different one every song or the one you choose (with their picture).",
+        "Close-ups as World Tour cuts them: the camera pushes right in on the guitarist or bassist, head to waist, the stage dark behind them, tighter in a solo.",
+        "The singer, guitarists and bassists are drawn at 1.5 times the detail, sharp in the close-ups.",
+        "Your band member plays what you play: a missed note isn't strummed, a sustain is held, and your whammy shakes their guitar.",
         "The band has two sets of moves now: World Tour's everyday groove in verses, and each member's wilder loop (lunges, arms up) in choruses, solos, Star Power and the outro.",
         "The band's pictures take a quarter of the memory they did (kept in 256 colours on the Vita).",
         "The band leaps into the air when a chorus slams in and the crowd is with you (once every 20 s at most), not only on Star Power.",

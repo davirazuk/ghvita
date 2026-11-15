@@ -9,12 +9,12 @@ SRC = sys.argv[1]
 OUT = sys.argv[2] if len(sys.argv) > 2 else os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'assets', 'band')
 INK = (16, 9, 28)
 CELLS = {'drummer': (266, 232)}
-STAND = (170, 256)
+STAND = (255, 384)
 
 
 def ink(cell):
     a = cell.getchannel('A').point(lambda v: 255 if v > 90 else 0)
-    line = a.filter(ImageFilter.MaxFilter(5)).filter(ImageFilter.GaussianBlur(0.6))
+    line = a.filter(ImageFilter.MaxFilter(7 if cell.width > 200 and cell.height > 300 else 5)).filter(ImageFilter.GaussianBlur(0.6))
     under = Image.new('RGBA', cell.size, INK + (0,))
     under.putalpha(line)
     rgb = ImageEnhance.Contrast(ImageEnhance.Color(cell.convert('RGB')).enhance(1.15)).enhance(1.08)

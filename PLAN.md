@@ -554,3 +554,11 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   sheet's first rows (guitars 48 groove x strum, singer 32 singing). res_band_alt; draw_band "wild" = big section,
   cue chorus/frenzy, SP, or that guitarist's solo: the same cell from the alt sheet. Raw alt sheets in
   backups/band_raw/alt, inked by band_ink.py.
+- v252: user wanted the band "look like real GHWT, pick the band, staging and camera, play the actual notes".
+  Pick: cfg.band_pick[4] (settings band_pick0..3, "song" = each song's own), O_PICK0..3 in STAGE, thumb picture
+  (tools/band_thumbs.py -> assets/band/thumb, res_band_thumb). Close-ups: focus on guitarist/bassist zooms 1.42 (1.55
+  in your solo) with the head kept at y 34 (feet may leave the frame), veil over the venue when cam_z > 1.25; singer
+  and drummer stand behind the board so they keep the old 1.2 push. Standing sheets 1.5x (band.py STAND 255x384 at
+  180 px/m, ink MaxFilter 7); draw_band/band_frame take cells from each sheet's width, so either size works. Play:
+  strum held through a sustain, your misses aren't strummed, your whammy shakes your member on a ringing note.
+  Not done: fret hand along the neck (needs 5x the frames).
