@@ -106,6 +106,9 @@ typedef struct {
     char name[96], artist[96], charter[64];
     char folder[256];
     bool repair;                    // not a newer chart: this same one again (its audio was made badly)
+    bool check;                     // with repair: only if it's outdated (below), found by asking the site
+    uint8_t have;                   // the parts installed (bit per PART_*)
+    bool old_chart, old_audio;      // made by an older converter / older audio encoder: outdated whatever the site says
 } DlUpdateAsk;
 bool dl_updates_start(const DlUpdateAsk * ask, int n);  // false: one's already going, or nothing to ask
 bool dl_updates_progress(int * done, int * total, int * found);   // true while it's going
@@ -113,5 +116,7 @@ bool dl_updates_progress(int * done, int * total, int * found);   // true while 
 // a Chorus search's album covers (one each): their URLs and "Artist - Album", how many (blocking: call from a worker)
 int dl_cover_search(const char * text, char (*urls)[160], char (*labels)[120], int max);
 int dl_updates_take(DlHit * out, char (*old)[256], int max);
+// what the outdated check found: songs missing parts the site has, old charts, old audio
+void dl_updates_reasons(int * parts, int * chart, int * audio);
 // the cover of a hit, fetched in the background: the file once it's there, else NULL (asks for it)
 const char * dl_cover(const DlHit * h);

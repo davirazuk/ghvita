@@ -1958,14 +1958,23 @@ static void updates_poll(void)
         upd_repair = false;
         for (int i = 0; i < n; i++)
             queued += dl_queue(&hits[i]) ? 1 : 0;
-        char t[96];
-        if (!total)
-            snprintf(t, sizeof(t), "Every downloaded song's audio is fine");
+        char t[160];
+        int wp, wc, wa;
+        dl_updates_reasons(&wp, &wc, &wa);
+        if (!n)
+            snprintf(t, sizeof(t), "All %d downloaded songs are up to date", total);
         else if (!queued)
-            snprintf(t, sizeof(t), "Couldn't find those songs online: download them again by hand");
-        else
-            snprintf(t, sizeof(t), "%d %s downloading again with clean audio%s", queued, queued == 1 ? "song" : "songs",
-                     queued < total ? " (some couldn't be found)" : "");
+            snprintf(t, sizeof(t), "%d outdated, but couldn't download them again: try later", n);
+        else {
+            char why[100] = "";
+            if (wp)
+                snprintf(why + strlen(why), sizeof(why) - strlen(why), "%s%d missing parts", why[0] ? ", " : "", wp);
+            if (wc)
+                snprintf(why + strlen(why), sizeof(why) - strlen(why), "%s%d old charts", why[0] ? ", " : "", wc);
+            if (wa)
+                snprintf(why + strlen(why), sizeof(why) - strlen(why), "%s%d old audio", why[0] ? ", " : "", wa);
+            snprintf(t, sizeof(t), "%d outdated %s updating (%s)", queued, queued == 1 ? "song" : "songs", why);
+        }
         say(t);
         return;
     }
@@ -2014,18 +2023,24 @@ static void updates_check(void)
     }
 }
 
-// songs whose audio this game converted before v228 (gritty highs, MP3s late): each downloaded again
+// outdated songs: downloaded songs missing a part their chart has now (installed before this game could convert it:
+// drums, vocals...), made by an older chart converter, or with audio from before v228 (gritty highs, MP3s late). The
+// site is asked about each; the outdated ones download again into their own folders, scores kept
 static void repair_check(void)
 {
-    static DlUpdateAsk ask[64];
+    static DlUpdateAsk ask[2000];
     int n = 0;
-    for (int i = 0; i < songs_count() && n < 64; i++) {
+    for (int i = 0; i < songs_count() && n < 2000; i++) {
         const Song * s = songs_get(i);
-        if ((strncmp(s->source, "chorus:", 7) && strncmp(s->source, "rv:", 3)) || !shrink_old(s->folder))
-            continue;
+        if (strncmp(s->source, "chorus:", 7) && strncmp(s->source, "rv:", 3))
+            continue;                   // from elsewhere: nothing to fetch it again from
         DlUpdateAsk * a = &ask[n++];
         memset(a, 0, sizeof(*a));
         a->repair = true;
+        a->check = true;
+        a->have = s->parts;
+        a->old_chart = s->chart_ver < CHART_VERSION;
+        a->old_audio = shrink_old(s->folder);
         snprintf(a->source, sizeof(a->source), "%s", s->source);
         snprintf(a->name, sizeof(a->name), "%s", s->name);
         snprintf(a->artist, sizeof(a->artist), "%s", s->artist);
@@ -2033,13 +2048,13 @@ static void repair_check(void)
         snprintf(a->folder, sizeof(a->folder), "%s", s->folder);
     }
     if (!n) {
-        say("Every downloaded song's audio is fine");
+        say("No downloaded songs to check");
         return;
     }
     if (dl_updates_start(ask, n)) {
         upd_was_running = upd_repair = true;
         char t[80];
-        snprintf(t, sizeof(t), "Finding %d %s to download again", n, n == 1 ? "song" : "songs");
+        snprintf(t, sizeof(t), "Checking %d downloaded %s against their sites", n, n == 1 ? "song" : "songs");
         say(t);
     }
 }
@@ -2426,9 +2441,9 @@ static void list_menu_draw(const Song * s)
         snprintf(rows[8], sizeof(rows[8]), "Check for newer charts");
     snprintf(rows[9], sizeof(rows[9]), "Random gig: 5 songs from this list");
     if (upd_repair && dl_updates_progress(&done, &total, &found))
-        snprintf(rows[10], sizeof(rows[10]), "Finding songs to download again %d/%d", done, total);
+        snprintf(rows[10], sizeof(rows[10]), "Checking for outdated songs %d/%d", done, total);
     else
-        snprintf(rows[10], sizeof(rows[10]), "Repair downloaded songs' audio");
+        snprintf(rows[10], sizeof(rows[10]), "Find outdated songs (missing parts, old audio)");
     for (int i = 0; i < 11; i++) {
         float y = 74 + i * 38.5f;
         if (i == list_row)
@@ -5590,6 +5605,7 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "SELECT in the song list, Find outdated songs: checks every downloaded song against its site and updates the ones missing a part (drums, vocals...), with an old chart or old audio. Scores kept.",
         "The guitarist and bassist do World Tour's own Star Power jump: a crouch and a big leap, guitars in hand.",
         "The drummer clicks the sticks over the kit through the count-in and after the last chord, and idles while their part rests.",
         "A real crowd: World Tour's own people stand in front of the stage, backlit, bored, nodding, cheering or going wild with the song.",
@@ -5628,7 +5644,7 @@ static void news_screen(void)
         "Late hits are capped at half the way to the next note, as in GH: a fast run no longer eats the next note early.",
         "Fixed 30 fps: it still drew 60 frames a second. Now it really draws 30 (and reads the buttons 60 times a second).",
         "Downloaded songs sound clean now: their audio was resampled badly (gritty cymbals and voices) and MP3s ran 25 ms late.",
-        "Songs you downloaded before: SELECT in the song list, Repair downloaded songs' audio. They download again, scores kept.",
+        "Songs you downloaded before: SELECT in the song list, Find outdated songs. They download again, scores kept.",
         "Fixed downloads sometimes running twice at once and spoiling each other's files.",
         "Flash looks more like Guitar Flash: white-topped pucks, ring targets, black lane lines, big fire, its own camera.",
         "Every hit is rated PERFECT, GREAT or GOOD. Results show your accuracy and a rank, S+ to D; the song list keeps your best.",
@@ -5835,6 +5851,10 @@ int main(void)
     const char * e = getenv("GHV_AUTOPLAY");
     autoplay = e && atoi(e);
     plat_log("build " __DATE__ " " __TIME__);
+#ifndef __vita__
+    if (getenv("GHV_OUTDATED"))
+        repair_check();                 // tests: Find outdated songs at start-up (then "waitdl" in GHV_SCRIPT)
+#endif
     if (getenv("GHV_SONG")) {
         // tests: straight into a song (GHV_SONG=index, GHV_PART, GHV_DIFF)
         const char * want = getenv("GHV_SONG");

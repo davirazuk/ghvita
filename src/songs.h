@@ -20,6 +20,7 @@ typedef struct {
     char sort_name[96], sort_artist[96];
     int length_ms, preview_ms;
     uint8_t parts;                          // bit per PART_*
+    int8_t chart_ver;                       // the converter that made it (ghvita.ini chart; 1 when absent)
     int8_t diff[PART_COUNT];                // song.ini's difficulty tiers (-1 unknown)
     uint8_t guessed;                        // bit per part: its tier was estimated from the chart; 0x80 done
     char stems[MAX_STEMS][24];

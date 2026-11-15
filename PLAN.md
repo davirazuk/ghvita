@@ -526,3 +526,16 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   the room above the head in the shot (a third always shows). Drummer rows 6-7: 48-55 GHWT idle (32-frame loop that
   closes best; while the drum part rests), 56-63 armsup_120 (stick clicks over the kit) looped per 2 beats in the
   count-in and after the last note. Old builds' singer_rise table stays as the fallback.
+
+## Find outdated songs (v248, 2026-11-14)
+- Song list SELECT menu, last row (was "Repair downloaded songs' audio", which it includes): every song with a
+  chorus:/rv: source is asked about on its site (upd_thread, DlUpdateAsk.check). Outdated = the site lists a part
+  (DlHit.parts >= 0) the installed song lacks (Song.parts), or ghvita.ini "chart" < CHART_VERSION (now in songconv.h;
+  absent = 1), or shrink_old audio. Outdated ones download again into their own folders (the repair path, scores
+  kept); the toast counts missing parts / old charts / old audio, log.txt has "outdated: <song>: <why>" per song.
+  Chorus parts come from a name+artist search matched on the md5 (chorus_parts). Songs without a source (raw copies,
+  pack.py) aren't checked. LIB_MAGIC bumped (Song.chart_ver). UPD_MAX 200 found per run.
+- PC test: GHV_OUTDATED=1 runs the check at start-up; script "sleep 20000 / waitdl" for the downloads. Tested with
+  copies of Hash Pipe (vocals taken out of parts: came back) and Go Away (chart = 1: redone); Plug In Baby and
+  NeilSSong left alone.
+- Not possible: parts no chart has (Smile Like You Mean It's synth: Harmonix's RB chart has no keys anywhere).

@@ -2212,11 +2212,12 @@ static int job_thread(void * arg)
 // Songs from Chorus remember the chart's md5 ("chorus:<md5>"). A chart its charter has updated has a new md5 under the
 // same name, artist and charter: a search for each finds them, on a worker, one request at a time.
 
-#define UPD_MAX 64
+#define UPD_MAX 200
 static struct {
     DlUpdateAsk * ask;
     int n;
     volatile int done, found;
+    int why_parts, why_chart, why_audio;        // the outdated check's reasons, song by song
     volatile bool running;
     DlHit hits[UPD_MAX];
     char old[UPD_MAX][256];
@@ -2232,6 +2233,31 @@ static void json_escape(char * out, size_t size, const char * in)
         out[k++] = (unsigned char)*in < 32 ? ' ' : *in;
     }
     out[k] = 0;
+}
+
+// the parts a Chorus chart has, found by searching for its name and artist and picking out its md5; false: not found
+static bool chorus_parts(const DlUpdateAsk * a, DlHit * out)
+{
+    char q[200], post[600], err[160], both[200];
+    snprintf(both, sizeof(both), "%s %s", a->name, a->artist);
+    json_escape(q, sizeof(q), both);
+    snprintf(post, sizeof(post), "{\"search\":\"%s\",\"page\":1,\"per_page\":25}", q);
+    const char * headers[] = {"Content-Type: application/json", NULL};
+    HttpReq r = {.url = "https://api.enchor.us/search", .post = post, .headers = headers, .stall_s = 20};
+    char * body = NULL;
+    size_t len = 0;
+    int status = http_fetch(&r, &body, &len, err, sizeof(err));
+    DlHit * hits = NULL;
+    int total = 0, n = status >= 200 && status < 300 ? parse_chorus(body, len, &hits, &total) : 0;
+    free(body);
+    bool got = false;
+    for (int k = 0; k < n && !got; k++)
+        if (!strcmp(hits[k].id, a->source)) {
+            *out = hits[k];
+            got = true;
+        }
+    free(hits);
+    return got;
 }
 
 static void * upd_thread(void * arg)
@@ -2252,6 +2278,14 @@ static void * upd_thread(void * arg)
                 snprintf(h.artist, sizeof(h.artist), "%s", a->artist);
                 snprintf(h.charter, sizeof(h.charter), "%s", a->charter);
                 got = true;
+                if (a->check) {
+                    // what the site says it has, to set against what's on the card
+                    DlHit site;
+                    if (chorus_parts(a, &site))
+                        memcpy(h.parts, site.parts, sizeof(h.parts));
+                    else
+                        memset(h.parts, -1, sizeof(h.parts));
+                }
             } else if (!strncmp(a->source, "rv:", 3)) {
                 char text[200], err[160] = "";
                 int n = 0, total = 0;
@@ -2271,6 +2305,28 @@ static void * upd_thread(void * arg)
                 }
             }
             free(hits);
+            if (got && a->check) {
+                // outdated: a part the site has that the card's copy lacks, or made by an older converter or encoder
+                char missing[80] = "";
+                static const char * const pn[PART_COUNT] = {"guitar", "bass", "rhythm", "coop", "keys", "drums", "vocals"};
+                for (int p = 0; p < PART_COUNT; p++)
+                    if (h.parts[p] >= 0 && !(a->have & 1 << p))
+                        snprintf(missing + strlen(missing), sizeof(missing) - strlen(missing), " %s", pn[p]);
+                pthread_mutex_lock(&upd_lock);
+                upd.why_parts += missing[0] != 0;
+                upd.why_chart += a->old_chart;
+                upd.why_audio += a->old_audio;
+                pthread_mutex_unlock(&upd_lock);
+                if (!missing[0] && !a->old_chart && !a->old_audio)
+                    got = false;                // up to date
+                else
+                    plat_log("outdated: %s - %s:%s%s%s%s", a->artist, a->name, missing[0] ? " missing" : "", missing,
+                             a->old_chart ? " old chart" : "", a->old_audio ? " old audio" : "");
+                if (!got) {
+                    upd.done = i + 1;
+                    continue;
+                }
+            }
             if (got) {
                 pthread_mutex_lock(&upd_lock);
                 if (upd.found < UPD_MAX) {
@@ -2333,6 +2389,7 @@ bool dl_updates_start(const DlUpdateAsk * ask, int n)
     memcpy(upd.ask, ask, n * sizeof(DlUpdateAsk));
     upd.n = n;
     upd.done = upd.found = 0;
+    upd.why_parts = upd.why_chart = upd.why_audio = 0;
     upd.running = true;
     pthread_t t;
     if (pthread_create(&t, NULL, upd_thread, NULL) != 0) {
@@ -2351,6 +2408,15 @@ bool dl_updates_progress(int * done, int * total, int * found)
     *total = upd.n;
     *found = upd.found;
     return upd.running;
+}
+
+void dl_updates_reasons(int * parts, int * chart, int * audio)
+{
+    pthread_mutex_lock(&upd_lock);
+    *parts = upd.why_parts;
+    *chart = upd.why_chart;
+    *audio = upd.why_audio;
+    pthread_mutex_unlock(&upd_lock);
 }
 
 int dl_updates_take(DlHit * out, char (*old)[256], int max)

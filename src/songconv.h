@@ -3,6 +3,8 @@
 // with notes.vhc (the 5-fret parts, timed), ghvita.ini (what the song list shows), album.jpg (256x256) and the song's
 // own audio files, played as they are
 #pragma once
+// bump with pack.py's CHART_VERSION when the chart output changes (songs older than this are outdated)
+#define CHART_VERSION 2
 #include <stdbool.h>
 #include <stddef.h>
 

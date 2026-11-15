@@ -25,8 +25,6 @@
 #define F_SP_END NOTE_SP_END
 #define OPEN FRET_OPEN
 
-// bump with pack.py's CHART_VERSION when the chart output changes
-#define CHART_VERSION 2
 
 #define VEC(T) struct { T * v; int n, cap; }
 #define PUSH(vec, x) do { \

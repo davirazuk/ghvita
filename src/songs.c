@@ -97,6 +97,7 @@ static bool load_song(const char * folder)
     }
     Song * s = &songs[count];
     memset(s, 0, sizeof(*s));
+    s->chart_ver = 1;                   // ghvita.ini without "chart =": the first converter
     snprintf(s->folder, sizeof(s->folder), "%s", folder);
     for (int i = 0; i < PART_COUNT; i++) {
         s->diff[i] = -1;
@@ -124,6 +125,8 @@ static bool load_song(const char * folder)
         STR("charter", charter)
         STR("source", source)
 #undef STR
+        else if (strcmp(k, "chart") == 0)
+            s->chart_ver = (int8_t)atoi(v);
         else if (strcmp(k, "song_length") == 0)
             s->length_ms = atoi(v);
         else if (strcmp(k, "preview_start_time") == 0)
@@ -177,7 +180,7 @@ static bool has_ext(const char * name, const char * ext)
 // What every folder said last time, so a library of thousands doesn't mean opening thousands of files at each start.
 // A folder whose time has changed is read afresh. New songs, gone songs and a new Song layout all just rewrite it
 
-#define LIB_MAGIC 0x3142494cu
+#define LIB_MAGIC 0x3242494cu         // bump when Song's fields change meaning (2: chart_ver)
 
 typedef struct {
     uint32_t magic, size;
