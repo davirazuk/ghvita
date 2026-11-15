@@ -45,6 +45,10 @@ bool replay_last_path(const Song * song, int part, int diff, char * out, int siz
 
 // playing one back: its settings stand in for yours while it plays (config_save keeps yours)
 bool replay_load(const char * path);
+// the last replay's singing is still being cleaned of the song (a few seconds after it's saved); replay_wait: till
+// it's done (before loading it)
+bool replay_busy(void);
+void replay_wait(void);
 void replay_unload(void);
 bool replay_playing(void);
 const ReplayInfo * replay_info(void);

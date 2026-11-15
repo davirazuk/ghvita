@@ -2616,7 +2616,7 @@ bool game_start_replay(Song * song)
     int n, ch;
     float t0;
     const int16_t * v = replay_voice(&n, &t0, &ch);
-    audio_voice(v, n, ch, VOICE_RATE, t0, v ? 1 : 0);
+    audio_voice(v, n, ch, VOICE_RATE, t0, v ? game_my_voice_volume() : 0);
     return true;
 }
 
@@ -2630,19 +2630,25 @@ bool game_replay_song_vocals(int level)
     return true;
 }
 
-void game_replay_my_voice(bool on)
+float game_my_voice_volume(void)
 {
-    audio_voice_volume(on ? 1 : 0);
+    static const float levels[6] = {0, 0.5f, 0.75f, 1, 1.5f, 2};
+    return levels[cfg.voice_level < 0 || cfg.voice_level > 5 ? 3 : cfg.voice_level];
 }
 
-void game_replay_voice_style(int style, bool on)
+void game_replay_my_voice(float volume)
+{
+    audio_voice_volume(volume);
+}
+
+void game_replay_voice_style(int style, float volume)
 {
     audio_voice(NULL, 0, 1, 0, 0, 0);
     replay_mix_voice(style);
     int n, ch;
     float t0;
     const int16_t * v = replay_voice(&n, &t0, &ch);
-    audio_voice(v, n, ch, VOICE_RATE, t0, v && on ? 1 : 0);
+    audio_voice(v, n, ch, VOICE_RATE, t0, v ? volume : 0);
 }
 
 void game_set_view(int view)

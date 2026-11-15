@@ -34,3 +34,5 @@ void vox_record_clear(void);
 // the note sung at song time s (within margin seconds of one): its pitch (MIDI; 0 spoken or a clap), -1 none
 int vox_target_at(double s, double margin);
 const int16_t * vox_record_get(int * n, float * t0);
+// the same, handed over (the caller frees both; ref may be NULL: the speakers weren't kept); false: nothing sung
+bool vox_record_take(int16_t ** pcm, int16_t ** ref, int * n, float * t0);

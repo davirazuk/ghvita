@@ -367,6 +367,24 @@ static int voice_n, voice_rate, voice_ch;
 static double voice_t0;
 static float voice_vol;
 
+// what the speakers play, kept for the echo canceller (aec.c): mono, 16 kHz, cap_buf[0] at song time cap_t0
+static int16_t * cap_buf;
+static int cap_n;
+static double cap_t0;
+#ifndef __vita__
+// tests (plat_sdl's speaker echo): everything played, 16 kHz mono by song time, the last 4 minutes (the disk driver
+// the tests use mixes well ahead of the clock)
+#define HEARD (1 << 22)
+static int16_t heard[HEARD];
+
+void audio_test_heard(double t, int16_t * out, int n)
+{
+    long k = (long)floor(t * 16000);
+    for (int i = 0; i < n; i++, k++)
+        out[i] = k >= 0 ? heard[k % HEARD] : 0;
+}
+#endif
+
 static void mix(int16_t * out, int frames)
 {
     static float acc[MAX_MIX * 2];
@@ -379,6 +397,9 @@ static void mix(int16_t * out, int frames)
     h->out_frame = out_frames;
     h->song_frame = song_frame;
     h->playing = song_active && song_playing;
+    int16_t * cap = song_active && song_playing ? cap_buf : NULL;
+    int cap_len = cap_n;
+    double cap_at = ((double)song_frame / AUDIO_RATE - cap_t0) * 16000, cap_step = 16000.0 / AUDIO_RATE * song_speed;
     if (song_active && song_playing) {
         // the frames of the song this buffer takes, and where they go
         // any speed but 1 goes through the stretch: above 1 the buffer takes more of the song than it plays
@@ -483,6 +504,50 @@ static void mix(int16_t * out, int frames)
         vc->vol = vc->vol_target;
     }
     out_frames += frames;
+#ifndef __vita__
+    if (song_active && song_playing) {
+        // averaged like the capture (a mic filters what it can't keep; picking every third would alias)
+        double at = (double)h->song_frame / AUDIO_RATE * 16000;
+        static float hs;
+        static int hn;
+        static long hk = -1;
+        for (int i = 0; i < frames; i++, at += 16000.0 / AUDIO_RATE * song_speed) {
+            long k = (long)floor(at);
+            if (k != hk) {
+                if (hk >= 0 && hn)
+                    heard[hk % HEARD] = (int16_t)(hs / hn);
+                hs = 0, hn = 0, hk = k;
+            }
+            float l = acc[i * 2], r = acc[i * 2 + 1];
+            l = l > 32767 ? 32767 : l < -32768 ? -32768 : l;
+            r = r > 32767 ? 32767 : r < -32768 ? -32768 : r;
+            hs += (l + r) * 0.5f;
+            hn++;
+        }
+    }
+#endif
+    if (cap) {
+        // each 16 kHz sample the mean of the output frames that fall in it (3 at normal speed), clipped as played;
+        // under the lock: audio_capture(NULL) may free the buffer straight after
+        static float sum;
+        static int count, last = -1;
+        static int16_t * last_buf;
+        if (cap != last_buf)
+            last_buf = cap, last = -1, sum = 0, count = 0;
+        for (int i = 0; i < frames; i++, cap_at += cap_step) {
+            int k = (int)floor(cap_at);
+            if (k != last) {
+                if (last >= 0 && last < cap_len && count)
+                    cap[last] = (int16_t)(sum / count);
+                sum = 0, count = 0, last = k;
+            }
+            float l = acc[i * 2], r = acc[i * 2 + 1];
+            l = l > 32767 ? 32767 : l < -32768 ? -32768 : l;
+            r = r > 32767 ? 32767 : r < -32768 ? -32768 : r;
+            sum += (l + r) * 0.5f;
+            count++;
+        }
+    }
     pthread_mutex_unlock(&mix_lock);
     for (int i = 0; i < frames * 2; i++) {
         float s = acc[i];
@@ -755,6 +820,15 @@ void audio_voice(const int16_t * pcm, int n, int channels, int rate, double t0, 
     voice_rate = rate;
     voice_t0 = t0;
     voice_vol = volume;
+    pthread_mutex_unlock(&mix_lock);
+}
+
+void audio_capture(int16_t * buf, int n, double t0)
+{
+    pthread_mutex_lock(&mix_lock);
+    cap_buf = buf;
+    cap_n = n;
+    cap_t0 = t0;
     pthread_mutex_unlock(&mix_lock);
 }
 

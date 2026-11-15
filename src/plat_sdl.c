@@ -363,6 +363,8 @@ void plat_run_updater(const char * staged, const char * app, const char * old)
 static void (*audio_mix)(int16_t * out, int frames);
 static void (*audio_started)(int64_t frame, int64_t when_us);
 
+// GHV_MIC_ECHO=<gain>: the test mic also hears the game's own output, like the Vita's speakers: a small speaker's
+// sound (no bass, rounded peaks, a reflection), GHV_MIC_ECHO_MS (default 60) after it was played
 static void audio_callback(void * user, Uint8 * stream, int len)
 {
     (void)user;
@@ -441,10 +443,31 @@ void plat_mic_read(int port, short * out)
         SDL_Delay((Uint32)((mic_due - now) * 1000));
     if (mic_file) {
         // a recording (raw 16-bit mono at the mic's rate, song time 0 at its start), heard GHV_MIC_LATE s late
+        // a steady stream like a real mic: one grain after the other, back in step only if 100 ms out (the test
+        // clock jitters; the Vita's mic and speakers run off steady clocks)
+        static long pos = -1000000000;
         double t = audio_song_clock() - mic_late;
-        long at = (long)(t * mic_rate) - mic_grain;
-        for (int i = 0; i < mic_grain; i++)
-            out[i] = at + i >= 0 && at + i < mic_file_n ? mic_file[at + i] : 0;
+        long want = (long)(t * mic_rate) - mic_grain;
+        if (labs(want - pos) > mic_rate / 10)
+            pos = want;
+        long at = pos;
+        pos += mic_grain;
+        t = (double)(at + mic_grain) / mic_rate;
+        float eg = getenv("GHV_MIC_ECHO") ? (float)atof(getenv("GHV_MIC_ECHO")) : 0;
+        double ed = (getenv("GHV_MIC_ECHO_MS") ? atof(getenv("GHV_MIC_ECHO_MS")) : 60) / 1000;
+        int16_t played[4096 + 90];
+        if (eg > 0)
+            audio_test_heard(t - ed - (double)(mic_grain + 90) / mic_rate, played, mic_grain + 90);
+        static float hp_x, hp_y;
+        for (int i = 0; i < mic_grain; i++) {
+            float v = at + i >= 0 && at + i < mic_file_n ? mic_file[at + i] : 0;
+            if (eg > 0) {
+                float x = played[90 + i] + 0.3f * played[i], y = 0.86f * (hp_y + x - hp_x);    // high pass ~350 Hz
+                hp_x = x, hp_y = y;
+                v += eg * 12000 * tanhf(y / 12000);
+            }
+            out[i] = (short)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
+        }
         return;
     }
     double hz = 196 * pow(2, (sin(now * 0.7) + 1) / 2);

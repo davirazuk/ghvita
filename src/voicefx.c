@@ -1,6 +1,7 @@
 // The singing kept with a replay, mixed to sit in the song: put back in time with the chart, the rumble and the hiss
 // filtered off, the gaps between lines quietened, gently tuned to the notes when it's close, evened out, brought to
 // the level of a lead vocal and given a little room (a stereo reverb). Done once, when the replay loads.
+#include <limits.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -163,7 +164,7 @@ int16_t * voicefx_mix(int16_t * x, int n, float t0, const RFrame * fr, int nf, i
     float thr = fminf(fmaxf(floor_ * 3, 120), fmaxf(loud90 * 0.25f, 60));
     // ---- in time: the shift (+-250 ms) that lines the singing up best with the chart's notes
     double best_e = 0;
-    long best = -(1L << 40);
+    long best = LONG_MIN;
     for (int e10 = -25; e10 <= 25; e10++) {
         double e = e10 * 0.01;
         long score = 0;
