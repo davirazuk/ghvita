@@ -55,4 +55,4 @@ void replay_rewind(void);
 // the singing, decoded: 16 kHz from t0, n frames of 1 or 2 channels (NULL: none)
 const int16_t * replay_voice(int * n, float * t0, int * channels);
 // mixed to sit in the song (voicefx.c; the vocals' chart must be loaded): stereo from then on
-bool replay_mix_voice(void);
+bool replay_mix_voice(int style);           // voicefx's styles; the mixer must not be playing the old mix

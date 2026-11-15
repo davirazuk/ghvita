@@ -26,6 +26,7 @@
 #include "chart.h"
 #include "game.h"
 #include "replay.h"
+#include "voicefx.h"
 #include "vocals.h"
 #include "dl.h"
 #include "update.h"
@@ -3277,6 +3278,7 @@ static int replay_back = S_RESULTS;     // where a replay goes when it's over
 static Config cfg_mine;                 // yours, while a replay's settings stand in
 static int replay_song_vox = 2;          // the song's own vocals: 2 full, 1 low, 0 off
 static bool replay_my_vox = true;
+static int replay_view;                 // 0 all, 1 stage + lyrics, 2 stage only
 enum { RL_MAX = 24 };
 static char rl_paths[RL_MAX][400];
 static ReplayInfo rl_info[RL_MAX];
@@ -3294,8 +3296,12 @@ static void end_replay(void)
     game_stop();
     replay_unload();
     if (cfg_borrowed) {
+        bool style_changed = cfg_mine.voice_style != cfg.voice_style;
+        cfg_mine.voice_style = cfg.voice_style;
         cfg = cfg_mine;
         cfg_borrowed = false;
+        if (style_changed)
+            config_save();          // the style picked in the replay is the one kept
     }
     go(replay_back);
     sel_t = now_s;
@@ -3325,6 +3331,7 @@ static bool start_replay(const char * path, int back)
     cfg.frame_rate = cfg_mine.frame_rate;
     cfg.light_fx = cfg_mine.light_fx;
     cfg.show_fps = cfg_mine.show_fps;
+    cfg.voice_style = cfg_mine.voice_style;
     cfg_borrowed = true;
     sel = idx;
     if (in->voice_n) {
@@ -3346,6 +3353,7 @@ static bool start_replay(const char * path, int back)
     }
     // under your singing the song's own is a quiet guide; muted or full from the pause menu
     replay_my_vox = true;
+    replay_view = 0;
     replay_song_vox = in->voice_n && game_replay_song_vocals(1) ? 1 : 2;
     replay_back = back;
     go(S_PLAY);
@@ -3391,20 +3399,24 @@ static bool save_singing(char * where, int size)
 
 static void replay_pause_screen(void)
 {
-    enum { R_RESUME, R_RESTART, R_SONGVOX, R_MYVOX, R_WAV, R_QUIT };
+    enum { R_RESUME, R_RESTART, R_SONGVOX, R_MYVOX, R_STYLE, R_VIEW, R_WAV, R_QUIT };
     int n_voice, chans;
     float t0;
     bool voice = replay_voice(&n_voice, &t0, &chans) != NULL;
-    int ids[6], n = 0;
+    int ids[8], n = 0;
     ids[n++] = R_RESUME;
     ids[n++] = R_RESTART;
     ids[n++] = R_SONGVOX;
     if (voice) {
         ids[n++] = R_MYVOX;
-        ids[n++] = R_WAV;
+        ids[n++] = R_STYLE;
     }
+    ids[n++] = R_VIEW;
+    if (voice)
+        ids[n++] = R_WAV;
     ids[n++] = R_QUIT;
-    char rows[6][48];
+    char rows[8][48];
+    static const char * const views[3] = {"VIEW: EVERYTHING", "VIEW: STAGE + LYRICS", "VIEW: STAGE ONLY"};
     for (int i = 0; i < n; i++) {
         int id = ids[i];
         snprintf(rows[i], sizeof(rows[i]), "%s",
@@ -3412,7 +3424,15 @@ static void replay_pause_screen(void)
                  : id == R_SONGVOX ? (replay_song_vox == 2 ? "SONG'S VOCALS: FULL"
                                       : replay_song_vox == 1 ? "SONG'S VOCALS: LOW" : "SONG'S VOCALS: OFF")
                  : id == R_MYVOX ? (replay_my_vox ? "YOUR SINGING: ON" : "YOUR SINGING: OFF")
+                 : id == R_STYLE ? "VOICE: " : id == R_VIEW ? views[replay_view]
                  : id == R_WAV ? "SAVE YOUR SINGING" : "END REPLAY");
+        if (id == R_STYLE) {
+            char up[24];
+            snprintf(up, sizeof(up), "%s", voicefx_name(cfg.voice_style));
+            for (char * c = up; *c; c++)
+                *c = (char)toupper((unsigned char)*c);
+            snprintf(rows[i], sizeof(rows[i]), "VOICE: %s", up);
+        }
     }
     if (menu_index >= n)
         menu_index = 0;
@@ -3427,7 +3447,7 @@ static void replay_pause_screen(void)
     bool resume = pressed & (BTN_START | BTN_CIRCLE);
     int d = repeat & (BTN_LEFT | BTN_RIGHT) ? 1 : 0;
     int id = ids[menu_index];
-    if ((pressed & BTN_CROSS) || (d && (id == R_SONGVOX || id == R_MYVOX))) {
+    if ((pressed & BTN_CROSS) || (d && (id == R_SONGVOX || id == R_MYVOX || id == R_STYLE || id == R_VIEW))) {
         ui_sound(SND_UI_SELECT);
         if (id == R_RESUME)
             resume = true;
@@ -3448,6 +3468,12 @@ static void replay_pause_screen(void)
         } else if (id == R_MYVOX) {
             replay_my_vox = !replay_my_vox;
             game_replay_my_voice(replay_my_vox);
+        } else if (id == R_STYLE) {
+            cfg.voice_style = (cfg.voice_style + (repeat & BTN_LEFT ? VOICE_STYLES - 1 : 1)) % VOICE_STYLES;
+            game_replay_voice_style(cfg.voice_style, replay_my_vox);
+        } else if (id == R_VIEW) {
+            replay_view = (replay_view + (repeat & BTN_LEFT ? 2 : 1)) % 3;
+            game_set_view(replay_view);
         } else if (id == R_WAV) {
             char where[600], msg[700];
             if (save_singing(where, sizeof(where))) {
@@ -3472,9 +3498,9 @@ static void replay_pause_screen(void)
     gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(0, 0, 0, 150));
     gfx_sprite(atlas_get(res.hud, "dialog_bg"), SCREEN_W / 2 - 210, 40, 420, 420, WHITE);
     font_draw_shadow(res.title, "REPLAY", SCREEN_W / 2, 132, 46, RGBA(255, 150, 130, 255), ALIGN_CENTER);
-    float step = n > 5 ? 38 : 44, size = n > 5 ? 30 : 34;
+    float step = n > 6 ? 29 : n > 5 ? 38 : 44, size = n > 6 ? 25 : n > 5 ? 30 : 34;
     for (int i = 0; i < n; i++) {
-        float y = 186 + i * step;
+        float y = (n > 6 ? 174 : 186) + i * step;
         if (i == menu_index)
             select_bar(SCREEN_W / 2 - 180, y - 4, 360, step - 4, WHITE);
         font_draw_fit(res.title, rows[i], SCREEN_W / 2, y, size, 340,
@@ -4471,7 +4497,7 @@ enum { O_SPEED, O_HIGHWAY, O_VENUE, O_BAND, O_SING, O_SINGDIFF, O_OFFSET, O_LAYO
        O_CAMERA, O_HWALPHA, O_VLIGHT, O_FLASH, O_POPUPS, O_TIMING, O_LIVE, O_VANISH, O_MISSSND, O_REAR, O_BEND, O_COUNTDOWN,
        O_RESET, O_FIVEPADS, O_DOUBLEKICK, O_EASYSUS, O_COUNTIN, O_SCREENS, O_PROGRESS, O_CUPS, O_AUTOREPRESS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, O_CROWDHANDS, O_VIGNETTE, O_LYRICS, O_MENUMUSIC, O_SINGSP, O_SHRINKCHECK, O_GHOST, O_RIVAL, O_WINDOW, O_LIGHTFX, O_SONGSPEED,
        O_FRAMERATE, O_STILLCAM, O_PRESET,
-       O_BACKDROP, O_RATINGS, O_HWLEN, O_SUDDEN, O_HARDROCK, O_ENGINE, O_STEPS, O_PICK0, O_PICK1, O_PICK2, O_PICK3, O_KEEPSING, O_COUNT };
+       O_BACKDROP, O_RATINGS, O_HWLEN, O_SUDDEN, O_HARDROCK, O_ENGINE, O_STEPS, O_PICK0, O_PICK1, O_PICK2, O_PICK3, O_KEEPSING, O_VOICESTYLE, O_COUNT };
 
 // the options by subject, L and R between them
 enum { OPT_TABS = 8, OPT_TAB_MAX = 18 };
@@ -4483,7 +4509,7 @@ static const int opt_tabs[OPT_TABS][OPT_TAB_MAX + 1] = {
     {O_VENUE, O_VLIGHT, O_BAND, O_PICK1, O_PICK2, O_PICK3, O_PICK0, O_CROWDHANDS, O_VIGNETTE, O_SCREENS, O_FLASH, -1},
     {O_LYRICS, O_POPUPS, O_PROGRESS, O_TIMING, O_LIVE, O_GHOST, O_LIGHTFX, O_FPS, -1},
     {O_PRESET, O_FRAMERATE, O_FPS, O_BACKDROP, O_RATINGS, O_HWLEN, O_STILLCAM, O_LIGHTFX, O_BAND, O_FIRE, O_FLASH, O_CROWDHANDS, O_VIGNETTE, -1},
-    {O_MUSIC, O_SFX, O_CROWD, O_MENUMUSIC, O_COUNTIN, O_DRUMHITS, O_MISSSND, O_BEND, -1},
+    {O_MUSIC, O_SFX, O_CROWD, O_MENUMUSIC, O_COUNTIN, O_DRUMHITS, O_MISSSND, O_BEND, O_VOICESTYLE, -1},
     {O_SHRINKCHECK, -1},
 };
 static int opt_tab, opt_top;
@@ -4590,6 +4616,7 @@ static void option_text(int i, char * name, char * value, size_t n)
     case O_OFFSET: strcpy(name, "Audio offset"); snprintf(value, n, "%+d ms", cfg.offset_ms); break;
     case O_LAYOUT: strcpy(name, "Buttons"); snprintf(value, n, "%s", cfg.layout ? "Layout B" : "Layout A"); break;
     case O_TILT: strcpy(name, "Tilt for Star Power"); snprintf(value, n, "%s", cfg.tilt ? "On" : "Off"); break;
+    case O_VOICESTYLE: strcpy(name, "My singing in replays"); snprintf(value, n, "%s", voicefx_name(cfg.voice_style)); break;
     case O_KEEPSING: strcpy(name, "Keep my singing in replays"); snprintf(value, n, "%s", cfg.keep_singing ? "On" : "Off"); break;
     case O_NOFAIL: strcpy(name, "No fail"); snprintf(value, n, "%s", cfg.nofail ? "On" : "Off"); break;
     case O_DRUMKEYS: strcpy(name, "Drum buttons"); snprintf(value, n, "%s", cfg.drum_layout == 1 ? "Shoulders" : cfg.drum_layout == 2 ? "Guitar" : "Thumbs"); break;
@@ -4763,6 +4790,7 @@ static void change_option(int i, int d)
     case O_TILT: cfg.tilt = !cfg.tilt; break;
     case O_NOFAIL: cfg.nofail = !cfg.nofail; break;
     case O_KEEPSING: cfg.keep_singing = !cfg.keep_singing; break;
+    case O_VOICESTYLE: cfg.voice_style = (cfg.voice_style + (d < 0 ? VOICE_STYLES - 1 : 1)) % VOICE_STYLES; break;
     case O_LEFTY: cfg.lefty = !cfg.lefty; break;
     case O_MUSIC: cfg.music_vol = clampi(cfg.music_vol + d, 0, 10); break;
     case O_SFX: cfg.sfx_vol = clampi(cfg.sfx_vol + d, 0, 10); break;
@@ -5998,6 +6026,8 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "Your singing's voice in replays: Natural, Studio, Big hall or Hard tune (snapped to the notes). Change it live from the replay's START menu, or Options > Sound.",
+        "Replays have a clean view (START > View): the stage and the lyrics, or the stage alone, no highway or meters. Good for recording.",
         "Replays: every song you finish is kept. START on the results screen watches it, played back exactly as you played it.",
         "SELECT in the song list, Replays of this song: your last and your best run of each part, to watch again or delete.",
         "Your singing is kept with the replay (Sing along or the Vocals part) and mixed into the song: lined up with the beat, cleaned up, gently tuned to the notes and given a little reverb.",

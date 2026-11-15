@@ -580,3 +580,8 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   LOW (0.25), pause menu FULL/LOW/OFF (needs a separate vocals stem). SAVE YOUR SINGING writes a 16 kHz stereo WAV
   to <player>/recordings. Option "Keep my singing in replays" (keep_singing). PC test mic: GHV_MIC=1 (tone) or
   GHV_MIC=<raw s16 16 kHz> + GHV_MIC_LATE=<s>.
+- v254: voice styles (voicefx styles[]: Natural/Studio/Big hall/Hard tune = tune strength, range, retune speed,
+  reverb wet/fb/damp/predelay; cfg.voice_style, Options > Sound and the replay pause menu; replay.c keeps the raw
+  mono to re-mix; game_replay_voice_style detaches the mixer first). Clean view (G.view_mode, replay pause VIEW:
+  everything / stage + lyrics / stage only). voicefx: +1e-18 against denormals (4x faster), sin^2 table, compressor
+  gain every 16 samples: 130 s mixes in 0.1 s on PC.

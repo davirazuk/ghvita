@@ -70,3 +70,5 @@ void game_set_autoplay(bool on);
 bool game_start_replay(Song * song);            // the loaded replay (replay_load) from the top
 bool game_replay_song_vocals(int level);        // 2 full, 1 low, 0 off; false: not a track of its own
 void game_replay_my_voice(bool on);
+void game_replay_voice_style(int style, bool on);   // mixed again (a moment) in voicefx's style
+void game_set_view(int view);                   // 0 all, 1 stage + lyrics, 2 stage only

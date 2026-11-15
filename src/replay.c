@@ -265,7 +265,8 @@ static struct {
     int16_t * voice;
     int channels;
     float voice_t0;
-    bool mixed;
+    int16_t * raw;              // the singing as recorded (mono), kept to mix again in another style
+    int style;                  // what it's mixed as, -1 not yet
 } play;
 
 bool replay_load(const char * path)
@@ -315,13 +316,16 @@ bool replay_load(const char * path)
     play.at = 0;
     play.channels = 1;
     play.voice_t0 = play.info.voice_t0;
+    play.style = -1;
     return true;
 }
 
 void replay_unload(void)
 {
     free(play.f);
-    free(play.voice);
+    if (play.voice != play.raw)
+        free(play.voice);
+    free(play.raw);
     memset(&play, 0, sizeof(play));
 }
 
@@ -360,18 +364,34 @@ const int16_t * replay_voice(int * n, float * t0, int * channels)
     return play.voice;
 }
 
-bool replay_mix_voice(void)
+bool replay_mix_voice(int style)
 {
-    if (!play.voice || play.mixed)
-        return play.mixed;
+    if (!play.voice)
+        return false;
+    if (play.style == style)
+        return true;
+    if (!play.raw) {
+        play.raw = play.voice;              // the first mix: what was decoded is the recording
+    } else {
+        free(play.voice);                   // the old mix (the mixer's let go of it: audio_voice NULL first)
+        play.voice = play.raw;
+        play.channels = 1;
+        play.voice_t0 = play.info.voice_t0;
+        play.style = -1;
+    }
+    int n = play.info.voice_n;
+    int16_t * work = malloc((size_t)n * sizeof(int16_t));
+    if (!work)
+        return false;
+    memcpy(work, play.raw, (size_t)n * sizeof(int16_t));
     float t0;
-    int16_t * st = voicefx_mix(play.voice, play.info.voice_n, play.info.voice_t0, play.f, play.info.frames, &t0);
+    int16_t * st = voicefx_mix(work, n, play.info.voice_t0, play.f, play.info.frames, style, &t0);
+    free(work);
     if (!st)
         return false;
-    free(play.voice);
     play.voice = st;
     play.channels = 2;
     play.voice_t0 = t0;
-    play.mixed = true;
+    play.style = style;
     return true;
 }

@@ -142,6 +142,7 @@ typedef struct {
     int sort;
     char last_song[256];
     bool keep_singing;      // the mic's kept with the replay (sing along, the vocals) to hear back
+    int voice_style;        // how it's mixed into the song: voicefx's Natural, Studio, Big hall, Hard tune
 } Config;
 
 extern Config cfg;

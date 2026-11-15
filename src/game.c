@@ -174,6 +174,7 @@ static struct {
     const char * venue_title;
     bool replaying;                     // a replay plays: the frames come from it, not the pad
     int replay_last;                    // what its last frame came to
+    int view_mode;                      // 0 all, 1 the stage and the lyrics, 2 the stage alone (a replay's clean view)
     Tex * band[4];                      // drummer, vocalist, guitarist, bassist
     Tex * band_alt[4];                  // their wilder loops, for the big sections (NULL: none)
     const float (*marks)[3];
@@ -2511,6 +2512,7 @@ void game_stop(void)
     if (G.drums)
         plat_log("drums: %d freestyle hits", G.freestyle);
     practice.on = false;
+    G.view_mode = 0;
     if (G.replaying) {
         G.replaying = false;
         vox_replay(false);
@@ -2610,7 +2612,7 @@ bool game_start_replay(Song * song)
     vox_autoplay(false);
     // the singing mixed into the song (once; the chart's notes are loaded now)
     if (G.sing)
-        replay_mix_voice();
+        replay_mix_voice(cfg.voice_style);
     int n, ch;
     float t0;
     const int16_t * v = replay_voice(&n, &t0, &ch);
@@ -2631,6 +2633,21 @@ bool game_replay_song_vocals(int level)
 void game_replay_my_voice(bool on)
 {
     audio_voice_volume(on ? 1 : 0);
+}
+
+void game_replay_voice_style(int style, bool on)
+{
+    audio_voice(NULL, 0, 1, 0, 0, 0);
+    replay_mix_voice(style);
+    int n, ch;
+    float t0;
+    const int16_t * v = replay_voice(&n, &t0, &ch);
+    audio_voice(v, n, ch, VOICE_RATE, t0, v && on ? 1 : 0);
+}
+
+void game_set_view(int view)
+{
+    G.view_mode = view;
 }
 
 void game_set_autoplay(bool on)
@@ -5471,7 +5488,7 @@ void game_draw(void)
         if (fl >= 0 && fl < G.flare_len * 3 && cfg.flashes < 2)
             gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(255, 245, 225, (int)((cfg.flashes ? 35 : 120) * exp(-fl / G.flare_len))));
     }
-    if (G.rock < 0.2f && !G.failed && !G.autoplay && G.t > 0 && cfg.flashes < 2) {
+    if (G.rock < 0.2f && !G.failed && !G.autoplay && G.t > 0 && cfg.flashes < 2 && !G.view_mode) {
         // about to fail: the edges of the picture pulse red, faster the closer it gets
         float danger = (0.2f - G.rock) / 0.2f, beat = 0.5f + 0.5f * sinf((float)G.t * (6 + 6 * danger));
         int a = (int)((40 + 90 * danger) * beat);
@@ -5488,7 +5505,7 @@ void game_draw(void)
     }
     if (G.sp_flash > 0.02f && cfg.flashes < 2)
         gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(80, 160, 255, (int)(G.sp_flash * (cfg.flashes ? 25 : 70))));
-    if (!G.vocal) {
+    if (!G.vocal && !G.view_mode) {
         static float shook[16];
         proj_now = battle_proj(shook) ? shook : G.proj;
         gfx_3d(proj_now, G.view);
@@ -5504,7 +5521,8 @@ void game_draw(void)
         draw_flames();
         draw_rail_meter();
     }
-    draw_hud();
+    if (!G.view_mode)
+        draw_hud();
     if (G.fail_frames) {
         float f = (float)G.fail_frames / FAIL_FRAMES;
         gfx_2d();
@@ -5512,9 +5530,9 @@ void game_draw(void)
         font_draw_shadow(res.title, "SONG FAILED", SCREEN_W / 2, 210, 72, with_alpha(RGBA(255, 90, 70, 255), f > 0.3f ? 1 : f / 0.3f),
                          ALIGN_CENTER);
     }
-    if (G.sing)
+    if (G.sing && !G.view_mode)
         vox_draw(G.t);
-    else if (!cfg.no_lyrics)
+    else if ((!cfg.no_lyrics || G.sing) && G.view_mode < 2)
         vox_lyrics(G.t);
     gfx_end();
 }

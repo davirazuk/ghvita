@@ -116,8 +116,26 @@ static inline int16_t clip(float v)
 
 // -------------------------------------------------------------------------------------------------- the mix
 
-int16_t * voicefx_mix(int16_t * x, int n, float t0, const RFrame * fr, int nf, float * out_t0)
+// natural, studio, big hall, hard tune
+static const struct {
+    float tune, range, speed, wet, fb, damp;
+    int predelay;
+    const char * name;
+} styles[VOICE_STYLES] = {
+    {0.5f, 1.0f, 0.004f, 0.08f, 0.78f, 0.40f, 400, "Natural"},
+    {0.8f, 1.5f, 0.004f, 0.16f, 0.80f, 0.35f, 400, "Studio"},
+    {0.8f, 1.5f, 0.004f, 0.30f, 0.87f, 0.25f, 640, "Big hall"},
+    {1.0f, 3.0f, 0.05f, 0.14f, 0.80f, 0.35f, 400, "Hard tune"},
+};
+
+const char * voicefx_name(int style)
 {
+    return styles[style < 0 || style >= VOICE_STYLES ? 1 : style].name;
+}
+
+int16_t * voicefx_mix(int16_t * x, int n, float t0, const RFrame * fr, int nf, int style, float * out_t0)
+{
+    style = style < 0 || style >= VOICE_STYLES ? 1 : style;
     uint64_t start = plat_now_us();
     int hops = n / HOP;
     if (hops < 100)
@@ -201,8 +219,8 @@ int16_t * voicefx_mix(int16_t * x, int n, float t0, const RFrame * fr, int nf, f
             if (note > 0 && p > 0) {
                 float diff = note - p;
                 diff -= 12 * floorf(diff / 12 + 0.5f);      // an octave off is still the note
-                if (fabsf(diff) <= 1.5f)
-                    corr = diff * 0.8f;
+                if (fabsf(diff) <= styles[style].range)
+                    corr = diff * styles[style].tune;
             }
             r_target = powf(2, corr / 12);
             mask = vox_target_at(meant, 0.2) >= 0 ? 1 : 0.3f;
@@ -215,7 +233,7 @@ int16_t * voicefx_mix(int16_t * x, int n, float t0, const RFrame * fr, int nf, f
         gate = g_want > gate ? g_want + (gate - g_want) * att_g : g_want + (gate - g_want) * rel_g;
         // the tuning: two read heads sweeping a short delay, crossfaded; back to a plain delay (W/2) when it's not
         // pulling, quickly when nothing's being sung
-        ratio += (r_target - ratio) * 0.004f;
+        ratio += (r_target - ratio) * styles[style].speed;
         float r = ratio;
         if (fabsf(r_target - 1) < 1e-4f) {
             float to = d < W / 4.0f ? 0 : d < 3 * W / 4.0f ? W / 2.0f : W;
@@ -274,13 +292,13 @@ int16_t * voicefx_mix(int16_t * x, int n, float t0, const RFrame * fr, int nf, f
     // ---- pass two: the level and a room, into stereo
     int16_t * st = malloc((size_t)n * 2 * sizeof(int16_t));
     Line cl[NCOMB] = {{0}}, cr[NCOMB] = {{0}}, al[NAP] = {{0}}, ar[NAP] = {{0}}, pre = {0};
-    bool ok = st && line_new(&pre, 400);    // 25 ms before the room answers
+    bool ok = st && line_new(&pre, styles[style].predelay);    // 25-40 ms before the room answers
     for (int k = 0; k < NCOMB; k++)
         ok &= line_new(&cl[k], comb_len[k]) & line_new(&cr[k], comb_len[k] + SPREAD);
     for (int k = 0; k < NAP; k++)
         ok &= line_new(&al[k], ap_len[k]) & line_new(&ar[k], ap_len[k] + SPREAD);
     if (ok) {
-        const float fb = 0.80f, damp = 0.35f, wet = 0.16f;
+        const float fb = styles[style].fb, damp = styles[style].damp, wet = styles[style].wet;
         for (int i = 0; i < n; i++) {
             float dry = x[i] * makeup;
             float in = pre.buf[pre.at] * 0.25f;
@@ -310,7 +328,7 @@ int16_t * voicefx_mix(int16_t * x, int n, float t0, const RFrame * fr, int nf, f
         return NULL;
     }
     *out_t0 = (float)(t0a - (double)(W / 2) / R);
-    plat_log("voicefx: %d s mixed in %.2f s: moved %+d ms, %d%% sung, level x%.1f", n / R,
+    plat_log("voicefx: %s, %d s mixed in %.2f s: moved %+d ms, %d%% sung, level x%.1f", styles[style].name, n / R,
              (plat_now_us() - start) / 1e6, (int)(best_e * 1000), hops ? voiced * 100 / hops : 0, makeup);
     return st;
 }
