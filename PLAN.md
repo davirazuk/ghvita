@@ -543,3 +543,4 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   the far bulb hides the chain's end, so trimming there left the top lamp "ropeless").
 - Tried: GHWT venue moods (VR_MOOD in venue_render): the moods.txt parts are stage props swapped per mood (a riser
   shell, an emblem), not lights; no lights pictures came out. Dropped.
+- v250: G.leap_t: the band's jump also fires when a chorus slams in with rock >= 0.5 (the pyro moment), 20 s apart at least (charts split choruses); Star Power sets it too. The old card spin stays for sheets without jump rows.

@@ -208,6 +208,7 @@ static struct {
     double party_t;                     // when the confetti last came down
     bool end_party;
     double sp_on_t;                     // when Star Power last went on: the band spins round with it
+    double leap_t;                      // when the band last leapt: Star Power going on, or a chorus slamming in
     double intro_end;                   // the camera's on the drummer for the count-in, and pulls back from here
     bool cam_snap;                      // the next frame puts the camera straight where it's going
     float fountain;                     // the Star Power sparklers along the stage front: 0 off .. 1 full
@@ -570,6 +571,12 @@ static bool update_section(void)
             G.pyro_t = G.t;
             G.strobe_t = G.t;
             G.cheer = 1;            // the band leaps as the chorus hits
+            if (G.t - G.leap_t > 20) {     // a chart splitting a chorus in parts: not a leap each
+                G.leap_t = G.t;
+#ifndef __vita__
+                plat_log("band: chorus leap at %.2f", G.t);
+#endif
+            }
             party();
         }
     }
@@ -1688,8 +1695,9 @@ static void draw_band(double beat)
         const float * rise = G.band_rise[r] ? G.band_rise[r] : r == 1 ? singer_rise : NULL;
         bool jumps = r && rows8 && rise && G.sp_on_t > 0;
         int jump_f = -1;
-        if (jumps && spun > 0 && spun < SINGER_JUMP_S) {
-            int k = (int)(spun / SINGER_JUMP_S * 16);
+        float leapt = (float)(G.t - G.leap_t) - (r == 1 ? 0.12f : r == 3 ? 0.24f : 0);
+        if (r && rows8 && rise && G.leap_t > 0 && leapt > 0 && leapt < SINGER_JUMP_S) {
+            int k = (int)(leapt / SINGER_JUMP_S * 16);
             k = k > 15 ? 15 : k;
             jump_f = 48 + k;
             // as high as the shot has room for above their heads (a third of it always shows)
@@ -2199,6 +2207,7 @@ static void reset_play(void)
     G.cam_tx = G.cam_ty = 0;
     G.focus = -1;
     G.sp_on_t = -100;
+    G.leap_t = -100;
     G.cam_snap = true;
     G.fountain = G.laser = 0;
     G.crash_t = -100;
@@ -3233,7 +3242,7 @@ static void activate_sp(void)
     if (!GF.on)
         rock_change(0.1f);              // GH: Star Power lifts the meter, the way to save a song from the red
     G.kick = 1;
-    G.sp_on_t = G.t;
+    G.sp_on_t = G.leap_t = G.t;
     G.sp_last_q = chart_quarters(G.chart, G.t);
     G.sp_flash = 1;
     G.pyro_t = G.t;
