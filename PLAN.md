@@ -562,14 +562,13 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   180 px/m, ink MaxFilter 7); draw_band/band_frame take cells from each sheet's width, so either size works. Play:
   strum held through a sustain, your misses aren't strummed, your whammy shakes your member on a ringing note.
   Not done: fret hand along the neck (needs 5x the frames).
-- band3d branch (not on main): the band as GHWT's 3D models. tools/band.py --3d (run with ~/.cache/ghv-venv/bin/python:
+- 3D band (v256, on main since 2026-11-15; was the band3d branch): the band as GHWT's 3D models. tools/band.py --3d (run with ~/.cache/ghv-venv/bin/python:
   pyfqmr + scipy) writes assets/band3d/<name>.b3d (decimated mesh, 3500 tris, drummer 5500, small parts whole, two bone
   weights) + alt/<name>.b3a + tex/ (<=256 px); the same posed frames as the sheets. src/band3d.c: a worker thread
   (core 1) skins into a back buffer, the main thread draws the front one through a modelview matrix (screen place,
   lean shear, depth slice per member), ink line = second pass along the normals, floor shadow = flattened pass.
   Option "Band look: 3D models / Pictures" (cfg.band_pictures). PC: 1.7 us a member on the main thread.
-  Not seen on a Vita yet. assets/band3d is kept in ~/.cache/ghv-work/band3d_assets off the branch (assets/ is
-  untracked and the VPK takes everything in it).
+  Not seen on a Vita yet. assets/band3d now lives in assets/ (copy kept in ~/.cache/ghv-work/band3d_assets).
 - v253 replays + singing (main). src/replay.c: every game_update frame is an RFrame (G.t, held/pressed lanes after
   lefty/touch, whammy bar+dw, SP request bit (select/cymbals/tilt; tilt() now returns the trigger), mic pitch+level
   when singing). game_update -> game_tick(pad, pressed, rf); in a replay game_update runs every frame whose t <= audio

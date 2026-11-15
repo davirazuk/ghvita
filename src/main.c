@@ -6041,6 +6041,8 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "The band is real 3D now: World Tour's own models playing World Tour's moves, with an ink outline and a shadow on the stage, in place of the flat pictures.",
+        "Options > Stage, Band look: 3D models or Pictures. If the game runs slower with the 3D band, pick Pictures.",
         "Singing with the Vita's speakers on: the mic heard the song too, and the replay played that copy back as a muddy echo. Now the game keeps what the speakers played and takes it back out of your singing after the song (a few seconds).",
         "Replay START menu, Your singing: Off, 50%, 75%, 100%, 150% or 200% (it's remembered), instead of just on or off.",
         "Fixed: on the Vita your singing wasn't being lined up with the beat in replays.",
