@@ -3,6 +3,7 @@
 #include <string.h>
 #include <curl/curl.h>
 #include "net.h"
+#include "audio.h"
 #include "plat.h"
 
 typedef struct {
@@ -26,6 +27,9 @@ static size_t on_data(char * data, size_t size, size_t n, void * user)
             s->write_failed = true;
             return 0;
         }
+        // a song's being played: the download goes on, but slowly (the card and the CPU are the song's)
+        if (audio_song_active())
+            plat_sleep_us(45000);
     } else {
         if (s->len + bytes + 1 > s->cap) {
             s->cap = (s->len + bytes + 1) * 2;

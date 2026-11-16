@@ -340,7 +340,7 @@ def thin(meshes, bones, budget, work, name, SMALL=400, PROP=0.85, HEAD=1.9, FLOO
     return out
 
 
-def pack_atlas(parts, tex_dir, name, out, ATLAS=ATLAS, dens=1.0, tag='_atlas', PAD=3):
+def pack_atlas(parts, tex_dir, name, out, ATLAS=ATLAS, dens=1.0, tag='_atlas', PAD=3, ALONE=None):
     # every mesh's texture into one picture (ATLAS square): a mesh whose texture places run past the texture's edge (a
     # mirrored body: -1..1) gets the texture laid out as many times as it reaches, so nothing needs to wrap. What reaches
     # further than twice each way stays a part of its own with a small wrapping texture
@@ -431,7 +431,7 @@ def pack_atlas(parts, tex_dir, name, out, ATLAS=ATLAS, dens=1.0, tag='_atlas', P
         if src:
             tname = (name + ('f_' if dens < 1 else '_') + os.path.basename(src)[:-4])[-31:]
             im = Image.open(src).convert('RGBA')
-            k = max(im.width, im.height) / (128 if dens >= 1 else 32)
+            k = max(im.width, im.height) / (ALONE or (128 if dens >= 1 else 32))
             if k > 1:
                 im = im.resize((max(1, int(im.width / k)), max(1, int(im.height / k))), Image.LANCZOS)
             im.save(os.path.join(out, 'tex', tname + '.png'), optimize=True)
@@ -733,4 +733,5 @@ def main():
             f.write('\n'.join(sorted(x[:-4] for x in os.listdir(OUT) if x.endswith('.png'))) + '\n')
 
 
-main()
+if __name__ == '__main__':
+    main()

@@ -191,7 +191,9 @@ static struct {
     int cine_shot, cine_who, cine_slot;
     double cine_t0, cine_len;
     float cine_side, cine_fade, cine_aim[3];
-    Tex * venue_blur;                   // the venue out of focus, behind a close shot
+    Tex * venue_blur;                   // the venue out of focus, behind a close shot (when it has no model)
+    Venue3D * venue3d;                  // the venue as a model: what's behind a close shot
+    float cine_at[3];                   // what the camera's on, in the stage's axes (from the floor under the drummer)
     const float (*marks)[3];
     // the camera's shots of the venue (tools/venues.py SHOTS): 0 the wide one, then stage left, stage right, low front
     Tex * shot_tex[VENUE_SHOTS], * shot_glow[VENUE_SHOTS];
@@ -422,6 +424,7 @@ void game_force_venue(const char * zone)
 static void pick_venue(const Song * song)
 {
     G.venue = G.venue_lights = G.venue_blur = NULL;
+    G.venue3d = NULL;
     G.cine_shot = -1;
     G.cine_slot = -1000;
     G.venue_title = NULL;
@@ -448,6 +451,21 @@ static void pick_venue(const Song * song)
     if (res_venue(zone, &G.venue, &G.venue_lights)) {
         G.venue_title = res_venue_title(zone);
         G.venue_blur = res_venue_blur(zone);
+        {
+            // the venue's model, kept while the songs are in the same place
+            static Venue3D * kept;
+            static char kept_zone[16];
+            if (cfg.band_pictures || cfg.stage_only) {
+                venue3d_free(kept);
+                kept = NULL;
+                kept_zone[0] = 0;
+            } else if (!kept || strcmp(kept_zone, zone) != 0) {
+                venue3d_free(kept);
+                kept = venue3d_load(zone);
+                snprintf(kept_zone, sizeof(kept_zone), "%s", zone);
+            }
+            G.venue3d = kept;
+        }
         G.marks = res_venue_marks(zone);
         G.shot_tex[0] = G.venue;
         G.shot_glow[0] = G.venue_lights;
@@ -1176,6 +1194,33 @@ static void run_cues(void)
 // line; then round the members, more often whoever plays your part, the singer's face while there's a line to sing,
 // now and then the whole stage (the venue's own picture); a solo stays on you; Star Power cuts to you from the floor;
 // the last chord goes back to the stage for the fireworks
+static void cine_mark(int r, float m[3]);
+
+// whether a shot's camera, at both ends of its move, sees who it's on past the venue
+static bool cine_clear(int shot, int who, float side)
+{
+    const CineShot * cs = &cine_shots[shot];
+    float at[3], rad = 3.14159265f / 180;
+    if (shot == CS_LINE) {
+        float g[3], b[3];
+        cine_mark(2, g);
+        cine_mark(3, b);
+        at[0] = (g[0] + b[0]) / 2;
+        at[1] = (g[1] + b[1]) / 2 + 1.2f;
+        at[2] = (g[2] + b[2]) / 2;
+    } else {
+        cine_mark(who, at);
+        at[1] += (cs->anchor == 0 ? (who ? 1.62f : 1.25f) : cs->anchor == 1 ? (who ? 1.32f : 1.0f) : (who ? 1.0f : 0.7f)) + cs->up;
+    }
+    for (int end = 0; end < 2; end++) {
+        float yaw = -side * (end ? cs->yaw1 : cs->yaw0) * rad, pitch = (end ? cs->pitch1 : cs->pitch0) * rad;
+        float eye[3] = {at[0] + cs->dist * sinf(yaw) * cosf(pitch), at[1] + cs->dist * sinf(pitch), at[2] + cs->dist * cosf(yaw) * cosf(pitch)};
+        if (venue3d_blocked(G.venue3d, eye, at))
+            return false;
+    }
+    return true;
+}
+
 static void cine_direct(double beat, bool solo)
 {
     bool any = false;
@@ -1256,12 +1301,33 @@ static void cine_direct(double beat, bool solo)
     if (shot == G.cine_shot && who == G.cine_who && shot >= 0 && slot != G.cine_slot && !solo)
         shot = shot == CS_MEDIUM ? CS_WAIST : CS_MEDIUM;        // never the same shot twice running
     G.cine_slot = slot;
+    float side = who == 2 ? 1 : who == 3 ? -1 : (slot & 1) ? 1 : -1;
+    if (shot >= 0 && G.venue3d) {
+        // the venue's really there: a camera with an amp or a wall between it and them tries the other side, then a
+        // plainer shot, then gives the cut to the whole stage
+        static const int8_t plainer[4] = {CS_MEDIUM, CS_WAIST, CS_FACE, CS_HERO};
+        int tries = 0, first = shot;
+        while (tries < 10 && !cine_clear(shot, who, side)) {
+            tries++;
+            if (tries & 1)
+                side = -side;
+            else if (first == CS_LINE || first == CS_DRUMS || who == 0) {
+                shot = -1;
+                break;
+            } else
+                shot = plainer[(tries / 2 - 1) & 3];
+            if (who == 1 && (shot == CS_WAIST))
+                shot = CS_MEDIUM;
+        }
+        if (tries >= 10)
+            shot = -1;
+    }
     if (shot != G.cine_shot || who != G.cine_who) {
         G.cine_shot = shot;
         G.cine_who = who;
         G.cine_t0 = beat;
         G.cine_len = per;
-        G.cine_side = who == 2 ? 1 : who == 3 ? -1 : (slot & 1) ? 1 : -1;
+        G.cine_side = side;
         G.cine_fade = 1;
 #ifndef __vita__
         plat_log("cine: shot %d on %d at %.2f", shot, who, G.t);
@@ -1280,7 +1346,7 @@ static CineCam cine_cam(double beat)
     float u = (float)((beat - G.cine_t0) / G.cine_len);
     u = u < 0 ? 0 : u > 1 ? 1 : u;
     u = u * (2 - u);                    // the move slows into its end
-    float side = G.cine_shot == CS_DRUMS || G.cine_shot == CS_LINE ? ((G.cine_slot & 1) ? 1 : -1) : G.cine_side;
+    float side = G.cine_side;
     float t = (float)G.t, rad = 3.14159265f / 180;
     CineCam c;
     c.ppm = SCREEN_H / (cs->vis0 + (cs->vis1 - cs->vis0) * u) * (1 + 0.012f * G.band_loud);
@@ -1297,10 +1363,73 @@ static CineCam cine_cam(double beat)
     return c;
 }
 
-// behind a close shot: the venue out of focus, sliding as the camera goes round, the rig's lights as soft discs
+// where a member stands on the stage (its axes: metres from the floor under the drummer): the venue's own marks, or a
+// plain stage's
+static void cine_mark(int r, float m[3])
+{
+    if (G.venue3d)
+        memcpy(m, venue3d_mark(G.venue3d, r), 12);
+    else {
+        m[0] = cine_line[r][0];
+        m[1] = cine_line[r][1];
+        m[2] = cine_line[r][2] + 2.4f;
+    }
+}
+
+// what the camera's looking at, on the stage: the one it's on (their head, chest or hips, followed loosely), or the
+// middle of the band for the shot of them all
+static void cine_target(float at[3])
+{
+    if (G.cine_shot == CS_LINE) {
+        float g[3], b[3], d[3];
+        cine_mark(2, g);
+        cine_mark(3, b);
+        cine_mark(0, d);
+        at[0] = (g[0] + b[0]) / 2;
+        at[1] = (g[1] + b[1]) / 2 + 1.2f;
+        at[2] = (g[2] + b[2]) / 2 * 0.7f + d[2] * 0.3f;
+    } else {
+        float m[3];
+        cine_mark(G.cine_who, m);
+        for (int c = 0; c < 3; c++)
+            at[c] = m[c] + G.cine_aim[c];
+    }
+}
+
+// behind a close shot: the venue itself round the band through the same camera (or, where there's no model of it, its
+// picture out of focus), and the rig's lights as soft discs
 static void draw_cine_back(double beat, float pulse)
 {
     CineCam c = cine_cam(beat);
+    if (G.venue3d) {
+        float at[3], lit[3];
+        cine_target(at);
+        Band3DDraw cam = {.cx = c.cx, .cy = c.cy, .ppm = c.ppm, .cam_yaw = c.yaw, .cam_pitch = c.pitch, .cam_dist = c.dist,
+                          .pos = {-at[0], -at[1], -at[2]}};
+        for (int i = 0; i < 3; i++)
+            lit[i] = fminf(1.25f, 0.55f + 0.6f * G.stage_col[i]);
+        // the night behind everything
+        gfx_rect_grad(0, 0, SCREEN_W, SCREEN_H, RGBA((int)(14 * lit[0]), (int)(12 * lit[1]), (int)(26 * lit[2]), 255), RGBA(4, 3, 8, 255));
+        band3d_begin(true);
+        venue3d_draw(G.venue3d, &cam, lit);
+        band3d_end();
+        gfx_2d();
+        if (!cfg.light_fx) {
+            // the rig's lamps as a lens sees them: a few soft discs high up, in the show's colours
+            const Sprite * dot = atlas_get(res.stage, "dot");
+            gfx_blend(BLEND_ADD);
+            for (int i = 0; i < 5; i++) {
+                uint32_t k = (uint32_t)(i * 2654435761u + G.cine_slot * 40503u);
+                float bx = (float)(k >> 8 & 1023) / 1023 * (SCREEN_W + 300) - 150 - c.yaw * 700;
+                float by = 10 + (float)(k >> 18 & 255) / 255 * 120 - c.pitch * 300;
+                float size = 60 + (float)(k >> 4 & 63) * 1.4f, tw = 0.5f + 0.5f * sinf((float)G.t * (1.3f + i * 0.37f) + i);
+                float a = 0.07f + 0.10f * tw + 0.12f * pulse * G.band_loud;
+                gfx_sprite(dot, bx - size / 2, by - size / 2, size, size, col3(i % 3 ? G.key_col : G.light_col, a));
+            }
+            gfx_blend(BLEND_ALPHA);
+        }
+        return;
+    }
     Tex * t = G.venue_blur ? G.venue_blur : G.venue;
     if (t) {
         const Sprite s = sprite_whole(t);
@@ -1941,6 +2070,8 @@ static void draw_band(double beat)
         // the stage under them: the venue's own floor out of focus, running off into the dark, and each one's shadow
         Band3DDraw cam = {.cx = cc.cx, .cy = cc.cy, .ppm = cc.ppm, .cam_yaw = cc.yaw, .cam_pitch = cc.pitch, .cam_dist = cc.dist};
         bool line = G.cine_shot == CS_LINE;
+        float at[3];
+        cine_target(at);
         float fy = line ? -1.2f : -G.cine_aim[1], near_z = fminf(cc.dist * 0.85f, 5), far_z = -9;
         float fl[3];
         for (int c = 0; c < 3; c++)
@@ -1950,12 +2081,15 @@ static void draw_band(double beat)
         const float fuv[4][2] = {{0.15f, 0.66f}, {0.85f, 0.66f}, {1, 0.99f}, {0, 0.99f}};
         const uint32_t fc[4] = {far_c, far_c, near_c, near_c};
         band3d_begin(false);
-        band3d_quad(&cam, fp, G.venue_blur ? G.venue_blur : G.venue, fuv, fc);
+        if (!G.venue3d)
+            band3d_quad(&cam, fp, G.venue_blur ? G.venue_blur : G.venue, fuv, fc);
         for (int r = 0; r < 4; r++) {
             if (!G.band[r] || !G.band3d[r] || (!line && r != G.cine_who))
                 continue;
-            float sx = line ? cine_line[r][0] : -G.cine_aim[0], sz = line ? cine_line[r][2] : -G.cine_aim[2];
-            float sy = fy + (line && r == 0 ? 0.0f : 0) + 0.01f, rad = r ? 0.55f : 1.5f, deep = r ? 0.42f : 1.1f;
+            float mk[3];
+            cine_mark(r, mk);
+            float sx = mk[0] - at[0], sz = mk[2] - at[2];
+            float sy = mk[1] - at[1] + 0.02f, rad = r ? 0.55f : 1.5f, deep = r ? 0.42f : 1.1f;
             const float sp[4][3] = {{sx - rad, sy, sz - deep}, {sx + rad, sy, sz - deep}, {sx + rad, sy, sz + deep}, {sx - rad, sy, sz + deep}};
             const float suv[4][2] = {{dot->u0, dot->v0}, {dot->u1, dot->v0}, {dot->u1, dot->v1}, {dot->u0, dot->v1}};
             uint32_t sc = RGBA(4, 2, 10, 170);
@@ -2155,9 +2289,12 @@ static void draw_band(double beat)
                 d3.cam_dist = cc.dist;
                 d3.far = G.cine_shot == CS_LINE;
                 if (G.cine_shot == CS_LINE) {
+                    float mk[3], at[3];
+                    cine_mark(r, mk);
+                    cine_target(at);
                     for (int c = 0; c < 3; c++)
-                        d3.pos[c] = cine_line[r][c];
-                    d3.pos[1] += up - 1.2f;
+                        d3.pos[c] = mk[c] - at[c];
+                    d3.pos[1] += up;
                     // the guitars turned a little in toward the middle
                     d3.yaw += r == 2 ? -0.3f : r == 3 ? 0.3f : 0;
                 } else {
@@ -2225,7 +2362,7 @@ static void draw_band(double beat)
             d3.tint = tint;
             (void)lean;
             (void)dip;
-            band3d_begin(true);
+            band3d_begin(!(cine && G.venue3d));        // in the venue's model they share its depth
             band3d_draw(m3, &d3);
             band3d_end();
             continue;

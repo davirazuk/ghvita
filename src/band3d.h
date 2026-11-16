@@ -45,3 +45,11 @@ void band3d_begin(bool clear);
 void band3d_quad(const Band3DDraw * cam, const float p[4][3], Tex * tex, const float uv[4][2], const uint32_t col[4]);  // before a member (clear: the depth buffer cleared)
 void band3d_draw(Band3D * m, const Band3DDraw * d);
 void band3d_end(void);
+
+// World Tour's venue as a model (assets/venue3d/<zone>.v3d), in the stage's axes: drawn through the band's camera
+typedef struct Venue3D Venue3D;
+Venue3D * venue3d_load(const char * zone);      // NULL: none
+void venue3d_free(Venue3D * v);
+const float * venue3d_mark(const Venue3D * v, int role);        // where a member stands: 0 drummer, 1 singer, 2 guitarist, 3 bassist
+void venue3d_draw(Venue3D * v, const Band3DDraw * cam, const float tint[3]);    // cam->pos: the stage's origin from the camera's target
+bool venue3d_blocked(const Venue3D * v, const float from[3], const float to[3]);   // the venue's in the way between two places

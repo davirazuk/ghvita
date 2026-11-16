@@ -594,6 +594,17 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   Vita too (ux0:data/ghvita/log.txt: ask for it). Clothes' colour: gfx_load_hue + cfg.band_hue[4] (turn_hue skips
   skin/wood and greys), res_band3d(role, name, hue). ROCKERS screen (main.c rockers_screen, S_ROCKERS) picks members
   and colours with a live model. HUD: star meter under the streak counter (star_progress).
+  v263 (user: "i hate the blur, i want the venue and band more like guitar hero"): the venue is a model behind the
+  close shots. tools/venue3d.py (venv python + Blender) -> assets/venue3d/<zone>.v3d "V3D1" + tex/: the .wtch's opaque
+  parts (blend/additive/soft ones and the "hide" list left out; a flat vivid texture = a video screen's stand-in, left
+  out), z flipped as venue_render.c does, turned to the stage's axes (origin under the drummer, y from the singer's
+  floor), thinned by distance (near 9500 / mid 4000 / far 3200 tris), textures within 2 tiles in one 1024 atlas, the
+  tiling ones each their own (<=128, REPEAT), everything quantized to 256 colours (76 MB -> 30 MB for 40 venues), a
+  light byte a vertex (dimmer away from the stage), the four marks in the header. band3d.c: venue3d_load/draw (colours
+  = light x the show's tint, remade when the tint moves), venue3d_blocked (ray against every triangle: the director's
+  cine_clear tries the other side / a plainer shot / the stage). camera() now applies pos for stage-axes things and has
+  a real depth range (0.25..400 m). The band shares the venue's depth buffer (no clear between members). The blurred
+  picture is only the fallback when a venue has no model. GHV_CINE skips cine_clear (a test can show a blocked view).
   KNOWN, needs the game's files (not on this PC since ~/mods/ghwt-re went): the .wtch export took only "Diffuse 0" of
   each material: no material colour, vertex colours, second passes or blend modes, so some guitars/shirts show the
   wrong layer (guitarist 1's guitar, guitarist 5's red panel). Re-export = ghwt-tools/export_wtch.py + NXTools + the

@@ -1,0 +1,164 @@
+#!/usr/bin/env python3
+"""World Tour's venues as models the game draws behind the 3D band's close shots (assets/venue3d/<zone>.v3d):
+the stage and what stands round it, thinned with Blender, its textures in one atlas (the ones that tile kept apart),
+turned to the stage's own axes (x to the audience's right, y up from the singer's floor, z toward the audience, the
+origin under the drummer) with the band's marks.
+  tools/venue3d.py <textures dir> <work dir> [zone ...]      (~/.cache/ghv-venv/bin/python; Blender as tools/band.py)
+File: "V3D1", parts, 4 marks x 3 floats (drummer, vocalist, guitarist, bassist); each part: texture name[32], vertex
+and triangle counts, wraps; vertices (3 floats place, 2 floats texture place, light u8 + 3 pad); u16 indices."""
+import glob, importlib.util, json, math, os, struct, subprocess, sys
+import numpy as np
+from PIL import Image
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+spec = importlib.util.spec_from_file_location('band', os.path.join(HERE, 'band.py'))
+band = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(band)
+wc = band.wc
+OUT = os.path.join(HERE, '..', 'assets', 'venue3d')
+NEAR_M, MID_M = 16.0, 70.0              # metres from the stage: what's near keeps its shape, the skyline hardly any
+BUDGET = {'near': 9500, 'mid': 4000, 'far': 3200}
+BEHIND = 11.0                           # nothing's seen this far out toward the audience: the camera's nearer
+ROLES = ['drummer', 'vocalist', 'guitarist', 'bassist']
+
+
+def texture_kind(path, cache={}):
+    # opaque, cutout (alpha either side of the test), or soft (haze, beams: not for the depth-tested stage)
+    if path not in cache:
+        px = np.asarray(Image.open(path).convert('RGBA').resize((32, 32))).astype(np.float32)
+        rgb = px[:, :, :3]
+        sat = (rgb.max(2) - rgb.min(2)).mean()
+        if rgb.reshape(-1, 3).std(0).mean() < 26 and sat > 110:
+            cache[path] = 'soft'        # one flat vivid colour: a video screen's stand-in. Left out (a screen that's off)
+            return cache[path]
+        a = px[:, :, 3] / 255
+        mid = ((a > 0.15) & (a < 0.85)).mean()
+        cache[path] = 'opaque' if (a > 0.85).mean() > 0.97 else 'soft' if mid > 0.3 or (a > 0.5).mean() < 0.12 else 'cutout'
+    return cache[path]
+
+
+def bake(zone, tex_dir, work):
+    name = 'venue_ghwt_' + zone
+    bones, meshes, clips = wc.read(os.path.join(tex_dir, name + '.wtch'))
+    j = json.load(open(os.path.join(tex_dir, name + '.json')))
+    blends = json.load(open(os.path.join(tex_dir, name + '.parts.json')))['blend']
+    hide = set(j.get('hide', []))
+    f = np.array(j.get('facing', [0, 0, -1]), float) * [1, 1, -1]
+    f[1] = 0
+    f /= np.linalg.norm(f)
+    marks = {r: np.array(j['marks'][r], float) * [1, 1, -1] for r in ROLES if r in j.get('marks', {})}
+    if 'drummer' not in marks:
+        print(zone, 'no marks')
+        return
+    origin = marks['drummer'].copy()
+    origin[1] = marks.get('vocalist', marks['drummer'])[1]
+
+    def to_stage(P):
+        d = np.asarray(P, float) - origin
+        return np.stack([d[:, 0] * f[2] - d[:, 2] * f[0], d[:, 1], d[:, 0] * f[0] + d[:, 2] * f[2]], 1)
+
+    keep = []
+    for i, (tex, V, T) in enumerate(meshes):
+        if i in hide or (i < len(blends) and blends[i] != 'opaque') or not tex or len(T) == 0:
+            continue
+        src = band.find_tex(tex_dir, tex)
+        if not src or texture_kind(src) == 'soft':
+            continue
+        P = to_stage(np.asarray(V['p'], float) * [1, 1, -1])    # Unity's left-handed space back to GHWT's, as the marks are
+        T = np.asarray(T)
+        # triangles wholly out behind where any camera stands, and the ones below the world: gone
+        ok = ~((P[T][:, :, 2] > BEHIND).all(1))
+        T = T[ok]
+        if len(T) == 0:
+            continue
+        c = P[np.unique(T)].mean(0)
+        dist = math.hypot(c[0], c[2] - 1.5)
+        keep.append((tex, P, np.asarray(V['uv'], np.float32), np.asarray(V['a'], np.float32), T, dist))
+    total = {k: 0 for k in BUDGET}
+    cls = []
+    for tex, P, uv, a, T, dist in keep:
+        k = 'near' if dist < NEAR_M else 'mid' if dist < MID_M else 'far'
+        cls.append(k)
+        if len(T) > 40:
+            total[k] += len(T)
+    ratio = {k: min(1.0, BUDGET[k] / max(total[k], 1)) for k in BUDGET}
+    arrs = {'count': len(keep)}
+    for i, (tex, P, uv, a, T, dist) in enumerate(keep):
+        used = np.unique(T)
+        remap = np.full(len(P), -1)
+        remap[used] = np.arange(len(used))
+        n = len(used)
+        arrs.update({'p%d' % i: P[used].astype(np.float32), 'uv%d' % i: uv[used], 'j%d' % i: np.zeros((n, 4), np.int32),
+                     'w%d' % i: np.tile(np.array([1, 0, 0, 0], np.float32), (n, 1)), 'a%d' % i: a[used],
+                     't%d' % i: remap[T].astype(np.int32), 'r%d' % i: 1.0 if len(T) <= 40 else max(ratio[cls[i]], 0.07)})
+    src, dst = os.path.join(work, zone + '_in.npz'), os.path.join(work, zone + '_out.npz')
+    np.savez(src, **arrs)
+    subprocess.run([band.BLENDER, '-b', '--python', os.path.join(HERE, 'band_decimate_bl.py'), '--', src, dst], check=True,
+                   stdout=subprocess.DEVNULL)
+    d = np.load(dst)
+    parts = []
+    for i, (tex, P, uv, a, T, dist) in enumerate(keep):
+        if len(d['t%d' % i]):
+            parts.append((tex, {k: d['%s%d' % (k, i)] for k in ('p', 'n', 'uv', 'j', 'w', 'a')}, d['t%d' % i], False))
+    os.remove(src)
+    os.remove(dst)
+    os.makedirs(os.path.join(OUT, 'tex'), exist_ok=True)
+    packed = band.pack_atlas(parts, tex_dir, zone, OUT, 1024, 0.16, '_atlas', 3, 128)
+    # the parts that kept a texture of their own: one part a texture
+    merged, order = {}, []
+    for tname, V, T, wraps in packed:
+        if tname not in merged:
+            merged[tname] = [[], [], [], 0, wraps]
+            order.append(tname)
+        m = merged[tname]
+        m[0].append(V['p'])
+        m[1].append(V['uv'])
+        m[2].append(np.asarray(T) + m[3])
+        m[3] += len(V['p'])
+    recs = []
+    for tname in order:
+        P, uv, T, n, wraps = merged[tname]
+        P, uv, T = np.concatenate(P), np.concatenate(uv), np.concatenate(T)
+        # 65535 vertices a part: split what's bigger
+        for s in range(0, len(T), 20000):
+            tt = T[s:s + 20000]
+            used = np.unique(tt)
+            remap = np.full(len(P), -1)
+            remap[used] = np.arange(len(used))
+            rec = np.zeros(len(used), np.dtype([('p', '<f4', 3), ('uv', '<f4', 2), ('l', 'u1', 4)]))
+            rec['p'] = P[used]
+            rec['uv'] = uv[used]
+            # the show lights the stage: what's further from it is darker
+            dist = np.hypot(P[used][:, 0], P[used][:, 2] - 1.5)
+            rec['l'][:, 0] = np.clip((1.12 - dist / 60) * 255, 70, 255)
+            recs.append((tname, rec, remap[tt].astype('<u2'), wraps))
+    with open(os.path.join(OUT, zone + '.v3d'), 'wb') as o:
+        o.write(b'V3D1' + struct.pack('<i', len(recs)))
+        for r in ROLES:
+            m = to_stage(marks.get(r, marks['drummer'])[None])[0]
+            o.write(struct.pack('<3f', *m))
+        for tname, rec, T, wraps in recs:
+            o.write(tname.encode().ljust(32, b'\0'))
+            o.write(struct.pack('<iii', len(rec), len(T), 1 if wraps else 0))
+            o.write(rec.tobytes())
+            o.write(T.tobytes())
+    # the atlas in 256 colours where nothing in it is see-through at the edges: a third of the download
+    print(zone, sum(len(r) for _, r, _, _ in recs), 'verts', sum(len(t) for _, _, t, _ in recs), 'tris (from',
+          sum(len(m[2]) for m in meshes), ')', len(recs), 'parts', os.path.getsize(os.path.join(OUT, zone + '.v3d')) // 1024, 'KB')
+
+
+def main():
+    tex_dir, work = sys.argv[1], sys.argv[2]
+    os.makedirs(work, exist_ok=True)
+    zones = sys.argv[3:] or sorted(os.path.basename(p)[11:-5] for p in glob.glob(os.path.join(tex_dir, 'venue_ghwt_*.wtch')))
+    for z in zones:
+        bake(z, tex_dir, work)
+    # every texture in 256 colours (alpha kept): a third of the download, and nothing a stage in the dark shows
+    for f in glob.glob(os.path.join(OUT, 'tex', '*.png')):
+        im = Image.open(f)
+        if im.mode != 'P':
+            im.convert('RGBA').quantize(256, method=Image.Quantize.FASTOCTREE, dither=Image.Dither.NONE).save(f, optimize=True)
+
+
+if __name__ == '__main__':
+    main()

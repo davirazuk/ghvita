@@ -19,6 +19,7 @@
 #include "rar.h"
 #include "songconv.h"
 #include "plat.h"
+#include "audio.h"
 #include "rbcon.h"
 #include "shrink.h"
 
@@ -2125,13 +2126,21 @@ static void run_job(Job * j)
     }
     Install in = {j, 0, ""};
     if (ok) {
-        // the unpacking and converting is one at a time (its decoders were built for it); the downloads keep
-        // moving beside it. A song being played doesn't hold this up either: what can't convert now stays as
-        // it came, and the library's shrink gets it another time
-        shrink_defer(true);
-        pthread_mutex_lock(&install_lock);
+        // the unpacking and converting is one at a time (its decoders were built for it). It waits for a song being
+        // played to end: unpacking and re-encoding audio beside a song took the card and the CPU from it (the game
+        // stuttered), and what it skipped converting to keep moving was left too heavy to play well. The file's
+        // down already; it's only the install that waits
         pthread_mutex_lock(&lock);
         j->state = JOB_INSTALLING;
+        snprintf(j->msg, sizeof(j->msg), "%s", audio_song_active() ? "waiting for the song to end" : "");
+        pthread_mutex_unlock(&lock);
+        while (audio_song_active() && !j->cancel)
+            plat_sleep_us(250000);
+        pthread_mutex_lock(&install_lock);
+        while (audio_song_active() && !j->cancel)
+            plat_sleep_us(250000);
+        pthread_mutex_lock(&lock);
+        j->msg[0] = 0;
         pthread_mutex_unlock(&lock);
         if (folder)
             install_tree(&in, xdir, 0);
@@ -2164,7 +2173,6 @@ static void run_job(Job * j)
     dl_remove_tree(xdir);
     remove(file);
     pthread_mutex_unlock(&install_lock);
-    shrink_defer(false);
     pthread_mutex_lock(&lock);
     if (in.added) {
         j->state = JOB_DONE;

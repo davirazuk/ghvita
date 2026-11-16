@@ -331,24 +331,24 @@ static void camera(const Band3DDraw * d, bool model, float mv[16], float CW[3][3
     for (int r = 0; r < 3; r++) {
         for (int c = 0; c < 3; c++)
             CW[r][c] = C[r][0] * M[0][c] + C[r][1] * M[1][c] + C[r][2] * M[2][c];
-        T[r] = model ? C[r][0] * d->pos[0] + C[r][1] * d->pos[1] + C[r][2] * d->pos[2] : 0;
+        T[r] = C[r][0] * d->pos[0] + C[r][1] * d->pos[1] + C[r][2] * d->pos[2];
     }
-    float k = d->ppm, D = d->cam_dist > 0.5f ? d->cam_dist : 0.5f, zs = 0.2f, w0 = 1 - T[2] / D;
+    // the depth: what's between 0.25 m and 400 m from the lens, as a perspective projection lays it out (the venue's far
+    // walls and a guitar's head by the lens in the same buffer); gfx_2d's ortho turns the sign
+    float k = d->ppm, D = d->cam_dist > 0.5f ? d->cam_dist : 0.5f, w0 = 1 - T[2] / D;
+    const float zn = 0.25f, zf = 400, za = (zf + zn) / (zf - zn), zb = 2 * zf * zn / (zf - zn);
     for (int c = 0; c < 3; c++) {
         mv[c * 4 + 0] = k * CW[0][c] - d->cx / D * CW[2][c];
         mv[c * 4 + 1] = -k * CW[1][c] - d->cy / D * CW[2][c];
-        mv[c * 4 + 2] = zs * CW[2][c];
+        mv[c * 4 + 2] = za / D * CW[2][c];
         mv[c * 4 + 3] = -CW[2][c] / D;
     }
     mv[12] = k * T[0] + d->cx * w0;
     mv[13] = -k * T[1] + d->cy * w0;
-    mv[14] = zs * T[2];
+    mv[14] = -za + zb / D + za / D * T[2];
     mv[15] = w0;
 }
 
-// the pose: the two frames blended (the fret hand's bones from its layers), the mesh skinned by them in the model's own
-// space (two bones a vertex, the normal turned by the main one), and each vertex's light: the key and its fill, the
-// fall from head to toe, the rim where the surface turns from the camera
 typedef struct {
     float M[256][12], LS[256][12];
     uint8_t layered[256];
@@ -589,4 +589,185 @@ void band3d_quad(const Band3DDraw * cam, const float p[4][3], Tex * tex, const f
     gfx_mesh_xf(mv, tex, &p[0][0], &uv[0][0], 8, col, idx, 6);
     gfx_mesh_depth(true);
     gfx_mesh_state(true, 0.45f);
+}
+
+// ---------------------------------------------------------------------------------------------------- the venue
+// World Tour's venue as a model (tools/venue3d.py, assets/venue3d/<zone>.v3d): in the stage's own axes, drawn through
+// the same camera as the band, behind it. Unlit as the game has it (its light is in its textures); the show's colour and
+// the dark away from the stage are a colour a vertex, made here from the light the tool left on each.
+typedef struct {
+    float p[3], uv[2];
+    uint8_t l[4];
+} V3Vert;
+
+typedef struct {
+    Tex * tex;
+    int vc, tc;
+    float * xyz, * uv;
+    uint8_t * light;
+    uint32_t * col;
+    uint16_t * idx;
+} V3Part;
+
+struct Venue3D {
+    int nparts;
+    V3Part * parts;
+    float marks[4][3];
+    float tint[3];              // what col was last made for
+};
+
+void venue3d_free(Venue3D * v)
+{
+    if (!v)
+        return;
+    for (int i = 0; v->parts && i < v->nparts; i++) {
+        tex_free(v->parts[i].tex);
+        free(v->parts[i].xyz);
+        free(v->parts[i].uv);
+        free(v->parts[i].light);
+        free(v->parts[i].col);
+        free(v->parts[i].idx);
+    }
+    free(v->parts);
+    free(v);
+}
+
+Venue3D * venue3d_load(const char * zone)
+{
+    char path[512];
+    long size = 0;
+    snprintf(path, sizeof(path), "%svenue3d/%s.v3d", plat_asset_dir(), zone);
+    uint8_t * d = read_all(path, &size);
+    if (!d)
+        return NULL;
+    Venue3D * v = calloc(1, sizeof(Venue3D));
+    bool ok = size >= 56 && memcmp(d, "V3D1", 4) == 0;
+    long at = 56;
+    int32_t np = 0;
+    if (ok) {
+        memcpy(&np, d + 4, 4);
+        memcpy(v->marks, d + 8, 48);
+        ok = np > 0 && np < 1024;
+    }
+    if (ok) {
+        v->parts = calloc((size_t)np, sizeof(V3Part));
+        v->nparts = np;
+    }
+    for (int i = 0; ok && i < np; i++) {
+        V3Part * p = &v->parts[i];
+        if (at + 44 > size) {
+            ok = false;
+            break;
+        }
+        char tex[33] = {0};
+        memcpy(tex, d + at, 32);
+        int32_t c[3];
+        memcpy(c, d + at + 32, 12);
+        at += 44;
+        p->vc = c[0];
+        p->tc = c[1];
+        size_t vb = (size_t)p->vc * sizeof(V3Vert), ib = (size_t)p->tc * 6;
+        if (p->vc <= 0 || p->vc > 65535 || p->tc <= 0 || at + (long)(vb + ib) > size) {
+            ok = false;
+            break;
+        }
+        p->xyz = malloc((size_t)p->vc * 12);
+        p->uv = malloc((size_t)p->vc * 8);
+        p->light = malloc((size_t)p->vc);
+        p->col = malloc((size_t)p->vc * 4);
+        p->idx = malloc(ib);
+        if (!p->xyz || !p->uv || !p->light || !p->col || !p->idx) {
+            ok = false;
+            break;
+        }
+        const V3Vert * src = (const V3Vert *)(d + at);
+        for (int k = 0; k < p->vc; k++) {
+            V3Vert one;
+            memcpy(&one, &src[k], sizeof(one));
+            memcpy(p->xyz + k * 3, one.p, 12);
+            memcpy(p->uv + k * 2, one.uv, 8);
+            p->light[k] = one.l[0];
+        }
+        memcpy(p->idx, d + at + vb, ib);
+        for (int k = 0; k < p->tc * 3; k++)
+            if (p->idx[k] >= p->vc)
+                p->idx[k] = 0;
+        at += (long)(vb + ib);
+        if (tex[0]) {
+            snprintf(path, sizeof(path), "%svenue3d/tex/%s.png", plat_asset_dir(), tex);
+            p->tex = tex_load(path, TEX_MIPMAP | (c[2] ? TEX_REPEAT : 0));
+        }
+    }
+    free(d);
+    if (!ok) {
+        plat_log("venue3d: %s is damaged", zone);
+        venue3d_free(v);
+        return NULL;
+    }
+    v->tint[0] = -1;
+    return v;
+}
+
+const float * venue3d_mark(const Venue3D * v, int role)
+{
+    return v->marks[role & 3];
+}
+
+// the venue through a camera: cam->pos is where the stage's origin (the floor under the drummer) is from what the
+// camera looks at. Writes the depth: the band drawn after it stands in it
+void venue3d_draw(Venue3D * v, const Band3DDraw * cam, const float tint[3])
+{
+    if (!v)
+        return;
+    if (fabsf(tint[0] - v->tint[0]) + fabsf(tint[1] - v->tint[1]) + fabsf(tint[2] - v->tint[2]) > 0.012f) {
+        // the show's colour moved: every vertex's colour again (its own light times it)
+        memcpy(v->tint, tint, sizeof(v->tint));
+        int t[3];
+        for (int c = 0; c < 3; c++)
+            t[c] = (int)(tint[c] * 256);
+        for (int i = 0; i < v->nparts; i++) {
+            V3Part * p = &v->parts[i];
+            for (int k = 0; k < p->vc; k++) {
+                int l = p->light[k], r = l * t[0] >> 8, g = l * t[1] >> 8, b = l * t[2] >> 8;
+                p->col[k] = (uint32_t)(r > 255 ? 255 : r) | (uint32_t)(g > 255 ? 255 : g) << 8 | (uint32_t)(b > 255 ? 255 : b) << 16 | 0xff000000u;
+            }
+        }
+    }
+    float mv[16], CW[3][3];
+    camera(cam, false, mv, CW);
+    for (int i = 0; i < v->nparts; i++) {
+        const V3Part * p = &v->parts[i];
+        gfx_mesh_xf(mv, p->tex, p->xyz, p->uv, 8, p->col, p->idx, p->tc * 3);
+    }
+}
+
+// whether the venue stands between two places on the stage (its axes): a camera there wouldn't see who it's on
+bool venue3d_blocked(const Venue3D * v, const float from[3], const float to[3])
+{
+    if (!v)
+        return false;
+    float d[3] = {to[0] - from[0], to[1] - from[1], to[2] - from[2]};
+    for (int i = 0; i < v->nparts; i++) {
+        const V3Part * p = &v->parts[i];
+        for (int t = 0; t < p->tc; t++) {
+            const float * a = p->xyz + p->idx[t * 3] * 3, * b = p->xyz + p->idx[t * 3 + 1] * 3, * c = p->xyz + p->idx[t * 3 + 2] * 3;
+            float e1[3] = {b[0] - a[0], b[1] - a[1], b[2] - a[2]}, e2[3] = {c[0] - a[0], c[1] - a[1], c[2] - a[2]};
+            float h[3] = {d[1] * e2[2] - d[2] * e2[1], d[2] * e2[0] - d[0] * e2[2], d[0] * e2[1] - d[1] * e2[0]};
+            float det = e1[0] * h[0] + e1[1] * h[1] + e1[2] * h[2];
+            if (det > -1e-7f && det < 1e-7f)
+                continue;
+            float f = 1 / det, s[3] = {from[0] - a[0], from[1] - a[1], from[2] - a[2]};
+            float u = f * (s[0] * h[0] + s[1] * h[1] + s[2] * h[2]);
+            if (u < 0 || u > 1)
+                continue;
+            float q[3] = {s[1] * e1[2] - s[2] * e1[1], s[2] * e1[0] - s[0] * e1[2], s[0] * e1[1] - s[1] * e1[0]};
+            float w = f * (d[0] * q[0] + d[1] * q[1] + d[2] * q[2]);
+            if (w < 0 || u + w > 1)
+                continue;
+            float k = f * (e2[0] * q[0] + e2[1] * q[1] + e2[2] * q[2]);
+            if (k > 0.02f && k < 0.9f)
+                return true;            // short of them: the last tenth is their own stand, their monitor
+        }
+    }
+    return false;
 }

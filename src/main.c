@@ -6177,9 +6177,11 @@ static void rockers_screen(void)
         const float uv[4][2] = {{glow->u0, glow->v0}, {glow->u1, glow->v0}, {glow->u1, glow->v1}, {glow->u0, glow->v1}};
         const uint32_t lc[4] = {RGBA(255, 190, 110, 90), RGBA(255, 190, 110, 90), RGBA(255, 190, 110, 90), RGBA(255, 190, 110, 90)};
         const uint32_t sc[4] = {RGBA(0, 0, 0, 200), RGBA(0, 0, 0, 200), RGBA(0, 0, 0, 200), RGBA(0, 0, 0, 200)};
+        Band3DDraw floor_cam = d;       // the floor's corners are given from the camera's target already
+        memset(floor_cam.pos, 0, sizeof(floor_cam.pos));
         band3d_begin(true);
-        band3d_quad(&d, fp, glow->tex, uv, lc);
-        band3d_quad(&d, sp, glow->tex, uv, sc);
+        band3d_quad(&floor_cam, fp, glow->tex, uv, lc);
+        band3d_quad(&floor_cam, sp, glow->tex, uv, sc);
         band3d_draw(model, &d);
         band3d_end();
         gfx_2d();
@@ -6194,6 +6196,10 @@ static void rockers_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "Downloads no longer drag a song down: a finished download waits for the song to end before it's unpacked and converted (that work beside a song made the game stutter, and songs it skipped converting played badly), and a download under way slows while you play.",
+        "The venue is real behind the band: World Tour's own stages as 3D models - amps, walls, banners, the floor they stand on - seen through the same camera as the close shots, in place of the blurred picture.",
+        "The camera checks its view: a shot with an amp or a wall between it and the player tries the other side, then another shot.",
+        "The band stands on each venue's own marks in the close shots, the drummer on his riser behind them.",
         "ROCKERS on the main menu: pick each member of the band and turn their clothes round the colour wheel, with whoever you're choosing playing in front of you.",
         "Fixed on the Vita: the 3D band lagged the camera - after every cut it stood in the wrong place for a moment, and it shook as the camera moved. The camera is the GPU's now, never a frame behind.",
         "The band is lighter on the Vita: a quarter of the triangles when they're small (the whole stage, the band in a line), and their shadows no longer draw them twice.",
