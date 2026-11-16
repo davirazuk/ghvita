@@ -3,6 +3,7 @@
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>
+#include "gfx.h"
 
 typedef struct Band3D Band3D;
 // the fret hand, from the chart: the frame's two groove steps (ga < 0: as the frames have it), where along the neck
@@ -14,7 +15,7 @@ typedef struct Band3DHands {
     float wc;
 } Band3DHands;
 
-Band3D * band3d_load(const char * name);        // assets/band3d/<name>.b3d (+ alt/<name>.b3a); NULL: none
+Band3D * band3d_load(const char * name, int hue);      // assets/band3d/<name>.b3d (+ far/, alt/); hue: their clothes' colour turned (degrees); NULL: none
 void band3d_free(Band3D * m);
 int band3d_frames(const Band3D * m, bool alt);  // 0: no such frames
 bool band3d_has_hands(const Band3D * m);        // the fret hand can be driven (a guitar, a bass)
@@ -34,13 +35,13 @@ typedef struct {
     float fill;                 // how much of the light reaches the unlit side (0 hard .. 1 flat)
     uint32_t tint;
     float rim[3], rim_k;        // the backlight's colour and how strong
-    bool ink;                   // the cut-out look's ink line round them
-    bool shadow;                // their shape lying on the floor in front of them
-    float floor_y;              // the shadow's: the floor on the screen
+    bool far;                   // small on the screen: the far body will do
     Band3DHands hands;          // the guitar's fret hand, driven by the chart (ga < 0: as the frames have it)
 } Band3DDraw;
 
 void band3d_anchor(const Band3D * m, const Band3DDraw * d, int which, float out[3]);    // 0 head, 1 chest, 2 pelvis
-void band3d_begin(bool clear);  // before a member (clear: the depth buffer cleared)
+void band3d_begin(bool clear);
+// a flat thing on the stage through a camera (the stage's axes, metres from the camera's target): the floor, a shadow
+void band3d_quad(const Band3DDraw * cam, const float p[4][3], Tex * tex, const float uv[4][2], const uint32_t col[4]);  // before a member (clear: the depth buffer cleared)
 void band3d_draw(Band3D * m, const Band3DDraw * d);
 void band3d_end(void);

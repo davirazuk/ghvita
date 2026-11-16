@@ -283,7 +283,7 @@ THREED = False          # --3d: the member as a model for the game to draw (asse
 TRI_BUDGET = 7000       # a member's triangles after thinning: a close shot shows them a screen tall
 DRUM_BUDGET = 12500     # the drummer's, the kit included
 ATLAS = 1024            # a member's textures packed into one picture this size: one draw for the lot
-HEAD_DENSITY, BODY_DENSITY = 1500.0, 620.0     # texels a metre the atlas gives a face, and the rest
+HEAD_DENSITY, BODY_DENSITY = 1700.0, 430.0     # texels a metre the atlas gives a face, and the rest
 BLENDER = os.path.expanduser('~/mods/refs/blender-4.2.3-linux-x64/blender')
 HEAD_WORDS = ('head', 'jaw', 'eye', 'brow', 'lip', 'cheek', 'hair', 'face', 'nose', 'ear', 'tongue', 'teeth', 'mouth')
 # the fret hand's layers (game.c drives them from the chart): each groove step with the hand at these frets of the
@@ -303,11 +303,10 @@ def find_tex(tex_dir, name):
     return None
 
 
-def thin(meshes, bones, budget, work, name):
+def thin(meshes, bones, budget, work, name, SMALL=400, PROP=0.85, HEAD=1.9, FLOOR=0.2):
     # Blender's Decimate on every mesh big enough to matter (it keeps texture places and bone weights through the
     # collapse); the small ones (sticks, the mic, cymbals, eyes) whole. A face keeps most of its triangles
     total = sum(len(T) for _, _, T in meshes)
-    SMALL = 400
     head, prop = [], []
     for tex, V, T in meshes:
         w = np.zeros(len(bones))
@@ -317,13 +316,13 @@ def thin(meshes, bones, budget, work, name):
         # the kit, a guitar, the mic and its stand: flat and thin things a collapse eats (a cymbal goes to nothing)
         pw = sum(w[i] for i, b in enumerate(bones) if any(k in b[0].lower() for k in ('control_root', 'guitar', 'mic_')))
         prop.append(pw > 0.4 * max(w.sum(), 1e-9))
-    kept = sum(len(T) * 0.85 for (_, _, T), p in zip(meshes, prop) if p and len(T) > 400)
+    kept = sum(len(T) * PROP for (_, _, T), p in zip(meshes, prop) if p and len(T) > SMALL)
     small = sum(len(T) for _, _, T in meshes if len(T) <= SMALL)
-    rest = total - small - kept / 0.85
-    ratio = min(1.0, max(budget - small - kept, rest * 0.2) / max(rest, 1))
+    rest = total - small - kept / PROP
+    ratio = min(1.0, max(budget - small - kept, rest * FLOOR) / max(rest, 1))
     arrs = {'count': len(meshes)}
     for i, (tex, V, T) in enumerate(meshes):
-        r = 1.0 if len(T) <= SMALL else 0.85 if prop[i] else min(1.0, ratio * 1.9) if head[i] else ratio * 0.9
+        r = 1.0 if len(T) <= SMALL else PROP if prop[i] else min(1.0, ratio * HEAD) if head[i] else ratio * 0.9
         arrs.update({'p%d' % i: np.asarray(V['p'], np.float32), 'uv%d' % i: np.asarray(V['uv'], np.float32),
                      'j%d' % i: np.asarray(V['j'], np.int32), 'w%d' % i: np.asarray(V['w'], np.float32),
                      'a%d' % i: np.asarray(V['a'], np.float32), 't%d' % i: np.asarray(T, np.int32), 'r%d' % i: r})
@@ -341,7 +340,7 @@ def thin(meshes, bones, budget, work, name):
     return out
 
 
-def pack_atlas(parts, tex_dir, name, out):
+def pack_atlas(parts, tex_dir, name, out, ATLAS=ATLAS, dens=1.0, tag='_atlas', PAD=3):
     # every mesh's texture into one picture (ATLAS square): a mesh whose texture places run past the texture's edge (a
     # mirrored body: -1..1) gets the texture laid out as many times as it reaches, so nothing needs to wrap. What reaches
     # further than twice each way stays a part of its own with a small wrapping texture
@@ -361,7 +360,7 @@ def pack_atlas(parts, tex_dir, name, out):
         f1, f2 = uv[T[:, 1]] - uv[T[:, 0]], uv[T[:, 2]] - uv[T[:, 0]]
         a2 = np.abs(f1[:, 0] * f2[:, 1] - f1[:, 1] * f2[:, 0]).sum() / 2
         m_per_uv = math.sqrt(a3 / max(a2, 1e-9))            # metres one whole texture covers on them
-        want = m_per_uv * (HEAD_DENSITY if head else BODY_DENSITY)
+        want = m_per_uv * (HEAD_DENSITY if head else BODY_DENSITY) * dens
         w = int(min(max(want, 8), im.width)) * nu
         h = int(min(max(want * im.height / im.width, 8), im.height)) * nv
         rects.append([pi, src, (u0, v0, nu, nv), w, h, (src, nu, nv)])
@@ -373,7 +372,6 @@ def pack_atlas(parts, tex_dir, name, out):
             shared[k][3], shared[k][4] = max(shared[k][3], r[3]), max(shared[k][4], r[4])
         else:
             shared[k] = [None, r[1], r[2], r[3], r[4]]
-    PAD = 3
     scale = 1.0
     while True:
         items = sorted(shared.items(), key=lambda kv: -kv[1][4])
@@ -408,7 +406,7 @@ def pack_atlas(parts, tex_dir, name, out):
         big = big.crop((tw - PAD, th - PAD, tw * (nu + 1) + PAD, th * (nv + 1) + PAD))
         atlas.paste(big, (x - PAD, y - PAD))
         place[k] = (x, y, tw * nu, th * nv)
-    aname = name + '_atlas'
+    aname = name + tag
     atlas.save(os.path.join(out, 'tex', aname + '.png'), optimize=True)
     # the atlas's meshes as one part, the rest as they were
     merged = {k: [] for k in ('p', 'n', 'uv', 'j', 'w', 'a')}
@@ -431,15 +429,47 @@ def pack_atlas(parts, tex_dir, name, out):
         src = find_tex(tex_dir, tex) if tex else None
         tname = ''
         if src:
-            tname = (name + '_' + os.path.basename(src)[:-4])[-31:]
+            tname = (name + ('f_' if dens < 1 else '_') + os.path.basename(src)[:-4])[-31:]
             im = Image.open(src).convert('RGBA')
-            k = max(im.width, im.height) / 128
+            k = max(im.width, im.height) / (128 if dens >= 1 else 32)
             if k > 1:
                 im = im.resize((max(1, int(im.width / k)), max(1, int(im.height / k))), Image.LANCZOS)
             im.save(os.path.join(out, 'tex', tname + '.png'), optimize=True)
         result.append((tname, V, T, True))          # True: wraps
     print(name, 'atlas', ATLAS, 'x', AH, 'scale %.2f' % scale, len(place), 'textures,', len(alone), 'parts alone')
     return result
+
+
+FAR_BUDGET, FAR_DRUM = 2200, 4200       # the far body's triangles: a member a fifth of the screen tall
+FAR_ATLAS = 256
+
+
+def part_records(parts, name):
+    recs = []
+    for tname, V, T, wraps in parts:
+        n = V['n'] / (np.linalg.norm(V['n'], axis=1, keepdims=True) + 1e-9)
+        w = V['w'] / np.maximum(V['w'].sum(1, keepdims=True), 1e-6)
+        wq = np.round(w * 255).astype(np.int32)
+        wq[:, 0] += 255 - wq.sum(1)
+        rec = np.zeros(len(V['p']), np.dtype([('p', '<f4', 3), ('n', '<f4', 3), ('uv', '<f4', 2), ('j', 'u1', 4), ('w', 'u1', 4)]))
+        rec['p'] = V['p']
+        rec['n'] = n
+        rec['uv'] = V['uv']
+        rec['j'][:, :2] = V['j']
+        rec['w'][:, :2] = np.clip(wq, 0, 255)
+        rec['w'][:, 3] = np.clip(np.round(V['a'] * 255), 0, 255)       # the vertex's own alpha
+        # 65535 vertices a part at most (u16 indices)
+        assert len(rec) < 65536, name
+        recs.append((tname, rec, np.asarray(T, '<u2'), wraps))
+    return recs
+
+
+def write_parts(o, recs):
+    for tname, rec, T1, wraps in recs:
+        o.write(tname.encode().ljust(32, b'\0'))
+        o.write(struct.pack('<iii', len(rec), len(T1), 1 if wraps else 0))
+        o.write(rec.tobytes())
+        o.write(T1.tobytes())
 
 
 def export3d(name, meshes, skins, c, alt, tex_dir, layers, bones, work):
@@ -470,29 +500,20 @@ def export3d(name, meshes, skins, c, alt, tex_dir, layers, bones, work):
     total = sum(len(T) for _, _, T in meshes)
     parts = thin(meshes, bones, DRUM_BUDGET if name.startswith('drummer') else TRI_BUDGET, work, name)
     parts = pack_atlas(parts, tex_dir, name, out)
-    recs = []
-    for tname, V, T, wraps in parts:
-        n = V['n'] / (np.linalg.norm(V['n'], axis=1, keepdims=True) + 1e-9)
-        w = V['w'] / np.maximum(V['w'].sum(1, keepdims=True), 1e-6)
-        wq = np.round(w * 255).astype(np.int32)
-        wq[:, 0] += 255 - wq.sum(1)
-        rec = np.zeros(len(V['p']), np.dtype([('p', '<f4', 3), ('n', '<f4', 3), ('uv', '<f4', 2), ('j', 'u1', 4), ('w', 'u1', 4)]))
-        rec['p'] = V['p']
-        rec['n'] = n
-        rec['uv'] = V['uv']
-        rec['j'][:, :2] = V['j']
-        rec['w'][:, :2] = np.clip(wq, 0, 255)
-        rec['w'][:, 3] = np.clip(np.round(V['a'] * 255), 0, 255)       # the vertex's own alpha
-        # 65535 vertices a part at most (u16 indices)
-        assert len(rec) < 65536, name
-        recs.append((tname, rec, np.asarray(T, '<u2'), wraps))
+    recs = part_records(parts, name)
+    # the far body: a quarter of the triangles and a small atlas with no mipmaps (an atlas's mipmaps run its pictures
+    # into each other, which is what a small figure would be drawn with)
+    drum = name.startswith('drummer')
+    far = thin(meshes, bones, FAR_DRUM if drum else FAR_BUDGET, work, name + '_far', 60, 0.3, 1.3, 0.07)
+    far = part_records(pack_atlas(far, tex_dir, name, out, FAR_ATLAS, 0.25, '_far', 2), name)
+    os.makedirs(os.path.join(out, 'far'), exist_ok=True)
+    with open(os.path.join(out, 'far', name + '.b3d'), 'wb') as o:
+        o.write(b'B3F1' + struct.pack('<i', len(far)))
+        write_parts(o, far)
+    print(name, 'far', sum(len(r) for _, r, _, _ in far), 'verts', sum(len(t) for _, _, t, _ in far), 'tris', len(far), 'parts')
     with open(os.path.join(out, name + '.b3d'), 'wb') as o:
         o.write(b'B3D2' + struct.pack('<iii', len(recs), S.shape[1], S.shape[0]) + lhead)
-        for tname, rec, T1, wraps in recs:
-            o.write(tname.encode().ljust(32, b'\0'))
-            o.write(struct.pack('<iii', len(rec), len(T1), 1 if wraps else 0))
-            o.write(rec.tobytes())
-            o.write(T1.tobytes())
+        write_parts(o, recs)
         o.write(S.tobytes())
         o.write(np.asarray(lb, '<i4').tobytes())
         o.write(L.tobytes())

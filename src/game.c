@@ -395,7 +395,7 @@ static void pick_band(const Song * song, uint32_t h)
         for (int j = 0; j < n; j++)
             if (cfg.band_pick[r][0] && strcmp(res.band_names[found[j]], cfg.band_pick[r]) == 0)
                 pick = found[j];            // chosen in the options
-        G.band3d[r] = cfg.band_pictures ? NULL : res_band3d(r, res.band_names[pick]);
+        G.band3d[r] = cfg.band_pictures ? NULL : res_band3d(r, res.band_names[pick], cfg.band_hue[r] * 40);
         if (G.band3d[r]) {
             // the model stands in for the pictures: their sheets (megabytes each) aren't loaded, only a sheet's
             // measures kept for the code that picks frames
@@ -1304,14 +1304,14 @@ static void draw_cine_back(double beat, float pulse)
     Tex * t = G.venue_blur ? G.venue_blur : G.venue;
     if (t) {
         const Sprite s = sprite_whole(t);
-        float z = 1.9f, w = SCREEN_W * z, h = SCREEN_H * z;
+        float z = 1.55f, w = SCREEN_W * z, h = SCREEN_H * z;
         // what's behind them slides the other way as the camera goes round, and rises as it looks up
-        float x = (SCREEN_W - w) / 2 - c.yaw * 420 + (c.cx - SCREEN_W / 2) * 0.25f, y = (SCREEN_H - h) / 2 - 60 - c.pitch * 500;
+        float x = (SCREEN_W - w) / 2 - c.yaw * 300 + (c.cx - SCREEN_W / 2) * 0.2f, y = (SCREEN_H - h) / 2 - 40 - c.pitch * 360;
         x = x > 0 ? 0 : x < SCREEN_W - w ? SCREEN_W - w : x;
         y = y > 0 ? 0 : y < SCREEN_H - h ? SCREEN_H - h : y;
         float lit[3];
         for (int i = 0; i < 3; i++)
-            lit[i] = fminf(1, 0.30f + 0.62f * G.stage_col[i]);
+            lit[i] = fminf(1, 0.42f + 0.62f * G.stage_col[i]);
         gfx_sprite(&s, x, y, w, h, col3(lit, 1));
     } else
         gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(10, 6, 18, 255));
@@ -1937,6 +1937,33 @@ static void draw_band(double beat)
         }
         gfx_sprite(dot, m[0] - w / 2, m[1] - h / 2, w, h, RGBA(6, 3, 12, 190));
     }
+    if (cine) {
+        // the stage under them: the venue's own floor out of focus, running off into the dark, and each one's shadow
+        Band3DDraw cam = {.cx = cc.cx, .cy = cc.cy, .ppm = cc.ppm, .cam_yaw = cc.yaw, .cam_pitch = cc.pitch, .cam_dist = cc.dist};
+        bool line = G.cine_shot == CS_LINE;
+        float fy = line ? -1.2f : -G.cine_aim[1], near_z = fminf(cc.dist * 0.85f, 5), far_z = -9;
+        float fl[3];
+        for (int c = 0; c < 3; c++)
+            fl[c] = fminf(1, 0.22f + 0.5f * G.stage_col[c]);
+        uint32_t near_c = col3(fl, 0.96f), far_c = col3(fl, 0);
+        const float fp[4][3] = {{-12, fy, far_z}, {12, fy, far_z}, {12, fy, near_z}, {-12, fy, near_z}};
+        const float fuv[4][2] = {{0.15f, 0.66f}, {0.85f, 0.66f}, {1, 0.99f}, {0, 0.99f}};
+        const uint32_t fc[4] = {far_c, far_c, near_c, near_c};
+        band3d_begin(false);
+        band3d_quad(&cam, fp, G.venue_blur ? G.venue_blur : G.venue, fuv, fc);
+        for (int r = 0; r < 4; r++) {
+            if (!G.band[r] || !G.band3d[r] || (!line && r != G.cine_who))
+                continue;
+            float sx = line ? cine_line[r][0] : -G.cine_aim[0], sz = line ? cine_line[r][2] : -G.cine_aim[2];
+            float sy = fy + (line && r == 0 ? 0.0f : 0) + 0.01f, rad = r ? 0.55f : 1.5f, deep = r ? 0.42f : 1.1f;
+            const float sp[4][3] = {{sx - rad, sy, sz - deep}, {sx + rad, sy, sz - deep}, {sx + rad, sy, sz + deep}, {sx - rad, sy, sz + deep}};
+            const float suv[4][2] = {{dot->u0, dot->v0}, {dot->u1, dot->v0}, {dot->u1, dot->v1}, {dot->u0, dot->v1}};
+            uint32_t sc = RGBA(4, 2, 10, 170);
+            const uint32_t scol[4] = {sc, sc, sc, sc};
+            band3d_quad(&cam, sp, dot->tex, suv, scol);
+        }
+        band3d_end();
+    }
     // lit from the rig above: heads in the show's colour, legs in shade (band_strip)
     for (int i = 0; i < 3; i++) {
         strip_top[i] = 1.12f + G.key_col[i] * 0.4f * (0.6f + 0.4f * G.band_loud);
@@ -2126,6 +2153,7 @@ static void draw_band(double beat)
                 d3.cam_yaw = cc.yaw;
                 d3.cam_pitch = cc.pitch;
                 d3.cam_dist = cc.dist;
+                d3.far = G.cine_shot == CS_LINE;
                 if (G.cine_shot == CS_LINE) {
                     for (int c = 0; c < 3; c++)
                         d3.pos[c] = cine_line[r][c];
@@ -2185,8 +2213,7 @@ static void draw_band(double beat)
                         d3.rim[c] = G.sp_active ? 0.35f + 0.65f * G.key_col[c] * 0.3f : G.key_col[c];
                     d3.rim_k = (strong ? 0.6f : 0.3f) * (0.6f + 0.6f * on_beat * G.band_loud);
                 }
-                d3.shadow = r != 1;
-                d3.floor_y = m[1];
+                d3.far = true;
                 if (r != 1) {
                     const Sprite * pool = atlas_get(res.stage, "dot");
                     float pw = cw * (m[2] / ppm) * 1.5f, ph = pw * 0.26f;
@@ -2199,24 +2226,7 @@ static void draw_band(double beat)
             (void)lean;
             (void)dip;
             band3d_begin(true);
-#ifndef __vita__
-            uint64_t t3 = (uint64_t)SDL_GetPerformanceCounter() / (SDL_GetPerformanceFrequency() / 1000000);
-#endif
             band3d_draw(m3, &d3);
-#ifndef __vita__
-            {
-                static uint64_t sum;
-                static int n3;
-                sum += (uint64_t)SDL_GetPerformanceCounter() / (SDL_GetPerformanceFrequency() / 1000000) - t3;
-                if (++n3 == 2000) {
-                    extern double band3d_skin_us;
-                    plat_log("band3d: %.1f us a member, %.1f of it skinning", sum / 2000.0, band3d_skin_us / 2000);
-                    band3d_skin_us = 0;
-                    sum = 0;
-                    n3 = 0;
-                }
-            }
-#endif
             band3d_end();
             continue;
         }
@@ -3105,6 +3115,20 @@ static int stars_for(double score)
         if (G.base_score > 0 && score >= cut[i] * G.base_score)
             s = i + 1;
     return s;
+}
+
+// the stars so far and how far along to the next (0..1), by the same cuts
+static float star_progress(int * stars)
+{
+    static const double guitar[6] = {0.06, 0.12, 0.2, 0.47, 0.78, 1.15}, bass[6] = {0.05, 0.1, 0.19, 0.47, 0.78, 1.15};
+    const double * cut = G.part_id == PART_BASS ? bass : guitar;
+    int s = stars_for(G.score);
+    *stars = s;
+    if (s >= 6 || G.base_score <= 0)
+        return 0;
+    double lo = s ? cut[s - 1] * G.base_score : 0, hi = cut[s] * G.base_score;
+    double f = hi > lo ? (G.score - lo) / (hi - lo) : 0;
+    return (float)(f < 0 ? 0 : f > 1 ? 1 : f);
 }
 
 float game_song_speed(void)
@@ -5696,6 +5720,32 @@ static void draw_hud(void)
                 gfx_blend(BLEND_ALPHA);
             }
             lcd("lcd_orange", G.streak, 5, cx0 + cnt_w - 16 * fx, cnt_y + 7 * fy + 1, 17, WHITE);
+        }
+        if (G.base_score > 0 && !G.vocal) {
+            // the stars as they're earned, under the counter (Guitar Hero 5's star meter): the next one fills from
+            // the bottom up, an earned one pops, all five turn gold at the sixth
+            static int had;
+            static double pop_t = -10;
+            int stars;
+            float frac = star_progress(&stars);
+            if (stars > had && G.t > 1)
+                pop_t = G.t;
+            had = stars;
+            const Sprite * on = atlas_get(res.hud, stars >= 6 ? "hud_star_gold" : "hud_star_on");
+            const Sprite * off = atlas_get(res.hud, "hud_star_off");
+            const float size = 24, gap = (bar_w - 5 * size) / 4, y0 = cnt_y + cnt_h + 5;
+            for (int i = 0; i < 5; i++) {
+                float x = bar_x + i * (size + gap), grow = 0;
+                if (i == stars - 1 && G.t - pop_t < 0.35 && G.t >= pop_t)
+                    grow = (float)(1 - (G.t - pop_t) / 0.35) * 8;
+                gfx_sprite(off, x, y0, size, size, RGBA(255, 255, 255, 150));
+                if (i < stars)
+                    gfx_sprite(on, x - grow / 2, y0 - grow / 2, size + grow, size + grow, WHITE);
+                else if (i == stars && frac > 0.02f) {
+                    float v = on->v1 - (on->v1 - on->v0) * frac;
+                    gfx_sprite_uv(on, x, y0 + size * (1 - frac), size, size * frac, on->u0, v, on->u1, on->v1, RGBA(255, 255, 255, 215));
+                }
+            }
         }
         // the dome: the metal first, its bright window set inside it with ROCK in black, the three sectors pale, the one
         // the needle's in lit up. The art's plinth under the rim is cropped: the dome sits on the score plate

@@ -165,10 +165,46 @@ static uint8_t * load_raw(const char * path, int * w, int * h)
     return px;
 }
 
+// The pictures loaded next have their colours turned round the wheel by this many degrees (0: as they are): a band
+// member's clothes in another colour. Skin (and wood) keeps its own: what's in skin's range of hue and not vivid is
+// left alone, and so is anything near grey
+static int load_hue;
+
+void gfx_load_hue(int degrees)
+{
+    load_hue = ((degrees % 360) + 360) % 360;
+}
+
+static void turn_hue(uint8_t * px, int w, int h)
+{
+    // a rotation about the grey axis (YIQ), as a 3 x 3 in 8.8 fixed point
+    float a = (float)load_hue * 3.14159265f / 180, c = cosf(a), s = sinf(a);
+    const float M[9] = {0.299f + 0.701f * c + 0.168f * s, 0.587f - 0.587f * c + 0.330f * s, 0.114f - 0.114f * c - 0.497f * s,
+                        0.299f - 0.299f * c - 0.328f * s, 0.587f + 0.413f * c + 0.035f * s, 0.114f - 0.114f * c + 0.292f * s,
+                        0.299f - 0.300f * c + 1.250f * s, 0.587f - 0.588f * c - 1.050f * s, 0.114f + 0.886f * c - 0.203f * s};
+    int m[9];
+    for (int i = 0; i < 9; i++)
+        m[i] = (int)(M[i] * 256);
+    for (size_t i = 0, n = (size_t)w * h; i < n; i++, px += 4) {
+        int r = px[0], g = px[1], b = px[2];
+        int hi = r > g ? (r > b ? r : b) : (g > b ? g : b), lo = r < g ? (r < b ? r : b) : (g < b ? g : b), sat = hi - lo;
+        if (sat < 24)
+            continue;                   // grey: nothing to turn
+        // skin and wood: red the most, then green, then blue, and not a vivid colour
+        if (r >= g && g >= b && sat * 100 < hi * 62 && (r - g) * 100 < sat * 72)
+            continue;
+        int nr = (m[0] * r + m[1] * g + m[2] * b) >> 8, ng = (m[3] * r + m[4] * g + m[5] * b) >> 8;
+        int nb = (m[6] * r + m[7] * g + m[8] * b) >> 8;
+        px[0] = (uint8_t)(nr < 0 ? 0 : nr > 255 ? 255 : nr);
+        px[1] = (uint8_t)(ng < 0 ? 0 : ng > 255 ? 255 : ng);
+        px[2] = (uint8_t)(nb < 0 ? 0 : nb > 255 ? 255 : nb);
+    }
+}
+
 Tex * tex_load(const char * path, int flags)
 {
     int w, h, n;
-    uint8_t * px = load_raw(path, &w, &h);
+    uint8_t * px = load_hue ? NULL : load_raw(path, &w, &h);
     if (px) {
         Tex * t = tex_rgba(px, w, h, flags);
         free(px);
@@ -179,6 +215,8 @@ Tex * tex_load(const char * path, int flags)
         plat_log("tex: can't load %s", path);
         return NULL;
     }
+    if (load_hue)
+        turn_hue(px, w, h);
     Tex * t = tex_rgba(px, w, h, flags);
     stbi_image_free(px);
     return t;
@@ -475,6 +513,15 @@ void gfx_mesh_state(bool depth_write, float alpha_ref)
 {
     glDepthMask(depth_write ? GL_TRUE : GL_FALSE);
     glAlphaFunc(GL_GREATER, alpha_ref);
+}
+
+// whether the meshes drawn next are tested against the depth buffer
+void gfx_mesh_depth(bool test)
+{
+    if (test)
+        glEnable(GL_DEPTH_TEST);
+    else
+        glDisable(GL_DEPTH_TEST);
 }
 
 // the same with a modelview matrix (column-major) taking xyz onto the screen

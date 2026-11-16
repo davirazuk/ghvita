@@ -584,7 +584,20 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   Fret hand: BandPart.fret_now (every note the part passes), hand_fret eased to lane * 0.75, chord 0/1 single by lane
   parity, 2 for chords. Tests: GHV_CINE="shot who" holds a shot, ~/.cache/ghv-work/scripts/cshot.sh, bshot.sh
   (GHV_FOCUS/GHV_ZOOM/GHV_VIEW). Reference footage of GH3/WT/5/Metallica/WoR: ~/.cache/ghv-work/ghref (grid.png).
-  Not seen on a Vita yet: frame rate with four models in LINE and the stage view is the question.
+  v262 (user on the Vita: "models messed up, glitches, stuttering"): the pose had the camera baked in (view rotation
+  on the CPU, a frame or several late on the Vita's slow worker) while cx/cy/ppm were this frame's: after every cut the
+  member stood in the old shot's place, and any camera move shook them. Now pose_model skins in MODEL space and
+  band3d_draw's matrix is the whole camera (camera()): only the animation can be late. Also: far/<name>.b3d ("B3F1",
+  ~2200 tris, 256 atlas without mipmaps: an atlas's mipmaps bleed) used when d.far (stage view, LINE); the mesh shadow
+  pass gone (blob shadows); the ink line's code gone; pose scratch per thread (main and worker shared statics);
+  band3d_quad for the floor and shadows in close shots; worker logs "band3d: N us a pose" every 3000 poses, on the
+  Vita too (ux0:data/ghvita/log.txt: ask for it). Clothes' colour: gfx_load_hue + cfg.band_hue[4] (turn_hue skips
+  skin/wood and greys), res_band3d(role, name, hue). ROCKERS screen (main.c rockers_screen, S_ROCKERS) picks members
+  and colours with a live model. HUD: star meter under the streak counter (star_progress).
+  KNOWN, needs the game's files (not on this PC since ~/mods/ghwt-re went): the .wtch export took only "Diffuse 0" of
+  each material: no material colour, vertex colours, second passes or blend modes, so some guitars/shirts show the
+  wrong layer (guitarist 1's guitar, guitarist 5's red panel). Re-export = ghwt-tools/export_wtch.py + NXTools + the
+  GHWT install.
 - v253 replays + singing (main). src/replay.c: every game_update frame is an RFrame (G.t, held/pressed lanes after
   lefty/touch, whammy bar+dw, SP request bit (select/cymbals/tilt; tilt() now returns the trigger), mic pitch+level
   when singing). game_update -> game_tick(pad, pressed, rf); in a replay game_update runs every frame whose t <= audio

@@ -31,12 +31,14 @@ typedef struct {
 
 void gfx_init(void);
 Tex * tex_load(const char * path, int flags);
+void gfx_load_hue(int degrees);     // pictures loaded next: their colours turned this far round the wheel (0: not)
 void gfx_mesh_begin(bool clear_depth);
 void gfx_mesh(Tex * t, const float * xyz, const float * uv, int uv_stride, const uint32_t * col, const uint16_t * idx,
               int n);
 void gfx_mesh_xf(const float mv[16], Tex * t, const float * xyz, const float * uv, int uv_stride, const uint32_t * col,
                  const uint16_t * idx, int n);
 void gfx_mesh_state(bool depth_write, float alpha_ref);
+void gfx_mesh_depth(bool test);
 void gfx_mesh_end(void);
 Tex * tex_load_paletted(const char * path, int flags);   // a 256-colour PNG kept paletted on the Vita (else as tex_load)
 Tex * tex_rgba(const uint8_t * px, int w, int h, int flags);

@@ -14,6 +14,7 @@
 #include "gfx.h"
 #include "font.h"
 #include "res.h"
+#include "band3d.h"
 #include "audio.h"
 #include "shrink.h"
 #include "songs.h"
@@ -32,7 +33,7 @@
 #include "update.h"
 
 enum { S_TITLE, S_MAIN, S_TOUR, S_SONGS, S_SELECT, S_PRACTICE, S_PLAY, S_PAUSE, S_RESUME, S_RESULTS, S_OPTIONS, S_CALIBRATE, S_EMPTY,
-       S_DOWNLOAD, S_UPDATE, S_CAREER, S_NEWS, S_PLAYERS, S_PLAYER_EDIT, S_FACEOFF, S_GIGDONE, S_REPLAYS };
+       S_DOWNLOAD, S_UPDATE, S_CAREER, S_NEWS, S_PLAYERS, S_PLAYER_EDIT, S_FACEOFF, S_GIGDONE, S_REPLAYS, S_ROCKERS };
 
 static int screen = S_TITLE;
 static double now_s, screen_t;
@@ -637,9 +638,9 @@ static void main_menu(void)
         return;
     }
     static const char * items[] = {"QUICKPLAY", "DAILY SONG", "WORLD TOUR", "DOWNLOAD SONGS", "OPTIONS", "CALIBRATE",
-                                   "CAREER", "EXIT"};
-    enum { M_QUICK, M_DAILY, M_TOUR, M_DOWNLOAD, M_OPTIONS, M_CALIBRATE, M_CAREER, M_EXIT };
-    const int n = 8;
+                                   "CAREER", "ROCKERS", "EXIT"};
+    enum { M_QUICK, M_DAILY, M_TOUR, M_DOWNLOAD, M_OPTIONS, M_CALIBRATE, M_CAREER, M_ROCKERS, M_EXIT };
+    const int n = 9;
     if (repeat & BTN_UP) {
         menu_index = (menu_index + n - 1) % n;
         ui_sound(SND_UI_MOVE);
@@ -685,6 +686,8 @@ static void main_menu(void)
             go(S_CALIBRATE);
         } else if (which == M_CAREER)
             go(S_CAREER);
+        else if (which == M_ROCKERS)
+            go(S_ROCKERS);
         else {
             plat_quit();
             exit(0);
@@ -707,11 +710,11 @@ static void main_menu(void)
     }
     if (res.logo)
         gfx_sprite(&(Sprite){res.logo, 0, 0, 1, 1, 512, 370}, 535, 46, 350, 253, WHITE);
-    panel(40, 108, 420, 340);
+    panel(40, 100, 420, 366);
     for (int i = 0; i < n; i++) {
-        float y = 118 + i * 41;
+        float y = 110 + i * 38.5f;
         if (i == menu_index)
-            select_bar(50, y - 5, 400, 42, WHITE);
+            select_bar(50, y - 5, 400, 41, WHITE);
         font_draw_shadow(res.title, items[i], 80, y, 34, i == menu_index ? RGBA(255, 230, 150, 255)
                                                                            : RGBA(200, 190, 180, 255), ALIGN_LEFT);
         if (i == M_DAILY && songs_count()) {
@@ -763,14 +766,14 @@ static void main_menu(void)
     }
     char t[200], now[160];
     snprintf(t, sizeof(t), "%d %s", songs_count(), songs_count() == 1 ? "song" : "songs");
-    font_draw_shadow(res.ui, t, 60, 456, 24, RGBA(220, 220, 220, 255), ALIGN_LEFT);
+    font_draw_shadow(res.ui, t, 60, 470, 22, RGBA(220, 220, 220, 255), ALIGN_LEFT);
     // which build this is: a card can quietly keep an old one
     font_draw(res.ui, "build " __DATE__ " " __TIME__, SCREEN_W - 20, 490, 16, RGBA(200, 200, 210, 200), ALIGN_RIGHT);
     status_corner();
     dl_now(now, sizeof(now));
     if (now[0]) {
         snprintf(t, sizeof(t), "Downloading %s", now);
-        font_draw_fit(res.ui, t, 190, 458, 20, 740, RGBA(140, 220, 255, 255), ALIGN_LEFT);
+        font_draw_fit(res.ui, t, 190, 472, 20, 740, RGBA(140, 220, 255, 255), ALIGN_LEFT);
     }
     draw_toast();
     char who[64];
@@ -6040,16 +6043,168 @@ static void career_screen(void)
 }
 
 // what changed in this build, shown once the first time it starts (or after an update)
+// ROCKERS: who's in the band and what they wear. Each of the four: one of World Tour's own, or a different one every
+// song; and their clothes turned round the colour wheel. Whoever the cursor's on stands on the right, playing
+static void rockers_screen(void)
+{
+    static const char * roles[4] = {"drummer", "vocalist", "guitarist", "bassist"};
+    static const char * titles[4] = {"DRUMMER", "SINGER", "GUITARIST", "BASSIST"};
+    static const int rows[4] = {1, 2, 3, 0};            // the order they're listed in: singer, guitarist, bassist, drummer
+    static int row;
+    int r = rows[row & 3], found[24], cnt = 0, cur = 0;
+    size_t len = strlen(roles[r]);
+    for (int i = 0; i < res.band_count && cnt < 24; i++)
+        if (strncmp(res.band_names[i], roles[r], len) == 0 && (!res.band_names[i][len] || res.band_names[i][len] == '_')) {
+            found[cnt++] = i;
+            if (strcmp(res.band_names[i], cfg.band_pick[r]) == 0)
+                cur = cnt;
+        }
+    if (repeat & BTN_UP) {
+        row = (row + 3) % 4;
+        ui_sound(SND_UI_MOVE);
+    }
+    if (repeat & BTN_DOWN) {
+        row = (row + 1) % 4;
+        ui_sound(SND_UI_MOVE);
+    }
+    int step = (repeat & BTN_RIGHT ? 1 : 0) - (repeat & BTN_LEFT ? 1 : 0);
+    if (step && cnt) {
+        cur = (cur + step + cnt + 1) % (cnt + 1);
+        snprintf(cfg.band_pick[r], sizeof(cfg.band_pick[r]), "%s", cur ? res.band_names[found[cur - 1]] : "");
+        ui_sound(SND_UI_MOVE);
+    }
+    int turn = (pressed & BTN_R ? 1 : 0) - (pressed & BTN_L ? 1 : 0);
+    if (turn) {
+        cfg.band_hue[r] = (cfg.band_hue[r] + turn + 9) % 9;
+        ui_sound(SND_UI_MOVE);
+    }
+    if (pressed & BTN_TRIANGLE) {
+        cfg.band_hue[r] = 0;
+        cfg.band_pick[r][0] = 0;
+        ui_sound(SND_UI_SELECT);
+    }
+    if (pressed & BTN_CIRCLE) {
+        ui_sound(SND_UI_BACK);
+        config_save();
+        go(S_MAIN);
+        return;
+    }
+    menu_music();
+    gfx_begin(0, 0, 0);
+    gfx_2d();
+    draw_background(res.bg_menu, WHITE);
+    banner("ROCKERS");
+    panel(40, 104, 470, 356);
+    for (int i = 0; i < 4; i++) {
+        int rr = rows[i];
+        float y = 118 + i * 84;
+        if (i == row)
+            select_bar(50, y - 6, 450, 78, WHITE);
+        font_draw_shadow(res.title, titles[rr], 76, y, 34, i == row ? RGBA(255, 230, 150, 255) : RGBA(200, 190, 180, 255), ALIGN_LEFT);
+        char who[48] = "A different one each song";
+        if (cfg.band_pick[rr][0]) {
+            const char * us = strchr(cfg.band_pick[rr], '_');
+            snprintf(who, sizeof(who), "World Tour's %s %d", rr == 0 ? "drummer" : rr == 1 ? "singer" : rr == 2 ? "guitarist" : "bassist",
+                     us ? atoi(us + 1) : 1);
+        }
+        font_draw(res.ui, who, 78, y + 38, 20, RGBA(225, 225, 230, 255), ALIGN_LEFT);
+        // their clothes' colour: the wheel in nine steps, the one worn ringed
+        for (int k = 0; k < 9; k++) {
+            float a = (float)k * 40 * 3.14159265f / 180, x = 330 + k * 18.0f, sy = y + 44;
+            int cr = (int)(150 + 105 * cosf(a)), cg = (int)(150 + 105 * cosf(a - 2.094f)), cb = (int)(150 + 105 * cosf(a + 2.094f));
+            if (k == cfg.band_hue[rr])
+                gfx_rect(x - 2, sy - 2, 18, 18, WHITE);
+            gfx_rect(x, sy, 14, 14, k ? RGBA(cr, cg, cb, 255) : RGBA(90, 90, 96, 255));
+        }
+    }
+    // whoever the cursor's on, as they'll be on the stage: turning slowly, playing World Tour's loop
+    const char * name = cur ? res.band_names[found[cur - 1]] : cnt ? res.band_names[found[(int)(now_s / 4) % cnt]] : NULL;
+    Band3D * model = name ? res_band3d(r, name, cfg.band_hue[r] * 40) : NULL;
+    if (model) {
+        double beats = now_s * 100 / 60;
+        float phase = (float)(fmod(beats, 4) / 4), t = (float)now_s;
+        Band3DDraw d = {0};
+        d.hands.ga = -1;
+        if (r >= 2) {
+            int st = (int)(phase * 16) % 16, hit = fmod(beats, 1) < 0.18 ? 1 : fmod(beats, 1) < 0.36 ? 2 : 0;
+            d.fa = st * 3 + hit;
+            d.fb = ((st + 1) % 16) * 3 + hit;
+            d.wb = (float)fmod(phase * 16, 1);
+            if (band3d_has_hands(model)) {
+                d.hands.ga = st;
+                d.hands.gb = (st + 1) % 16;
+                d.hands.fret = 1.5f + 1.4f * sinf(t * 0.9f);
+                d.hands.ca = 0;
+                d.hands.cb = 2;
+                d.hands.wc = 0.5f + 0.5f * sinf(t * 1.7f);
+            }
+        } else if (r == 1) {
+            d.fa = (int)(phase * 32) % 32;
+            d.fb = (d.fa + 1) % 32;
+            d.wb = (float)fmod(phase * 32, 1);
+        } else {
+            float p = (float)fmod(beats / 2, 1) * 8;
+            d.fa = 48 + (int)p % 8;
+            d.fb = 48 + ((int)p + 1) % 8;
+            d.wb = p - (float)(int)p;
+        }
+        d.pos[1] = r ? -1.02f : -0.75f;
+        d.yaw = sinf(t * 0.45f) * 0.9f;
+        d.cam_pitch = 0.07f;
+        d.cam_dist = 6;
+        d.cx = 730;
+        d.cy = 268;
+        d.ppm = r ? 196 : 140;
+        d.key[0] = -0.5f;
+        d.key[1] = 0.6f;
+        d.key[2] = 0.65f;
+        d.fill = 0.45f;
+        for (int c = 0; c < 3; c++) {
+            d.top[c] = 1.12f;
+            d.bot[c] = 0.88f;
+        }
+        d.tint = WHITE;
+        d.rim[0] = 1.0f;
+        d.rim[1] = 0.62f;
+        d.rim[2] = 0.25f;
+        d.rim_k = 0.5f;
+        // a pool of light and their shadow on the floor under them
+        const Sprite * glow = atlas_get(res.game, "glow");
+        float fy = d.pos[1], rad = r ? 0.75f : 1.6f;
+        const float fp[4][3] = {{-rad * 1.6f, fy, -rad}, {rad * 1.6f, fy, -rad}, {rad * 1.6f, fy, rad}, {-rad * 1.6f, fy, rad}};
+        const float sp[4][3] = {{-rad * 0.8f, fy + 0.01f, -rad * 0.5f}, {rad * 0.8f, fy + 0.01f, -rad * 0.5f},
+                                {rad * 0.8f, fy + 0.01f, rad * 0.5f}, {-rad * 0.8f, fy + 0.01f, rad * 0.5f}};
+        const float uv[4][2] = {{glow->u0, glow->v0}, {glow->u1, glow->v0}, {glow->u1, glow->v1}, {glow->u0, glow->v1}};
+        const uint32_t lc[4] = {RGBA(255, 190, 110, 90), RGBA(255, 190, 110, 90), RGBA(255, 190, 110, 90), RGBA(255, 190, 110, 90)};
+        const uint32_t sc[4] = {RGBA(0, 0, 0, 200), RGBA(0, 0, 0, 200), RGBA(0, 0, 0, 200), RGBA(0, 0, 0, 200)};
+        band3d_begin(true);
+        band3d_quad(&d, fp, glow->tex, uv, lc);
+        band3d_quad(&d, sp, glow->tex, uv, sc);
+        band3d_draw(model, &d);
+        band3d_end();
+        gfx_2d();
+    }
+    static const char * help[] = {"btn_up", "Member", "btn_left", "Who", "btn_l", "", "btn_r", "Clothes' colour",
+                                  "btn_triangle", "Reset", "btn_circle", "Back"};
+    help_bar(help, 12);
+    draw_toast();
+    gfx_end();
+}
+
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "ROCKERS on the main menu: pick each member of the band and turn their clothes round the colour wheel, with whoever you're choosing playing in front of you.",
+        "Fixed on the Vita: the 3D band lagged the camera - after every cut it stood in the wrong place for a moment, and it shook as the camera moved. The camera is the GPU's now, never a frame behind.",
+        "The band is lighter on the Vita: a quarter of the triangles when they're small (the whole stage, the band in a line), and their shadows no longer draw them twice.",
+        "Close shots have a stage under them: the venue's floor running off into the dark, a shadow under each member.",
         "The band is filmed the way Guitar Hero films it: the camera cuts every bar or two between close shots of the members - a face over the top of the board, chest up beside it, from the floor, along the guitar's neck, the kit from above, the whole band in a line - and the venue's whole stage now and then.",
         "The guitarist's and bassist's fret hand plays the notes: down by the nut for green, up by the body for orange, one finger for a note, a barre for a chord.",
         "A solo keeps the camera on you; Star Power cuts to you from the floor; the count-in has the whole band.",
         "The 3D band redone: twice the detail, their real faces and clothes (most had come out as flat colour), lit by a white spot with the show's colour on their edges.",
         "Options > Stage, Band camera: Close-ups or Whole stage (the band on the venue's picture, as before).",
         "With the 3D band on, the old band pictures are no longer loaded: tens of megabytes of memory back.",
-        "The band is real 3D now: World Tour's own models playing World Tour's moves, with an ink outline and a shadow on the stage, in place of the flat pictures.",
+        "The band is real 3D: World Tour's own models playing World Tour's moves, in place of the flat pictures.",
         "Options > Stage, Band look: 3D models or Pictures. If the game runs slower with the 3D band, pick Pictures.",
         "Singing with the Vita's speakers on: the mic heard the song too, and the replay played that copy back as a muddy echo. Now the game keeps what the speakers played and takes it back out of your singing after the song (a few seconds).",
         "Replay START menu, Your singing: Off, 50%, 75%, 100%, 150% or 200% (it's remembered), instead of just on or off.",
@@ -6149,9 +6304,9 @@ static void news_screen(void)
     for (int i = 0; i < n; i++) {
         float h = 0;
         if (y > 100 && y < 470)
-            h = draw_wrapped(lines[i], 170, y, 18, 620, 2, RGBA(230, 230, 235, 255));
+            h = draw_wrapped(lines[i], 170, y, 18, 620, 4, RGBA(230, 230, 235, 255));
         else
-            h = 40;
+            h = 60;
         y += h + 11;
         bottom = y + scroll;
     }
@@ -6386,6 +6541,7 @@ int main(void)
         case S_FACEOFF: faceoff_screen(); break;
         case S_GIGDONE: gigdone_screen(); break;
         case S_NEWS: news_screen(); break;
+        case S_ROCKERS: rockers_screen(); break;
         case S_PLAY: play_screen(); break;
         case S_PAUSE: pause_screen(); break;
         case S_RESUME: resume_screen(); break;

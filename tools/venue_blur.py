@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Each venue's picture out of focus (assets/venues/<zone>_blur.jpg, 240 x 136): what's behind the 3D band in a close shot.
+"""Each venue's picture out of focus (assets/venues/<zone>_blur.jpg, 480 x 272: soft, but the place can still be told): what's behind the 3D band in a close shot.
 venue_blur.py [assets/venues]"""
 import glob, os, sys
 from PIL import Image, ImageFilter
@@ -16,7 +16,7 @@ for p in sorted(glob.glob(os.path.join(d, '*.jpg'))):
         g = Image.open(glow).convert('RGB').resize(im.size)
         from PIL import ImageChops
         im = ImageChops.add(im, Image.eval(g, lambda v: v * 6 // 10))
-    im = im.resize((240, 136), Image.LANCZOS).filter(ImageFilter.GaussianBlur(4.5))
+    im = im.resize((480, 272), Image.LANCZOS).filter(ImageFilter.GaussianBlur(3.2))
     im.save(os.path.join(d, b + '_blur.jpg'), quality=82)
     n += 1
 print(n, 'venues')

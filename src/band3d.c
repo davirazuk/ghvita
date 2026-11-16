@@ -1,12 +1,18 @@
 // The band as World Tour's models: see band3d.h. The files are tools/band.py --3d's:
 //   <name>.b3d  "B3D2", parts, bones, frames, layer bones, layer grooves, frets, chords; then each part: texture
 //               name[32], vertex and triangle counts, wraps; vertices (B3Vert), u16 indices; then frames x bones skin
-//               matrices (3 x 4 floats, rows); the layer's bone numbers; grooves x frets x chords x layer bones matrices
+//               matrices (3 x 4 floats, rows); the layer's bone numbers; grooves x frets x chords x layer bones
+//               matrices; the camera's anchors
+//   far/<name>.b3d  "B3F1", parts, then the parts: the same body in a quarter of the triangles with a small texture,
+//               for when they're small on the screen (the whole stage, the band in a line)
 //   alt/<name>.b3a  "B3A2", bones, frames, the four layer counts, the matrices, the layer's bones and matrices
 // Model space: metres, y up from the feet, the loop's centre at x = z = 0, facing -z (the audience).
 // The layers are the fret hand apart from the body (the arm, the hand, the fingers): at each step of the groove, the
-// hand at each of a few places along the neck in each of a few chord shapes. band3d_draw blends the ones the chart
-// asks for over the frame's own arm.
+// hand at each of a few places along the neck in each of a few chord shapes. pose_model blends the ones the chart asks
+// for over the frame's own arm.
+// The CPU skins in the model's own space (a worker thread, a frame or so behind: only the animation is late); the
+// camera is all in the matrix the GPU is given at the draw, so a cut or a camera move is never a frame behind the
+// picture it's drawn over.
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,17 +20,12 @@
 #include "band3d.h"
 #include "gfx.h"
 #include "plat.h"
-#ifndef __vita__
-#include <SDL2/SDL.h>
-double band3d_skin_us;     // tests: time spent skinning (not drawing)
-static uint64_t now_us(void) { return SDL_GetPerformanceCounter() * 1000000 / SDL_GetPerformanceFrequency(); }
-#endif
 
-#define CELL_H 2.13f            // what a sheet's lean and dip were measured against (a cell's height in metres)
+#define CELL_H 2.13f            // the light's fall from head to toe is over this many metres
 
 typedef struct {
     float p[3], n[3], uv[2];
-    uint8_t j[4], w[4];
+    uint8_t j[4], w[4];         // two bones and their weights; w[3] the vertex's own alpha
 } B3Vert;
 
 typedef struct {
@@ -35,17 +36,22 @@ typedef struct {
     uint16_t * idx;
 } B3Part;
 
+typedef struct {
+    B3Part * parts;
+    int nparts, total_v;
+} B3Mesh;
+
 struct Band3D {
-    int nparts, nbones, nframes, alt_frames, maxv, total_v;
-    // two posings (pose_model): positions, the ink line's (3 floats a vertex) and colours. The worker thread fills the
-    // back one while the front one's drawn
-    float * pose[2], * ink[2];
+    int nbones, nframes, alt_frames;
+    B3Mesh lod[2];              // the whole body, and the far one (none: the whole one always)
+    // two posings (pose_model): positions (3 floats a vertex) and colours, of the mesh in posed_lod. The worker
+    // thread fills the back one while the front one's drawn
+    float * pose[2];
     uint32_t * col[2];
-    float view_t[2][3];         // where each posing put the feet, as the camera sees it
+    int posed_lod[2];
     int front;
     bool posed;                 // the front one has something in it
     int job;                    // the worker's slot posing it, -1 none
-    B3Part * parts;
     float * mats, * alt;        // frames x bones x 12
     // the fret hand's layers: [0] the main loop's, [1] the wilder one's
     int lbones, lg, lp, lc;
@@ -55,11 +61,7 @@ struct Band3D {
     float anchor_at[3][3];
 };
 
-static uint32_t * ink_col, * shadow_col;
-static int buf_cap;
-
 void band3d_release(Band3D * m);
-static const float * frame_mats(const Band3D * m, bool alt, int f);
 
 static void * read_all(const char * path, long * size)
 {
@@ -76,6 +78,72 @@ static void * read_all(const char * path, long * size)
     }
     fclose(f);
     return d;
+}
+
+// a file's parts from `at` on into a mesh; where they end, or -1: damaged
+static long read_parts(B3Mesh * mesh, int nparts, int nbones, const uint8_t * d, long size, long at, bool mipmaps)
+{
+    char path[512];
+    if (nparts <= 0 || nparts >= 256)
+        return -1;
+    mesh->parts = calloc((size_t)nparts, sizeof(B3Part));
+    if (!mesh->parts)
+        return -1;
+    mesh->nparts = nparts;
+    for (int i = 0; i < nparts; i++) {
+        B3Part * p = &mesh->parts[i];
+        if (at + 44 > size)
+            return -1;
+        char tex[33] = {0};
+        memcpy(tex, d + at, 32);
+        int32_t c[3];
+        memcpy(c, d + at + 32, 12);
+        at += 44;
+        p->vc = c[0];
+        p->tc = c[1];
+        size_t vb = (size_t)p->vc * sizeof(B3Vert), ib = (size_t)p->tc * 6;
+        if (p->vc <= 0 || p->vc > 65535 || p->tc <= 0 || at + (long)(vb + ib) > size)
+            return -1;
+        p->v = malloc(vb);
+        p->idx = malloc(ib);
+        p->uv = malloc((size_t)p->vc * 8);
+        if (!p->v || !p->idx || !p->uv)
+            return -1;
+        memcpy(p->v, d + at, vb);
+        for (int k = 0; k < p->vc; k++) {
+            p->uv[k * 2] = p->v[k].uv[0];
+            p->uv[k * 2 + 1] = p->v[k].uv[1];
+        }
+        memcpy(p->idx, d + at + vb, ib);
+        at += (long)(vb + ib);
+        for (int k = 0; k < p->vc; k++)
+            for (int j = 0; j < 2; j++)
+                if (p->v[k].j[j] >= nbones) {
+                    p->v[k].j[j] = 0;
+                    p->v[k].w[j] = j ? 0 : p->v[k].w[j];
+                }
+        for (int k = 0; k < p->tc * 3; k++)
+            if (p->idx[k] >= p->vc)
+                p->idx[k] = 0;
+        if (tex[0]) {
+            snprintf(path, sizeof(path), "%sband3d/tex/%s.png", plat_asset_dir(), tex);
+            p->tex = tex_load(path, (mipmaps ? TEX_MIPMAP : 0) | (c[2] ? TEX_REPEAT : 0));
+        }
+        mesh->total_v += p->vc;
+    }
+    return at;
+}
+
+static void free_mesh(B3Mesh * mesh)
+{
+    for (int i = 0; mesh->parts && i < mesh->nparts; i++) {
+        tex_free(mesh->parts[i].tex);
+        free(mesh->parts[i].v);
+        free(mesh->parts[i].uv);
+        free(mesh->parts[i].idx);
+    }
+    free(mesh->parts);
+    memset(mesh, 0, sizeof(*mesh));
 }
 
 // a file's layer block: the bone numbers (the main file's only) and the matrices; false: damaged
@@ -105,74 +173,31 @@ static bool read_layers(Band3D * m, const uint8_t * d, long size, long at, const
     return true;
 }
 
-Band3D * band3d_load(const char * name)
+Band3D * band3d_load(const char * name, int hue)
 {
+    gfx_load_hue(hue);
     char path[512];
     long size = 0;
     snprintf(path, sizeof(path), "%sband3d/%s.b3d", plat_asset_dir(), name);
     uint8_t * d = read_all(path, &size);
-    if (!d)
+    if (!d) {
+        gfx_load_hue(0);
         return NULL;
+    }
     Band3D * m = calloc(1, sizeof(Band3D));
     m->job = -1;
-    int32_t head[7];
+    int32_t head[7] = {0};
     bool ok = size >= 32 && memcmp(d, "B3D2", 4) == 0;
     long at = 32;
     if (ok) {
         memcpy(head, d + 4, 28);
-        m->nparts = head[0];
         m->nbones = head[1];
         m->nframes = head[2];
-        ok = m->nparts > 0 && m->nparts < 256 && m->nbones > 0 && m->nbones <= 256 && m->nframes > 0;
+        ok = m->nbones > 0 && m->nbones <= 256 && m->nframes > 0;
     }
-    if (ok)
-        m->parts = calloc((size_t)m->nparts, sizeof(B3Part));
-    for (int i = 0; ok && i < m->nparts; i++) {
-        B3Part * p = &m->parts[i];
-        if (at + 44 > size) {
-            ok = false;
-            break;
-        }
-        char tex[33] = {0};
-        memcpy(tex, d + at, 32);
-        int32_t c[3];
-        memcpy(c, d + at + 32, 12);
-        at += 44;
-        p->vc = c[0];
-        p->tc = c[1];
-        size_t vb = (size_t)p->vc * sizeof(B3Vert), ib = (size_t)p->tc * 6;
-        if (p->vc <= 0 || p->vc > 65535 || p->tc <= 0 || at + (long)(vb + ib) > size) {
-            ok = false;
-            break;
-        }
-        p->v = malloc(vb);
-        p->idx = malloc(ib);
-        p->uv = malloc((size_t)p->vc * 8);
-        if (!p->v || !p->idx || !p->uv) {
-            ok = false;
-            break;
-        }
-        memcpy(p->v, d + at, vb);
-        for (int k = 0; k < p->vc; k++) {
-            p->uv[k * 2] = p->v[k].uv[0];
-            p->uv[k * 2 + 1] = p->v[k].uv[1];
-        }
-        memcpy(p->idx, d + at + vb, ib);
-        at += (long)(vb + ib);
-        for (int k = 0; k < p->vc; k++)
-            for (int j = 0; j < 2; j++)
-                if (p->v[k].j[j] >= m->nbones)
-                    p->v[k].w[j] = 0;
-        for (int k = 0; k < p->tc * 3; k++)
-            if (p->idx[k] >= p->vc)
-                p->idx[k] = 0;
-        if (tex[0]) {
-            snprintf(path, sizeof(path), "%sband3d/tex/%s.png", plat_asset_dir(), tex);
-            p->tex = tex_load(path, TEX_MIPMAP | (c[2] ? TEX_REPEAT : 0));
-        }
-        if (p->vc > m->maxv)
-            m->maxv = p->vc;
-        m->total_v += p->vc;
+    if (ok) {
+        at = read_parts(&m->lod[0], head[0], m->nbones, d, size, at, true);
+        ok = at > 0;
     }
     size_t mb = (size_t)m->nframes * m->nbones * 12 * sizeof(float);
     if (ok && at + (long)mb <= size) {
@@ -201,8 +226,20 @@ Band3D * band3d_load(const char * name)
     if (!ok) {
         plat_log("band3d: %s is damaged", name);
         band3d_free(m);
+        gfx_load_hue(0);
         return NULL;
     }
+    // the far body, when there is one
+    snprintf(path, sizeof(path), "%sband3d/far/%s.b3d", plat_asset_dir(), name);
+    d = read_all(path, &size);
+    if (d && size >= 8 && memcmp(d, "B3F1", 4) == 0) {
+        int32_t np = 0;
+        memcpy(&np, d + 4, 4);
+        if (read_parts(&m->lod[1], np, m->nbones, d, size, 8, false) < 0)
+            free_mesh(&m->lod[1]);
+    }
+    free(d);
+    gfx_load_hue(0);
     // the wilder loop, when there is one
     snprintf(path, sizeof(path), "%sband3d/alt/%s.b3a", plat_asset_dir(), name);
     d = read_all(path, &size);
@@ -230,22 +267,16 @@ void band3d_free(Band3D * m)
 {
     if (!m)
         return;
-    for (int i = 0; m->parts && i < m->nparts; i++) {
-        tex_free(m->parts[i].tex);
-        free(m->parts[i].v);
-        free(m->parts[i].uv);
-        free(m->parts[i].idx);
-    }
-    free(m->parts);
+    band3d_release(m);
+    free_mesh(&m->lod[0]);
+    free_mesh(&m->lod[1]);
     free(m->mats);
     free(m->alt);
     free(m->lbone);
     free(m->layer[0]);
     free(m->layer[1]);
-    band3d_release(m);
     for (int i = 0; i < 2; i++) {
         free(m->pose[i]);
-        free(m->ink[i]);
         free(m->col[i]);
     }
     free(m);
@@ -254,6 +285,16 @@ void band3d_free(Band3D * m)
 int band3d_frames(const Band3D * m, bool alt)
 {
     return !m ? 0 : alt ? m->alt_frames : m->nframes;
+}
+
+static const float * frame_mats(const Band3D * m, bool alt, int f)
+{
+    if (alt && m->alt && m->alt_frames > 0) {
+        f = f < 0 ? 0 : f >= m->alt_frames ? m->alt_frames - 1 : f;
+        return m->alt + (size_t)f * m->nbones * 12;
+    }
+    f = f < 0 ? 0 : f >= m->nframes ? m->nframes - 1 : f;
+    return m->mats + (size_t)f * m->nbones * 12;
 }
 
 // where the head (0), the chest (1) or the pelvis (2) is in the pose asked for: the model's own space (metres, y up
@@ -274,57 +315,57 @@ void band3d_anchor(const Band3D * m, const Band3DDraw * d, int which, float out[
     out[2] = -v[2];
 }
 
-void band3d_begin(bool clear)
+// The camera. The model (facing -z) on the stage (x to the audience's right, y up, z toward the audience), turned by
+// yaw and stood at pos; the camera's orbit and pitch about the target; then the lens: w = 1 - z / dist, so what's
+// nearer is bigger, the target landing on (cx, cy) at ppm pixels a metre; the depth as gfx_2d's ortho has it (the
+// nearer, the smaller). CW: model to the camera's axes (x right, y up, z toward it); model: false for things given in
+// the stage's own axes (the floor)
+static void camera(const Band3DDraw * d, bool model, float mv[16], float CW[3][3])
 {
-    gfx_mesh_begin(clear);
-}
-
-void band3d_end(void)
-{
-    gfx_mesh_end();
-}
-
-static const float * frame_mats(const Band3D * m, bool alt, int f)
-{
-    if (alt && m->alt && m->alt_frames > 0) {
-        f = f < 0 ? 0 : f >= m->alt_frames ? m->alt_frames - 1 : f;
-        return m->alt + (size_t)f * m->nbones * 12;
-    }
-    f = f < 0 ? 0 : f >= m->nframes ? m->nframes - 1 : f;
-    return m->mats + (size_t)f * m->nbones * 12;
-}
-
-static uint8_t to8(float v)
-{
-    return v <= 0 ? 0 : v >= 1 ? 255 : (uint8_t)(v * 255 + 0.5f);
-}
-
-// the pose: the two frames blended, and the view in each bone's matrix (turned by yaw, looked down on by the pitch:
-// x right, y up the picture, z toward the camera, metres). The CPU skins it (two bones a vertex, the normal turned by
-// the main one) into the positions, the ink line's positions and the colours; the screen is the GPU's (band3d_draw's matrices)
-static void pose_model(Band3D * m, const Band3DDraw * d, int buf)
-{
-    static float M[256][12];
-    const float * A = frame_mats(m, d->alt_a, d->fa), * B = frame_mats(m, d->alt_b, d->fb);
-    float wb = d->wb < 0 ? 0 : d->wb > 1 ? 1 : d->wb, wa = 1 - wb;
-    // model (facing -z) to the stage (z toward the audience), turned by yaw; then the camera's orbit and pitch
-    float cy = cosf(d->yaw), sy = sinf(d->yaw), cp = cosf(d->cam_pitch), sp = sinf(d->cam_pitch);
+    float cy = model ? cosf(d->yaw) : 1, sy = model ? sinf(d->yaw) : 0, cp = cosf(d->cam_pitch), sp = sinf(d->cam_pitch);
     float cc = cosf(d->cam_yaw), sc = sinf(d->cam_yaw);
-    const float W[3][3] = {{cy, 0, sy}, {0, 1, 0}, {sy, 0, -cy}};
+    const float W[3][3] = {{cy, 0, sy}, {0, 1, 0}, {sy, 0, -cy}}, I[3][3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
     const float C[3][3] = {{cc, 0, -sc}, {-sp * sc, cp, -sp * cc}, {cp * sc, sp, cp * cc}};
-    float V[3][3], T[3];
+    const float (*M)[3] = model ? W : I;
+    float T[3];
     for (int r = 0; r < 3; r++) {
         for (int c = 0; c < 3; c++)
-            V[r][c] = C[r][0] * W[0][c] + C[r][1] * W[1][c] + C[r][2] * W[2][c];
-        T[r] = C[r][0] * d->pos[0] + C[r][1] * d->pos[1] + C[r][2] * d->pos[2];
+            CW[r][c] = C[r][0] * M[0][c] + C[r][1] * M[1][c] + C[r][2] * M[2][c];
+        T[r] = model ? C[r][0] * d->pos[0] + C[r][1] * d->pos[1] + C[r][2] * d->pos[2] : 0;
     }
-    // the fret hand where the chart has it: the layer's bones from the layers instead of the frame, two places along
-    // the neck and two chord shapes blended, at the frame's two groove steps
-    static float LS[256][12];
-    static uint8_t layered[256];
+    float k = d->ppm, D = d->cam_dist > 0.5f ? d->cam_dist : 0.5f, zs = 0.2f, w0 = 1 - T[2] / D;
+    for (int c = 0; c < 3; c++) {
+        mv[c * 4 + 0] = k * CW[0][c] - d->cx / D * CW[2][c];
+        mv[c * 4 + 1] = -k * CW[1][c] - d->cy / D * CW[2][c];
+        mv[c * 4 + 2] = zs * CW[2][c];
+        mv[c * 4 + 3] = -CW[2][c] / D;
+    }
+    mv[12] = k * T[0] + d->cx * w0;
+    mv[13] = -k * T[1] + d->cy * w0;
+    mv[14] = zs * T[2];
+    mv[15] = w0;
+}
+
+// the pose: the two frames blended (the fret hand's bones from its layers), the mesh skinned by them in the model's own
+// space (two bones a vertex, the normal turned by the main one), and each vertex's light: the key and its fill, the
+// fall from head to toe, the rim where the surface turns from the camera
+typedef struct {
+    float M[256][12], LS[256][12];
+    uint8_t layered[256];
+} Scratch;
+static Scratch scratch_main, scratch_worker;    // pose_model runs on two threads: each its own
+
+static void pose_model(Band3D * m, const Band3DDraw * d, int buf, Scratch * sc)
+{
+    float (*M)[12] = sc->M, (*LS)[12] = sc->LS;
+    uint8_t * layered = sc->layered;
+    const float * A = frame_mats(m, d->alt_a, d->fa), * B = frame_mats(m, d->alt_b, d->fb);
+    float wb = d->wb < 0 ? 0 : d->wb > 1 ? 1 : d->wb, wa = 1 - wb;
     memset(layered, 0, (size_t)m->nbones);
     const Band3DHands * hd = &d->hands;
     if (m->lbones > 0 && hd->ga >= 0) {
+        // the fret hand where the chart has it: two places along the neck and two chord shapes, at the frame's two
+        // groove steps
         const float * LA = m->layer[d->alt_a && m->layer[1] ? 1 : 0], * LB = m->layer[d->alt_b && m->layer[1] ? 1 : 0];
         float fp = hd->fret < 0 ? 0 : hd->fret > m->lp - 1 ? (float)(m->lp - 1) : hd->fret;
         int p0 = (int)fp, p1 = p0 + 1 < m->lp ? p0 + 1 : p0;
@@ -350,42 +391,45 @@ static void pose_model(Band3D * m, const Band3DDraw * d, int buf)
         }
     }
     for (int b = 0; b < m->nbones; b++) {
-        float S[12];
         if (layered[b])
-            memcpy(S, LS[b], sizeof(S));
+            memcpy(M[b], LS[b], sizeof(M[b]));
         else
             for (int k = 0; k < 12; k++)
-                S[k] = A[b * 12 + k] * wa + B[b * 12 + k] * wb;
-        for (int r = 0; r < 3; r++) {
-            for (int c = 0; c < 4; c++)
-                M[b][r * 4 + c] = V[r][0] * S[c] + V[r][1] * S[4 + c] + V[r][2] * S[8 + c];
-            M[b][r * 4 + 3] += T[r];
-        }
+                M[b][k] = A[b * 12 + k] * wa + B[b * 12 + k] * wb;
     }
-    m->view_t[buf][0] = T[0];
-    m->view_t[buf][1] = T[1];
-    m->view_t[buf][2] = T[2];
-    float feet_y = T[1];
-    // the light from the audience (right, up, toward the camera), as tools/band_render.c's
-    float L[3] = {d->key[0], d->key[1], d->key[2]}, ll = sqrtf(L[0] * L[0] + L[1] * L[1] + L[2] * L[2]);
+    // the light and the camera's line of sight, brought into the model's space (the light's a frame late with the
+    // rest of the pose: nothing anyone sees)
+    float mv[16], CW[3][3];
+    camera(d, true, mv, CW);
+    float Lv[3] = {d->key[0], d->key[1], d->key[2]}, ll = sqrtf(Lv[0] * Lv[0] + Lv[1] * Lv[1] + Lv[2] * Lv[2]);
     if (ll < 1e-3f) {
-        L[0] = 0.25f;
-        L[1] = 0.45f;
-        L[2] = 0.85f;
-        ll = sqrtf(L[0] * L[0] + L[1] * L[1] + L[2] * L[2]);
+        Lv[0] = 0.25f;
+        Lv[1] = 0.45f;
+        Lv[2] = 0.85f;
+        ll = sqrtf(Lv[0] * Lv[0] + Lv[1] * Lv[1] + Lv[2] * Lv[2]);
     }
-    for (int i = 0; i < 3; i++)
-        L[i] /= ll;
-    float fill = d->fill < 0 ? 0 : d->fill > 1 ? 1 : d->fill;
+    float L[3], E[3];
+    for (int j = 0; j < 3; j++) {
+        L[j] = (Lv[0] * CW[0][j] + Lv[1] * CW[1][j] + Lv[2] * CW[2][j]) / ll * 0.5f;
+        E[j] = CW[2][j];
+    }
+    float fill = d->fill < 0 ? 0 : d->fill > 1 ? 1 : d->fill, lift = 1 - fill;
     float tint[3] = {(d->tint & 255) / 255.0f, ((d->tint >> 8) & 255) / 255.0f, ((d->tint >> 16) & 255) / 255.0f};
-    uint32_t ta = (d->tint >> 24) << 24;
-    float ink_m = 1.6f / (d->ppm > 1 ? d->ppm : 1);      // the ink line's width in metres at this size
-    float * o = m->pose[buf], * q = m->ink[buf];
+    float bot[3], span[3], rimc[3];
+    for (int ch = 0; ch < 3; ch++) {
+        bot[ch] = d->bot[ch] * tint[ch] * 255;
+        span[ch] = (d->top[ch] - d->bot[ch]) * tint[ch] * 255 / CELL_H;
+        rimc[ch] = d->rim[ch] * d->rim_k * 255;
+    }
+    uint32_t ta = d->tint >> 24;
+    int lod = d->far && m->lod[1].nparts ? 1 : 0;
+    const B3Mesh * mesh = &m->lod[lod];
+    float * o = m->pose[buf];
     uint32_t * col = m->col[buf];
-    for (int pi = 0; pi < m->nparts; pi++) {
-        const B3Part * p = &m->parts[pi];
-        for (int i = 0; i < p->vc; i++, o += 3, q += 3, col++) {
-            const B3Vert * v = &p->v[i];
+    for (int pi = 0; pi < mesh->nparts; pi++) {
+        const B3Part * p = &mesh->parts[pi];
+        const B3Vert * v = p->v;
+        for (int i = 0; i < p->vc; i++, v++, o += 3, col++) {
             const float * R = M[v->j[0]];
             float px = v->p[0], py = v->p[1], pz = v->p[2];
             float x = R[0] * px + R[1] * py + R[2] * pz + R[3];
@@ -404,26 +448,19 @@ static void pose_model(Band3D * m, const Band3DDraw * d, int buf)
             o[0] = x;
             o[1] = y;
             o[2] = z;
-            if (d->ink) {
-                // the ink line: the body a couple of pixels fatter along its outline, a little behind
-                float sl = sqrtf(nx * nx + ny * ny) + 1e-6f, push = ink_m * (1 - fabsf(nz) * 0.5f) / sl;
-                q[0] = x + nx * push;
-                q[1] = y + ny * push;
-                q[2] = z - 0.06f;
-            }
             // half-lambert: the lit side full, the far side down to the fill
-            float nl = 0.5f + 0.5f * (nx * L[0] + ny * L[1] + nz * L[2]);
-            float lit = fill + (1 - fill) * nl * nl;
-            float g = (y - feet_y) / CELL_H;
-            g = g < 0 ? 0 : g > 1 ? 1 : g;
-            float edge = 1 - fabsf(nz), rim = edge * edge * d->rim_k;
-            float c[3];
-            for (int ch = 0; ch < 3; ch++)
-                c[ch] = lit * (d->bot[ch] + (d->top[ch] - d->bot[ch]) * g) * tint[ch] + rim * d->rim[ch];
-            *col = (uint32_t)to8(c[0]) | (uint32_t)to8(c[1]) << 8 | (uint32_t)to8(c[2]) << 16 |
-                   (v->w[3] == 255 ? ta : ((ta >> 24) * v->w[3] / 255) << 24);
+            float nl = 0.5f + nx * L[0] + ny * L[1] + nz * L[2];
+            float lit = fill + lift * nl * nl;
+            float g = y < 0 ? 0 : y > CELL_H ? CELL_H : y;
+            float edge = 1 - fabsf(nx * E[0] + ny * E[1] + nz * E[2]), rim = edge * edge;
+            float r0 = lit * (bot[0] + span[0] * g) + rim * rimc[0];
+            float g0 = lit * (bot[1] + span[1] * g) + rim * rimc[1];
+            float b0 = lit * (bot[2] + span[2] * g) + rim * rimc[2];
+            uint32_t ri = r0 > 255 ? 255u : (uint32_t)r0, gi = g0 > 255 ? 255u : (uint32_t)g0, bi = b0 > 255 ? 255u : (uint32_t)b0;
+            *col = ri | gi << 8 | bi << 16 | (v->w[3] == 255 ? ta : ta * v->w[3] / 255) << 24;
         }
     }
+    m->posed_lod[buf] = lod;
 }
 
 // The worker: four slots (one a member). The main thread puts a model and how it's to be posed in a free slot (1),
@@ -440,26 +477,23 @@ static bool worker_on;
 static int worker(void * arg)
 {
     (void)arg;
+    uint64_t spent = 0;
+    int posed = 0, verts = 0;
     for (;;) {
         bool did = false;
         for (int i = 0; i < 4; i++)
             if (__atomic_load_n(&jobs[i].state, __ATOMIC_ACQUIRE) == 1) {
                 Band3D * m = jobs[i].m;
-#ifndef __vita__
-                static uint64_t spent;
-                static int posed, verts;
-                uint64_t t0 = now_us();
-#endif
-                pose_model(m, &jobs[i].d, m->front ^ 1);
-#ifndef __vita__
-                spent += now_us() - t0;
-                verts += m->total_v;
-                if (++posed == 1000) {
-                    plat_log("band3d: worker %.0f us a pose, %d vertices each", spent / 1000.0, verts / 1000);
+                uint64_t t0 = (uint64_t)plat_now_us();
+                pose_model(m, &jobs[i].d, m->front ^ 1, &scratch_worker);
+                spent += (uint64_t)plat_now_us() - t0;
+                verts += m->lod[m->posed_lod[m->front ^ 1]].total_v;
+                if (++posed == 3000) {
+                    // in the log (the Vita's too): what the band costs
+                    plat_log("band3d: %d us a pose, %d vertices each", (int)(spent / 3000), verts / 3000);
                     spent = 0;
                     posed = verts = 0;
                 }
-#endif
                 __atomic_store_n(&jobs[i].state, 2, __ATOMIC_RELEASE);
                 did = true;
             }
@@ -481,34 +515,30 @@ void band3d_release(Band3D * m)
     m->job = -1;
 }
 
+void band3d_begin(bool clear)
+{
+    gfx_mesh_begin(clear);
+}
+
+void band3d_end(void)
+{
+    gfx_mesh_end();
+}
+
 void band3d_draw(Band3D * m, const Band3DDraw * d)
 {
     if (!m)
         return;
     if (!m->pose[0]) {
+        int cap = m->lod[0].total_v > m->lod[1].total_v ? m->lod[0].total_v : m->lod[1].total_v;
         for (int i = 0; i < 2; i++) {
-            m->pose[i] = malloc((size_t)m->total_v * 12);
-            m->ink[i] = malloc((size_t)m->total_v * 12);
-            m->col[i] = malloc((size_t)m->total_v * 4);
-        }
-    }
-    if (m->maxv > buf_cap) {
-        buf_cap = m->maxv;
-        ink_col = realloc(ink_col, (size_t)buf_cap * 4);
-        shadow_col = realloc(shadow_col, (size_t)buf_cap * 4);
-        for (int i = 0; ink_col && shadow_col && i < buf_cap; i++) {
-            ink_col[i] = 0xff1c0910u;           // (16, 9, 28), tools/band_ink.py's ink
-            shadow_col[i] = 0x780c0306u;        // RGBA(6, 3, 12, 120), the sheets' shadow
+            m->pose[i] = malloc((size_t)cap * 12);
+            m->col[i] = malloc((size_t)cap * 4);
         }
     }
     for (int i = 0; i < 2; i++)
-        if (!m->pose[i] || !m->ink[i] || !m->col[i])
+        if (!m->pose[i] || !m->col[i])
             return;
-    if (!ink_col || !shadow_col)
-        return;
-#ifndef __vita__
-    uint64_t t0 = now_us();
-#endif
     if (!worker_on) {
         worker_on = true;
         plat_thread("band3d", worker, NULL, 1);
@@ -520,7 +550,7 @@ void band3d_draw(Band3D * m, const Band3DDraw * d)
         __atomic_store_n(&jobs[m->job].state, 0, __ATOMIC_RELEASE);
     }
     if (!m->posed) {
-        pose_model(m, d, m->front);     // the first time: now, here
+        pose_model(m, d, m->front, &scratch_main);      // the first time: now, here
         m->posed = true;
     }
     if (m->job < 0)
@@ -534,35 +564,29 @@ void band3d_draw(Band3D * m, const Band3DDraw * d)
         jobs[m->job].d = *d;
         __atomic_store_n(&jobs[m->job].state, 1, __ATOMIC_RELEASE);
     }
-#ifndef __vita__
-    band3d_skin_us += (double)(now_us() - t0);
-#endif
-    // onto the screen (the GPU's work): what the camera sees in metres (x right, y up, z toward it) through a lens
-    // cam_dist from the target: w = 1 - z / dist, so what's nearer is bigger; the depth as gfx_2d's ortho has it (the
-    // nearer, the smaller)
-    float k = d->ppm, D = d->cam_dist > 0.5f ? d->cam_dist : 0.5f, zs = 0.1f;
-    const float body[16] = {k, 0, 0, 0,
-                            0, -k, 0, 0,
-                            -d->cx / D, -d->cy / D, zs, -1 / D,
-                            d->cx, d->cy, 0, 1};
-    // the shadow: their shape laid down on the floor toward the camera, a fifth as tall, behind everything of theirs
-    float fy = m->view_t[m->front][1];
-    const float flat[16] = {k, 0, 0, 0,
-                            0, k * 0.18f, 0, 0,
-                            0, 0, 0, 0,
-                            d->cx, d->floor_y - k * 0.18f * fy, -0.99f, 1};
+    // the pose as the worker last left it, through this frame's camera
+    float mv[16], CW[3][3];
+    camera(d, true, mv, CW);
+    const B3Mesh * mesh = &m->lod[m->posed_lod[m->front]];
     size_t at = 0;
-    for (int pi = 0; pi < m->nparts; pi++) {
-        const B3Part * p = &m->parts[pi];
-        const float * uv = p->uv;
-        if (d->shadow) {
-            gfx_mesh_state(false, 0.2f);
-            gfx_mesh_xf(flat, p->tex, m->pose[m->front] + at * 3, uv, 8, shadow_col, p->idx, p->tc * 3);
-            gfx_mesh_state(true, 0.45f);
-        }
-        if (d->ink)
-            gfx_mesh_xf(body, p->tex, m->ink[m->front] + at * 3, uv, 8, ink_col, p->idx, p->tc * 3);
-        gfx_mesh_xf(body, p->tex, m->pose[m->front] + at * 3, uv, 8, m->col[m->front] + at, p->idx, p->tc * 3);
+    for (int pi = 0; pi < mesh->nparts; pi++) {
+        const B3Part * p = &mesh->parts[pi];
+        gfx_mesh_xf(mv, p->tex, m->pose[m->front] + at * 3, p->uv, 8, m->col[m->front] + at, p->idx, p->tc * 3);
         at += (size_t)p->vc;
     }
+}
+
+// a flat four-cornered thing on the stage (its own axes: x right, y up, z toward the audience, metres from what the
+// camera looks at) through a camera: the floor, a shadow on it. Between band3d_begin and band3d_end; it neither reads
+// nor writes the depth
+void band3d_quad(const Band3DDraw * cam, const float p[4][3], Tex * tex, const float uv[4][2], const uint32_t col[4])
+{
+    static const uint16_t idx[6] = {0, 1, 2, 0, 2, 3};
+    float mv[16], CW[3][3];
+    camera(cam, false, mv, CW);
+    gfx_mesh_state(false, 0.004f);
+    gfx_mesh_depth(false);
+    gfx_mesh_xf(mv, tex, &p[0][0], &uv[0][0], 8, col, idx, 6);
+    gfx_mesh_depth(true);
+    gfx_mesh_state(true, 0.45f);
 }

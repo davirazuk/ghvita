@@ -500,10 +500,11 @@ Tex * res_band_thumb(const char * name)
 }
 
 // a member's 3D model (assets/band3d), one per role kept
-Band3D * res_band3d(int role, const char * name)
+Band3D * res_band3d(int role, const char * name, int hue)
 {
     static Band3D * model[4];
     static char names[4][16];
+    static int hues[4];
     if (role < 0 || role > 3)
         return NULL;
     if (!name) {
@@ -512,10 +513,11 @@ Band3D * res_band3d(int role, const char * name)
         names[role][0] = 0;
         return NULL;
     }
-    if (strcmp(names[role], name) != 0) {
+    if (strcmp(names[role], name) != 0 || hues[role] != hue) {
         band3d_free(model[role]);
-        model[role] = band3d_load(name);
+        model[role] = band3d_load(name, hue);
         snprintf(names[role], sizeof(names[role]), "%s", name);
+        hues[role] = hue;
     }
     return model[role];
 }
