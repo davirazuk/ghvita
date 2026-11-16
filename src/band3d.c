@@ -59,6 +59,11 @@ struct Band3D {
     float * layer[2];
     int anchor_bone[3];         // the head, the chest, the pelvis: the bone and its joint's place in the mesh
     float anchor_at[3][3];
+    // the fret hand's fingers: the palm's bone, the fingers' bones, and 16 poses of them (a bit a finger: index, middle,
+    // ring, little) as matrices that follow the palm's
+    int palm, nfing;
+    int32_t * fing;
+    float * fing_pose;          // 16 x nfing x 12
 };
 
 void band3d_release(Band3D * m);
@@ -220,6 +225,23 @@ Band3D * band3d_load(const char * name, int hue)
                     m->anchor_bone[i] = 0;
             }
         }
+        long fa = aa + 4 + (long)na * 16;
+        if (ok && na >= 0 && na <= 8 && fa + 12 <= size && memcmp(d + fa, "FNG1", 4) == 0) {
+            int32_t fh[2];
+            memcpy(fh, d + fa + 4, 8);
+            size_t ib = (size_t)fh[1] * 4, pb = (size_t)fh[1] * 16 * 12 * sizeof(float);
+            if (fh[0] >= 0 && fh[0] < m->nbones && fh[1] > 0 && fh[1] <= 32 && fa + 12 + (long)(ib + pb) <= size) {
+                m->palm = fh[0];
+                m->nfing = fh[1];
+                m->fing = malloc(ib);
+                m->fing_pose = malloc(pb);
+                memcpy(m->fing, d + fa + 12, ib);
+                memcpy(m->fing_pose, d + fa + 12 + ib, pb);
+                for (int i = 0; i < m->nfing; i++)
+                    if (m->fing[i] < 0 || m->fing[i] >= m->nbones)
+                        m->nfing = 0;
+            }
+        }
     } else
         ok = false;
     free(d);
@@ -275,6 +297,8 @@ void band3d_free(Band3D * m)
     free(m->lbone);
     free(m->layer[0]);
     free(m->layer[1]);
+    free(m->fing);
+    free(m->fing_pose);
     for (int i = 0; i < 2; i++) {
         free(m->pose[i]);
         free(m->col[i]);
@@ -372,7 +396,8 @@ static void pose_model(Band3D * m, const Band3DDraw * d, int buf, Scratch * sc)
         float fp = hd->fret < 0 ? 0 : hd->fret > m->lp - 1 ? (float)(m->lp - 1) : hd->fret;
         int p0 = (int)fp, p1 = p0 + 1 < m->lp ? p0 + 1 : p0;
         float wp = fp - (float)p0, wc = hd->wc < 0 ? 0 : hd->wc > 1 ? 1 : hd->wc;
-        int c0 = hd->ca % m->lc, c1 = hd->cb % m->lc, ga = hd->ga % m->lg, gb = hd->gb % m->lg;
+        // with the fingers' own poses the layers carry the arm only: their one hand shape
+        int c0 = m->nfing ? 0 : hd->ca % m->lc, c1 = m->nfing ? 0 : hd->cb % m->lc, ga = hd->ga % m->lg, gb = hd->gb % m->lg;
         size_t stride = (size_t)m->lbones * 12;
         const float * src[8];
         float w8[8];
@@ -401,6 +426,22 @@ static void pose_model(Band3D * m, const Band3DDraw * d, int buf, Scratch * sc)
         else
             for (int k = 0; k < 12; k++)
                 M[b][k] = A[b * 12 + k] * wa + B[b * 12 + k] * wb;
+    }
+    if (m->nfing && m->lbones > 0 && hd->ga >= 0) {
+        // the fingers the notes ask for, hung on the palm where the layers put it: two sets of them, blended
+        const float * P = M[m->palm];
+        const float * Ca = m->fing_pose + (size_t)(hd->ca & 15) * m->nfing * 12, * Cb = m->fing_pose + (size_t)(hd->cb & 15) * m->nfing * 12;
+        float wc = hd->wc < 0 ? 0 : hd->wc > 1 ? 1 : hd->wc;
+        for (int i = 0; i < m->nfing; i++) {
+            float C[12], * o = M[m->fing[i]];
+            for (int k = 0; k < 12; k++)
+                C[k] = Ca[i * 12 + k] * (1 - wc) + Cb[i * 12 + k] * wc;
+            for (int r = 0; r < 3; r++) {
+                for (int k = 0; k < 4; k++)
+                    o[r * 4 + k] = P[r * 4] * C[k] + P[r * 4 + 1] * C[4 + k] + P[r * 4 + 2] * C[8 + k];
+                o[r * 4 + 3] += P[r * 4 + 3];
+            }
+        }
     }
     // the light and the camera's line of sight, brought into the model's space (the light's a frame late with the
     // rest of the pose: nothing anyone sees)

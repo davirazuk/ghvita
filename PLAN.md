@@ -675,3 +675,11 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 - The strum hand follows the notes (BandPart.strum_pos, Band3DDraw fa2/fb2/w2: the three strum frames blended, a
   stroke begun 30 ms early, quick notes picked down-up). It used to snap between the three.
 - No blurred venue any more (G.venue_blur is never loaded; the *_blur.jpg files are still in assets/venues).
+- The fret hand as GH3 has it (read from Guitar Hero Browser Edition, gh3.thediaryofchris.net: its fingers table maps
+  each set of colours to a hand animation): a finger a colour (green index, red middle, yellow ring, blue little,
+  orange the little one with the hand a place up), a chord its colours' fingers together. tools/band.py bakes 16 poses
+  of the hand's bones relative to the palm (FNG1 block at the end of a .b3d, from World Tour's roll3_1..4 and empty);
+  band3d.c hangs them on the palm the layers place; the layers now carry one hand shape (a quarter the size). The
+  hand only drifts along the neck with where the notes have been (BandPart.hand_lane).
+- The rail's lamps were 660 lit quads shaded afresh every frame, over 40% of the game's own CPU in a desktop profile
+  (gprof build: -pg). Each lamp's quads are kept (LampKeep) and drawn again until its state or the camera changes.

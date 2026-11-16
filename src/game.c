@@ -70,7 +70,7 @@ typedef struct {
     bool on;                    // playing right now (the camera goes to whoever is)
     // a guitar's fret hand (the 3D band): the frets of the note it's on, where along the neck it is, two chord shapes
     int fret_now;
-    float hand_fret, chord_w;
+    float hand_fret, chord_w, hand_lane;
     int chord_a, chord_b;
     float walk, front;          // metres along the stage they've wandered, 1 out front for a solo
     float turn;                 // walking, a standee shows its edge a little
@@ -2280,9 +2280,16 @@ static void draw_band(double beat)
                         low = low < 0 ? l : low;
                         count++;
                     }
-                int shape = count >= 2 ? 2 : low < 0 ? bp->chord_b % 3 : (low & 1);
+                // As GH3's hand: a finger a colour (green the index, red the middle, yellow the ring, blue the little
+                // one), a chord its colours' fingers down together; orange is the little finger with the hand a place
+                // up the neck. The hand itself only drifts along the neck with where the notes have been lately
+                int shape = (frets & 15) | (frets & 16 ? 8 : 0);
+                if (low < 0)
+                    shape = G.t < bp->held ? bp->chord_b : 0;       // ringing: held; resting: the hand open
+                (void)count;
                 if (low >= 0) {
-                    float aim = low * 0.75f + (count >= 2 ? 0.15f : 0);
+                    bp->hand_lane += ((float)low - bp->hand_lane) * ease(0.04f);
+                    float aim = 0.7f + bp->hand_lane * 0.3f + (frets & 16 ? 0.45f : 0);
                     if (r == me && G.whammy > 0.15f && G.t < bp->held)
                         aim += sinf((float)G.t * 30) * 0.05f * G.whammy;
                     bp->hand_fret += (aim - bp->hand_fret) * ease(0.32f);
@@ -2295,7 +2302,7 @@ static void draw_band(double beat)
                     bp->chord_b = shape;
                     bp->chord_w = bp->chord_w >= 1 ? 0 : bp->chord_w;
                 }
-                bp->chord_w = fminf(1, bp->chord_w + 0.2f * G.fstep);
+                bp->chord_w = fminf(1, bp->chord_w + 0.3f * G.fstep);       // a finger's down in about 50 ms
                 d3.hands.ga = d3.fa / 3;
                 d3.hands.gb = d3.fb / 3;
                 d3.hands.fret = bp->hand_fret;
@@ -4923,6 +4930,36 @@ static uint32_t shade(const float * p, const float * n, const float * base, floa
 }
 
 // one face of a mesh, skipped when it faces away (the pieces are convex, so that's all the sorting they need)
+// The rail's lamps are some 660 little lit quads, and nothing about them changes from one frame to the next but a
+// lamp going on or off: each lamp's quads are kept as they were shaded (LampKeep) and drawn again as they are until
+// its state, its colour or the camera changes
+enum { LAMP_QUADS = 400 };
+typedef struct {
+    int n;                      // quads kept; > LAMP_QUADS: not kept
+    float key[8];
+    bool have;
+    float p[LAMP_QUADS][4][3];
+    uint32_t c[LAMP_QUADS][4];
+} LampKeep;
+static LampKeep lamp_keep[5];
+static LampKeep * lamp_rec;     // the one being made now
+
+// a lamp's quads as they were, when its key hasn't changed (true: drawn); else lit_quad keeps what's made next
+static bool lamp_again(LampKeep * k, const float key[8])
+{
+    static const float uv[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+    if (k->have && k->n <= LAMP_QUADS && memcmp(k->key, key, sizeof(k->key)) == 0) {
+        for (int i = 0; i < k->n; i++)
+            gfx_quad(k->p[i], uv, k->c[i]);
+        return true;
+    }
+    memcpy(k->key, key, sizeof(k->key));
+    k->n = 0;
+    k->have = true;
+    lamp_rec = k;
+    return false;
+}
+
 static void lit_quad(const float p[4][3], const float n[4][3], const float * base, float shine, float glow,
                      const float * glow_c)
 {
@@ -4940,6 +4977,12 @@ static void lit_quad(const float p[4][3], const float n[4][3], const float * bas
     for (int i = 0; i < 4; i++)
         c[i] = shade(p[i], n[i], base, shine, glow, glow_c);
     gfx_quad(p, uv, c);
+    if (lamp_rec && lamp_rec->n < LAMP_QUADS) {
+        memcpy(lamp_rec->p[lamp_rec->n], p, sizeof(lamp_rec->p[0]));
+        memcpy(lamp_rec->c[lamp_rec->n], c, sizeof(c));
+        lamp_rec->n++;
+    } else if (lamp_rec)
+        lamp_rec->n = LAMP_QUADS + 1;       // too many to keep: made afresh each frame
 }
 
 // a bulb: a dome of radius r on (x, y, z) pointing along -x (out from the right rail), its glass a short way back
@@ -5032,9 +5075,13 @@ static void draw_rail_meter(void)
         for (int k = 0; k < 3; k++)
             base[k] = state == 0 ? dark[k] : hue[k] * (state == 1 ? 0.55f : 0.35f);
         gfx_tex(NULL);
-        if (i == 4)
-            lamp_seat(seat_x, seat_r, z0 + lg * 0.5f - rb * 1.35f, z1 + 0.05f, seat_r);
-        lamp_bulb(seat_x - 0.045f, seat_r + rb * 0.7f, zc, rb, base, state == 2 ? 0.95f : state == 1 ? 0.3f : 0, hue);
+        const float key[8] = {(float)state, hue[0], hue[1], hue[2], cam_eye[0], cam_eye[1], cam_eye[2], (float)i};
+        if (!lamp_again(&lamp_keep[i], key)) {
+            if (i == 4)
+                lamp_seat(seat_x, seat_r, z0 + lg * 0.5f - rb * 1.35f, z1 + 0.05f, seat_r);
+            lamp_bulb(seat_x - 0.045f, seat_r + rb * 0.7f, zc, rb, base, state == 2 ? 0.95f : state == 1 ? 0.3f : 0, hue);
+            lamp_rec = NULL;
+        }
         if (state == 2) {
             gfx_blend(BLEND_ADD);
             // the bloom round a lit bulb: its colour wide, white hot at the middle

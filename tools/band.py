@@ -177,6 +177,24 @@ def hand_pose(anims, bass, male, shape, k, chord=None, fret=None):
     return over
 
 
+def finger_pose(anims, male, mask):
+    # the hand's bones with the fingers of `mask` down (each from the roll that brings it down) and the rest lifted
+    kind = 'male' if male else 'fmale'
+    over = {b: x[0] for b, x in anims['gh3_hnd_guit_chord_%s_empty' % kind][1].items() if 'ik_hand' not in b}
+    top = 0
+    for k, fg in enumerate(FINGERS):
+        if mask & (1 << k):
+            top = k + 1
+            for b, x in anims['gh3_hnd_guit_chord_%s_roll3_%d' % (kind, k + 1)][1].items():
+                if fg in b:
+                    over[b] = x[0]
+    if top:
+        for b, x in anims['gh3_hnd_guit_chord_%s_roll3_%d' % (kind, top)][1].items():
+            if 'thumb' in b:
+                over[b] = x[0]
+    return over
+
+
 def rotation_between(a, b):
     a, b = a / np.linalg.norm(a), b / np.linalg.norm(b)
     v, c = np.cross(a, b), float(a @ b)
@@ -289,7 +307,12 @@ HEAD_WORDS = ('head', 'jaw', 'eye', 'brow', 'lip', 'cheek', 'hair', 'face', 'nos
 # the fret hand's layers (game.c drives them from the chart): each groove step with the hand at these frets of the
 # neck, in these chord shapes (one finger, another finger, a barre, the hand open)
 LAYER_FRETS = [1, 6, 11, 16]
-LAYER_CHORDS = ['roll3_1', 'roll3_3', 'bar1', 'empty']
+LAYER_CHORDS = ['empty']
+# the fret hand's fingers, as GH3 has them: a finger a colour (green the index, red the middle, yellow the ring, blue
+# the little one; orange is the little one with the hand a place up the neck), so a chord is its colours' fingers down.
+# One pose of the hand's bones for each of the 16 sets of fingers, kept relative to the palm: the game hangs them on
+# the palm wherever the layers put it
+FINGERS = ['index', 'middle', 'ring', 'pinkey']
 
 
 def find_tex(tex_dir, name):
@@ -472,6 +495,9 @@ def write_parts(o, recs):
         o.write(T1.tobytes())
 
 
+FINGER_TABLE = {}       # member -> (the palm's bone, the fingers' bones, 16 x bones x 3 x 4)
+
+
 def export3d(name, meshes, skins, c, alt, tex_dir, layers, bones, work):
     # assets/band3d/<name>.b3d: the mesh (thinned, bone weights kept, textures in one atlas), every frame's skin matrices
     # in the sheet's order, and the fret hand's layers; alt/<name>.b3a: the wilder loop's matrices and layers for the
@@ -523,6 +549,10 @@ def export3d(name, meshes, skins, c, alt, tex_dir, layers, bones, work):
         for bn in ('bone_head', 'bone_chest', 'bone_pelvis'):
             i = low.get(bn, 0)
             o.write(struct.pack('<i3f', i, *np.linalg.inv(bones[i][4])[:3, 3]))
+        # the fret hand's fingers (guitars and basses): the palm, the bones, 16 poses
+        if name in FINGER_TABLE:
+            palm, fb, C = FINGER_TABLE[name]
+            o.write(b'FNG1' + struct.pack('<ii', palm, len(fb)) + fb.tobytes() + C.tobytes())
     print(name, '3d', sum(len(r) for _, r, _, _ in recs), 'verts', sum(len(t) for _, _, t, _ in recs), 'tris (from', total,
           ')', len(recs), 'parts', len(lb), 'hand bones', os.path.getsize(os.path.join(out, name + '.b3d')) // 1024, 'KB')
 
@@ -674,6 +704,23 @@ def bake(path, work, tex_dir, alt=False):
             spread = np.abs(all_ - all_[:, :1, :1]).max(axis=(0, 1, 2, 4, 5))
             lb = np.nonzero(spread > 1e-4)[0]
             layers = (lb.astype('<i4'), all_[:, :, :, lb])
+            # the fingers' 16 poses, each bone's skin matrix as the palm's times this
+            low = {b[0].lower(): i for i, b in enumerate(bones)}
+            palm = low['bone_palm_l']
+            fb = [i for i, b in enumerate(bones) if b[0].lower().startswith('bone_hand_') and b[0].lower().endswith('_l')]
+            C = np.zeros((16, len(fb), 3, 4))
+            pose = blended(clip, s0, (s0, s0 + span))
+            for mask in range(16):
+                over = hand_pose(anims, role == 'bassist', male, 0, STRUM_K[0], 'empty', LAYER_FRETS[0])
+                over.update(finger_pose(anims, male, mask))
+                rig = wc.Rig(bones, pose_over(bones, pose, over))
+                wc.solve(rig, rest, role, 0, g0)
+                guitar_hands(rig)
+                S = [m @ b[4] for m, b in zip(rig.W, bones)]
+                ip = np.linalg.inv(S[palm])
+                for k, i in enumerate(fb):
+                    C[mask, k] = (ip @ S[i])[:3, :]
+            FINGER_TABLE[name] = (palm, np.array(fb, '<i4'), C.astype('<f4'))
         export3d(name, meshes, skins, c, alt, tex_dir, layers, bones, work)
         return
     binp = os.path.join(work, name + '.bin')
