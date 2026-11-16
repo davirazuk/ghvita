@@ -361,6 +361,8 @@ static void pose_model(Band3D * m, const Band3DDraw * d, int buf, Scratch * sc)
     uint8_t * layered = sc->layered;
     const float * A = frame_mats(m, d->alt_a, d->fa), * B = frame_mats(m, d->alt_b, d->fb);
     float wb = d->wb < 0 ? 0 : d->wb > 1 ? 1 : d->wb, wa = 1 - wb;
+    float w2 = d->w2 < 0 ? 0 : d->w2 > 1 ? 1 : d->w2;
+    const float * A2 = frame_mats(m, d->alt_a, d->fa2), * B2 = frame_mats(m, d->alt_b, d->fb2);
     memset(layered, 0, (size_t)m->nbones);
     const Band3DHands * hd = &d->hands;
     if (m->lbones > 0 && hd->ga >= 0) {
@@ -393,6 +395,9 @@ static void pose_model(Band3D * m, const Band3DDraw * d, int buf, Scratch * sc)
     for (int b = 0; b < m->nbones; b++) {
         if (layered[b])
             memcpy(M[b], LS[b], sizeof(M[b]));
+        else if (w2 > 0)
+            for (int k = 0; k < 12; k++)
+                M[b][k] = (A[b * 12 + k] * wa + B[b * 12 + k] * wb) * (1 - w2) + (A2[b * 12 + k] * wa + B2[b * 12 + k] * wb) * w2;
         else
             for (int k = 0; k < 12; k++)
                 M[b][k] = A[b * 12 + k] * wa + B[b * 12 + k] * wb;

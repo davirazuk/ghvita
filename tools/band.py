@@ -280,8 +280,8 @@ ALT = {'guitarist': ['horse_100', 'jimi_100', 'areyou_100', 'joker_100', 'bleed_
 
 
 THREED = False          # --3d: the member as a model for the game to draw (assets/band3d), not a picture sheet
-TRI_BUDGET = 7000       # a member's triangles after thinning: a close shot shows them a screen tall
-DRUM_BUDGET = 12500     # the drummer's, the kit included
+TRI_BUDGET = int(os.environ.get('BAND_TRIS', 16000))       # a member's triangles after thinning: a close shot shows them a screen tall
+DRUM_BUDGET = int(os.environ.get('DRUM_TRIS', 22000))     # the drummer's, the kit included
 ATLAS = 1024            # a member's textures packed into one picture this size: one draw for the lot
 HEAD_DENSITY, BODY_DENSITY = 1700.0, 430.0     # texels a metre the atlas gives a face, and the rest
 BLENDER = os.environ.get('BLENDER') or os.path.expanduser('~/mods/refs/blender-4.2.3-linux-x64/blender')    # 4.0 does as well

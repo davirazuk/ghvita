@@ -668,3 +668,10 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 - Desktop test anywhere: unzip the latest GHVita.vpk's assets/ into assets/, cmake -DPCDEPS=/usr/include, Xvfb.
   GHV_CINE="shot who" holds one camera shot (the leap is at 10 s of Test Song 1).
 - Download threads run at priority 185 (were 120, above the game's 160) and the game's thread is kept on core 0.
+- Next build: the close shots' models are near whole (tools/band.py BAND_TRIS 16000, DRUM_TRIS 22000, were 7000 and
+  12500: the thinning was most of the "broken shapes"; only one member is drawn in a close shot, the far body does the
+  rest). Not measured on a Vita: the worker thread skins about 2.3 times the vertices. If close shots stutter, lower
+  the two numbers and the workflow's BAKE line (it rebakes when that line changes, or on [bake] in the commit).
+- The strum hand follows the notes (BandPart.strum_pos, Band3DDraw fa2/fb2/w2: the three strum frames blended, a
+  stroke begun 30 ms early, quick notes picked down-up). It used to snap between the three.
+- No blurred venue any more (G.venue_blur is never loaded; the *_blur.jpg files are still in assets/venues).

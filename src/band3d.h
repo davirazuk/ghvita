@@ -24,6 +24,8 @@ typedef struct {
     bool alt_a, alt_b;          // which frames: the main loop's or the wilder one's
     int fa, fb;                 // two frames, blended: fb by wb
     float wb;
+    int fa2, fb2;               // and the same pair in another state (a guitar's strum further through), by w2 (0: none)
+    float w2;
     // where they stand: metres from what the camera looks at (x to the right of the stage as the audience sees it, y up,
     // z toward the audience), turned about their own up (0 facing the audience)
     float pos[3], yaw;

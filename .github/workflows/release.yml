@@ -72,23 +72,39 @@ jobs:
         run: |
           python3 tools/lampsync.py assets/game.png assets/game.txt tools/lampsrc
 
-      - name: The 3D band's loose bones (hair, hats and beards follow the head; a mended file is left as it is)
+      # The 3D band and the venues' models are baked here from the source art (the PC that used to is gone): when the
+      # last release's art hasn't this bake (assets/band3d/bake.txt), or has no venues, or the commit says [bake]
+      - name: The 3D band and the venues, baked from the source art
+        env:
+          BAKE: band 2 (16000 and 22000 triangles, both loops, loose bones mended)
         run: |
-          python3 tools/band_bones.py assets/band3d
-
-      - name: The venues as models, baked from the source art when the last release had none
-        run: |
-          if [ ! -f assets/venue3d/norway.v3d ] || git log -1 --format=%B | grep -q '\[venues\]'; then
+          said=$(git log -1 --format=%B | grep -c '\[bake\]' || true)
+          band=0; venues=0
+          [ "$(cat assets/band3d/bake.txt 2>/dev/null)" = "$BAKE" ] || band=1
+          [ -f assets/venue3d/norway.v3d ] || venues=1
+          if [ "$said" != 0 ]; then band=1; venues=1; fi
+          if [ $band = 1 ] || [ $venues = 1 ]; then
             sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq blender python3-pil >/dev/null
             pip install -q --break-system-packages py7zr
             mkdir -p /tmp/sa
             [ -f /tmp/sa/ghwt-textures.7z ] || gh release download source-art --pattern ghwt-textures.7z --dir /tmp/sa
             gh release download source-art --pattern ghwt-tools.7z --dir /tmp/sa
-            python3 -c "import py7zr; py7zr.SevenZipFile('/tmp/sa/ghwt-tools.7z').extractall('/tmp/sa/t'); z=py7zr.SevenZipFile('/tmp/sa/ghwt-textures.7z'); z.extract(path='/tmp/sa/v', targets=[n for n in z.getnames() if '/venue_ghwt_' in n])"
-            rm -rf assets/venue3d
-            GHWT_TOOLS=/tmp/sa/t/mods/refs/yarg/ghwt-tools BLENDER=$(which blender) \
-              python3 tools/venue3d.py /tmp/sa/v/mods/yarg-look/YargLook/textures /tmp/sa/work | grep -c ' tris '
-            test -f assets/venue3d/norway.v3d
+            python3 -c "import py7zr; py7zr.SevenZipFile('/tmp/sa/ghwt-tools.7z').extractall('/tmp/sa/t'); z=py7zr.SevenZipFile('/tmp/sa/ghwt-textures.7z'); z.extract(path='/tmp/sa/v', targets=[n for n in z.getnames() if not n.endswith('.mp3')])"
+            export GHWT_TOOLS=/tmp/sa/t/mods/refs/yarg/ghwt-tools BLENDER=$(which blender)
+            tex=/tmp/sa/v/mods/yarg-look/YargLook/textures
+            if [ $band = 1 ]; then
+              rm -rf assets/band3d
+              python3 tools/band.py --3d $tex /tmp/sa/work | grep ' 3d '
+              python3 tools/band.py --3d --alt $tex /tmp/sa/work | grep -c ' 3d alt '
+              python3 tools/band_bones.py assets/band3d
+              test -f assets/band3d/guitarist.b3d && test -f assets/band3d/alt/guitarist.b3a && test -f assets/band3d/far/drummer.b3d
+              echo "$BAKE" > assets/band3d/bake.txt
+            fi
+            if [ $venues = 1 ]; then
+              rm -rf assets/venue3d
+              python3 tools/venue3d.py $tex /tmp/sa/work | grep -c ' tris '
+              test -f assets/venue3d/norway.v3d
+            fi
           fi
 
       - name: Build, smoke test and publish

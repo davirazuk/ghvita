@@ -74,6 +74,9 @@ typedef struct {
     int chord_a, chord_b;
     float walk, front;          // metres along the stage they've wandered, 1 out front for a solo
     float turn;                 // walking, a standee shows its edge a little
+    // the 3D band's strum hand: 0 above the strings, 2 through them; where it's going; the stroke it last began
+    float strum_pos, strum_goal;
+    double strum_for, strum_last;
 } BandPart;
 
 typedef struct {
@@ -450,7 +453,7 @@ static void pick_venue(const Song * song)
     G.shot = 0;
     if (res_venue(zone, &G.venue, &G.venue_lights)) {
         G.venue_title = res_venue_title(zone);
-        G.venue_blur = res_venue_blur(zone);
+        G.venue_blur = NULL;            // never the picture out of focus: the venue's model, or its picture as it is
         {
             // the venue's model, kept while the songs are in the same place
             static Venue3D * kept;
@@ -2222,9 +2225,38 @@ static void draw_band(double beat)
             bool alt3 = wild_now && band3d_frames(m3, true) > 0;
             d3.fa = d3.fb = f;
             if (r >= 2 && jump_f < 0 && f < 48) {
+                // the strum hand: a stroke for every note, begun a moment early so it crosses the strings on it. Notes
+                // close together are picked down, up, down; a lone one is a down stroke that rings there and comes back
+                bool missed = r == me && G.miss_pulse > 0.5f;
+                float goal = bp->strum_goal, fast = 2 / 0.055f, slow = 2 / 0.2f, rate = fast;
+                if (bp->part && playing) {
+                    if (bp->hit_t < 1e8 && G.t > bp->hit_t - 0.03 && bp->strum_for != bp->hit_t && !missed) {
+                        bool quick = bp->hit_t - bp->strum_last < 0.28;
+                        goal = quick && goal > 1 ? 0 : 2;
+                        if (goal > 1 && bp->strum_pos > 0.5f)
+                            bp->strum_pos = 0.5f;           // a down stroke starts above the strings
+                        bp->strum_for = bp->strum_last = bp->hit_t;
+                    } else if (G.t - bp->strum_last > 0.24 && !(G.t < bp->held - 0.05 && bp->hit_t - G.t > 0.3)) {
+                        goal = 0;                           // back up, ready for the next
+                        rate = slow;
+                    }
+                } else if (!bp->part && playing) {
+                    goal = fmod(phase * 8, 1) < 0.5 ? 2 : 0;        // no chart for them: eighths, down and up
+                } else {
+                    goal = 0;
+                    rate = slow;
+                }
+                bp->strum_goal = goal;
+                float step = rate * G.fstep / 60, gap = goal - bp->strum_pos;
+                bp->strum_pos += gap > step ? step : gap < -step ? -step : gap;
+                int s0 = bp->strum_pos >= 1 ? 1 : 0;
                 d3.alt_a = d3.alt_b = alt3;
-                d3.fb = ((f / 3 + 1) % 16) * 3 + f % 3;          // the groove's next step
+                d3.fa = (f / 3) * 3 + s0;
+                d3.fb = ((f / 3 + 1) % 16) * 3 + s0;             // the groove's next step
                 d3.wb = (float)fmod(phase * 16, 1);
+                d3.fa2 = d3.fa + 1;
+                d3.fb2 = d3.fb + 1;
+                d3.w2 = bp->strum_pos - (float)s0;
             } else if (r == 1) {
                 if (jump_f >= 0)
                     d3.fa = d3.fb = jump_f;
