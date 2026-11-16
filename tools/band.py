@@ -13,7 +13,7 @@ from PIL import Image
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, '..', 'assets', 'band')
 RENDER = os.path.join(HERE, '..', 'build-tools', 'band_render')
-spec = importlib.util.spec_from_file_location('wc', os.path.expanduser('~/mods/refs/yarg/ghwt-tools/wtch_check.py'))
+spec = importlib.util.spec_from_file_location('wc', os.path.join(os.environ.get('GHWT_TOOLS') or os.path.expanduser('~/mods/refs/yarg/ghwt-tools'), 'wtch_check.py'))
 wc = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(wc)
 
@@ -284,7 +284,7 @@ TRI_BUDGET = 7000       # a member's triangles after thinning: a close shot show
 DRUM_BUDGET = 12500     # the drummer's, the kit included
 ATLAS = 1024            # a member's textures packed into one picture this size: one draw for the lot
 HEAD_DENSITY, BODY_DENSITY = 1700.0, 430.0     # texels a metre the atlas gives a face, and the rest
-BLENDER = os.path.expanduser('~/mods/refs/blender-4.2.3-linux-x64/blender')
+BLENDER = os.environ.get('BLENDER') or os.path.expanduser('~/mods/refs/blender-4.2.3-linux-x64/blender')    # 4.0 does as well
 HEAD_WORDS = ('head', 'jaw', 'eye', 'brow', 'lip', 'cheek', 'hair', 'face', 'nose', 'ear', 'tongue', 'teeth', 'mouth')
 # the fret hand's layers (game.c drives them from the chart): each groove step with the hand at these frets of the
 # neck, in these chord shapes (one finger, another finger, a barre, the hand open)

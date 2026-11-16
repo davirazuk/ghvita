@@ -654,3 +654,17 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   in real time).
   Replay "Your singing" is cfg.voice_level (Off/50/75/100/150/200%, saved). voicefx's alignment search started from
   -(1L<<40): long is 32 bits on the Vita, so alignment never moved there; now LONG_MIN.
+
+## Loose bones, leaps in close shots, the bakes off the PC (v263, 2026-11-16)
+- World Tour moves hair, hats, beards and coat tails itself: in the baked loops their bones (93-109) were left the same
+  as the hips (bone 1), so a bowed head left its hair and face pieces behind (spikes, torn faces). tools/band_bones.py
+  re-attaches each to the body bone its piece of the mesh grows from, in assets/band3d in place; a mended file is left
+  alone. The release workflow runs it on the art it takes from the last release. A rebake with tools/band.py --3d
+  should be followed by it.
+- A close shot's camera goes up with a leap (0.3 of it shows): the chorus leap used to take them out of the top.
+- The PC is gone. The source art is the `source-art` release (ghwt-textures.7z holds the venue and band .wtch files and
+  textures, ghwt-tools.7z has wtch_check.py). The workflow bakes assets/venue3d with apt's Blender 4.0 when the last
+  release has none, or when the commit says [venues]. tools/band.py reads GHWT_TOOLS and BLENDER from the environment.
+- Desktop test anywhere: unzip the latest GHVita.vpk's assets/ into assets/, cmake -DPCDEPS=/usr/include, Xvfb.
+  GHV_CINE="shot who" holds one camera shot (the leap is at 10 s of Test Song 1).
+- Download threads run at priority 185 (were 120, above the game's 160) and the game's thread is kept on core 0.

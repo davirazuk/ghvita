@@ -2309,7 +2309,7 @@ static void draw_band(double beat)
                         G.cine_aim[c] += (at[c] - G.cine_aim[c]) * ease(0.06f);
                     float cyw = cosf(d3.yaw), syw = sinf(d3.yaw);
                     d3.pos[0] = -(cyw * G.cine_aim[0] - syw * G.cine_aim[2]);
-                    d3.pos[1] = up - G.cine_aim[1];
+                    d3.pos[1] = up * 0.3f - G.cine_aim[1];       // the camera goes up with a leap: they stay in the picture
                     d3.pos[2] = -(syw * G.cine_aim[0] + cyw * G.cine_aim[2]);
                     G.cine_fade = 0;
                 }

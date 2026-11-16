@@ -72,6 +72,25 @@ jobs:
         run: |
           python3 tools/lampsync.py assets/game.png assets/game.txt tools/lampsrc
 
+      - name: The 3D band's loose bones (hair, hats and beards follow the head; a mended file is left as it is)
+        run: |
+          python3 tools/band_bones.py assets/band3d
+
+      - name: The venues as models, baked from the source art when the last release had none
+        run: |
+          if [ ! -f assets/venue3d/norway.v3d ] || git log -1 --format=%B | grep -q '\[venues\]'; then
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq blender python3-pil >/dev/null
+            pip install -q --break-system-packages py7zr
+            mkdir -p /tmp/sa
+            [ -f /tmp/sa/ghwt-textures.7z ] || gh release download source-art --pattern ghwt-textures.7z --dir /tmp/sa
+            gh release download source-art --pattern ghwt-tools.7z --dir /tmp/sa
+            python3 -c "import py7zr; py7zr.SevenZipFile('/tmp/sa/ghwt-tools.7z').extractall('/tmp/sa/t'); z=py7zr.SevenZipFile('/tmp/sa/ghwt-textures.7z'); z.extract(path='/tmp/sa/v', targets=[n for n in z.getnames() if '/venue_ghwt_' in n])"
+            rm -rf assets/venue3d
+            GHWT_TOOLS=/tmp/sa/t/mods/refs/yarg/ghwt-tools BLENDER=$(which blender) \
+              python3 tools/venue3d.py /tmp/sa/v/mods/yarg-look/YargLook/textures /tmp/sa/work | grep -c ' tris '
+            test -f assets/venue3d/norway.v3d
+          fi
+
       - name: Build, smoke test and publish
         run: |
           git config user.name "github-actions"
