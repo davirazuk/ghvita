@@ -157,9 +157,10 @@ HIT_RAISE = [1, 1, 0.55, 0, 0.2, 0.5, 0.8, 1]       # the stick's cock
 STICK_LEN = 0.382
 
 
-def hand_pose(anims, bass, male, shape, k):
+def hand_pose(anims, bass, male, shape, k, chord=None, fret=None):
     # the chord, fret and strum of one cell: what HandPlayer drives from the chart
-    chord, fret = SHAPES[shape]
+    if chord is None:
+        chord, fret = SHAPES[shape]
     kind = 'male' if male else 'fmale'
     over = {}
     fname = ('gh_rocker_male_fret_bass_%02d_d' if bass else 'gh_rocker_male_fret_%02d_d') % fret
@@ -279,9 +280,16 @@ ALT = {'guitarist': ['horse_100', 'jimi_100', 'areyou_100', 'joker_100', 'bleed_
 
 
 THREED = False          # --3d: the member as a model for the game to draw (assets/band3d), not a picture sheet
-TRI_BUDGET = 3500       # a member's triangles after decimation: they're a few hundred pixels tall at most
-DRUM_BUDGET = 5500      # the drummer's, the kit included
-TEX_MAX = 256
+TRI_BUDGET = 7000       # a member's triangles after thinning: a close shot shows them a screen tall
+DRUM_BUDGET = 12500     # the drummer's, the kit included
+ATLAS = 1024            # a member's textures packed into one picture this size: one draw for the lot
+HEAD_DENSITY, BODY_DENSITY = 1500.0, 620.0     # texels a metre the atlas gives a face, and the rest
+BLENDER = os.path.expanduser('~/mods/refs/blender-4.2.3-linux-x64/blender')
+HEAD_WORDS = ('head', 'jaw', 'eye', 'brow', 'lip', 'cheek', 'hair', 'face', 'nose', 'ear', 'tongue', 'teeth', 'mouth')
+# the fret hand's layers (game.c drives them from the chart): each groove step with the hand at these frets of the
+# neck, in these chord shapes (one finger, another finger, a barre, the hand open)
+LAYER_FRETS = [1, 6, 11, 16]
+LAYER_CHORDS = ['roll3_1', 'roll3_3', 'bar1', 'empty']
 
 
 def find_tex(tex_dir, name):
@@ -295,87 +303,207 @@ def find_tex(tex_dir, name):
     return None
 
 
-def export3d(name, meshes, skins, c, alt, tex_dir):
-    # assets/band3d/<name>.b3d: the mesh (decimated, bone weights kept) and every frame's skin matrices, the sheet's
-    # frames in the sheet's order; alt/<name>.b3a: the wilder loop's matrices for the same mesh. game.c's band3d draws
-    # them as the sheets would be: x from the loop's centre, y up from the feet, z toward the camera is -z here
+def thin(meshes, bones, budget, work, name):
+    # Blender's Decimate on every mesh big enough to matter (it keeps texture places and bone weights through the
+    # collapse); the small ones (sticks, the mic, cymbals, eyes) whole. A face keeps most of its triangles
+    total = sum(len(T) for _, _, T in meshes)
+    SMALL = 400
+    head, prop = [], []
+    for tex, V, T in meshes:
+        w = np.zeros(len(bones))
+        np.add.at(w, np.asarray(V['j']).ravel(), np.asarray(V['w']).ravel())
+        hw = sum(w[i] for i, b in enumerate(bones) if any(k in b[0].lower() for k in HEAD_WORDS))
+        head.append(hw > 0.6 * max(w.sum(), 1e-9))
+        # the kit, a guitar, the mic and its stand: flat and thin things a collapse eats (a cymbal goes to nothing)
+        pw = sum(w[i] for i, b in enumerate(bones) if any(k in b[0].lower() for k in ('control_root', 'guitar', 'mic_')))
+        prop.append(pw > 0.4 * max(w.sum(), 1e-9))
+    kept = sum(len(T) * 0.85 for (_, _, T), p in zip(meshes, prop) if p and len(T) > 400)
+    small = sum(len(T) for _, _, T in meshes if len(T) <= SMALL)
+    rest = total - small - kept / 0.85
+    ratio = min(1.0, max(budget - small - kept, rest * 0.2) / max(rest, 1))
+    arrs = {'count': len(meshes)}
+    for i, (tex, V, T) in enumerate(meshes):
+        r = 1.0 if len(T) <= SMALL else 0.85 if prop[i] else min(1.0, ratio * 1.9) if head[i] else ratio * 0.9
+        arrs.update({'p%d' % i: np.asarray(V['p'], np.float32), 'uv%d' % i: np.asarray(V['uv'], np.float32),
+                     'j%d' % i: np.asarray(V['j'], np.int32), 'w%d' % i: np.asarray(V['w'], np.float32),
+                     'a%d' % i: np.asarray(V['a'], np.float32), 't%d' % i: np.asarray(T, np.int32), 'r%d' % i: r})
+    src, dst = os.path.join(work, name + '_in.npz'), os.path.join(work, name + '_out.npz')
+    np.savez(src, **arrs)
+    subprocess.run([BLENDER, '-b', '--python', os.path.join(HERE, 'band_decimate_bl.py'), '--', src, dst], check=True,
+                   stdout=subprocess.DEVNULL)
+    d = np.load(dst)
+    out = []
+    for i, (tex, V, T) in enumerate(meshes):
+        if len(d['t%d' % i]):
+            out.append((tex, {k: d['%s%d' % (k, i)] for k in ('p', 'n', 'uv', 'j', 'w', 'a')}, d['t%d' % i], head[i]))
+    os.remove(src)
+    os.remove(dst)
+    return out
+
+
+def pack_atlas(parts, tex_dir, name, out):
+    # every mesh's texture into one picture (ATLAS square): a mesh whose texture places run past the texture's edge (a
+    # mirrored body: -1..1) gets the texture laid out as many times as it reaches, so nothing needs to wrap. What reaches
+    # further than twice each way stays a part of its own with a small wrapping texture
+    rects, alone = [], []
+    for pi, (tex, V, T, head) in enumerate(parts):
+        src = find_tex(tex_dir, tex) if tex else None
+        uv = V['uv']
+        u0, v0 = math.floor(uv[:, 0].min() + 1e-3), math.floor(uv[:, 1].min() + 1e-3)
+        nu, nv = max(1, math.ceil(uv[:, 0].max() - 1e-3) - u0), max(1, math.ceil(uv[:, 1].max() - 1e-3) - v0)
+        if not src or nu > 2 or nv > 2:
+            alone.append(pi)
+            continue
+        im = Image.open(src)
+        P = V['p']
+        e1, e2 = P[T[:, 1]] - P[T[:, 0]], P[T[:, 2]] - P[T[:, 0]]
+        a3 = np.linalg.norm(np.cross(e1, e2), axis=1).sum() / 2
+        f1, f2 = uv[T[:, 1]] - uv[T[:, 0]], uv[T[:, 2]] - uv[T[:, 0]]
+        a2 = np.abs(f1[:, 0] * f2[:, 1] - f1[:, 1] * f2[:, 0]).sum() / 2
+        m_per_uv = math.sqrt(a3 / max(a2, 1e-9))            # metres one whole texture covers on them
+        want = m_per_uv * (HEAD_DENSITY if head else BODY_DENSITY)
+        w = int(min(max(want, 8), im.width)) * nu
+        h = int(min(max(want * im.height / im.width, 8), im.height)) * nv
+        rects.append([pi, src, (u0, v0, nu, nv), w, h, (src, nu, nv)])
+    # the same texture over the same tiles: one place for all the meshes that use it
+    shared = {}
+    for r in rects:
+        k = r[5]
+        if k in shared:
+            shared[k][3], shared[k][4] = max(shared[k][3], r[3]), max(shared[k][4], r[4])
+        else:
+            shared[k] = [None, r[1], r[2], r[3], r[4]]
+    PAD = 3
+    scale = 1.0
+    while True:
+        items = sorted(shared.items(), key=lambda kv: -kv[1][4])
+        x = y = row = 0
+        place, ok = {}, True
+        for k, r in items:
+            w, h = max(4, int(r[3] * scale)), max(4, int(r[4] * scale))
+            if x + w + 2 * PAD > ATLAS:
+                x, y, row = 0, y + row, 0
+            if y + h + 2 * PAD > ATLAS or w + 2 * PAD > ATLAS:
+                ok = False
+                break
+            place[k] = (x + PAD, y + PAD, w, h)
+            x += w + 2 * PAD
+            row = max(row, h + 2 * PAD)
+        if ok:
+            break
+        scale *= 0.94
+    used_h = y + row
+    AH = 1 << max(6, math.ceil(math.log2(max(used_h, 1))))
+    atlas = Image.new('RGBA', (ATLAS, AH), (0, 0, 0, 0))
+    for k, (x, y, w, h) in place.items():
+        src, nu, nv = k
+        im = Image.open(src).convert('RGBA')
+        tw, th = max(1, w // nu), max(1, h // nv)
+        tile = im.resize((tw, th), Image.LANCZOS)
+        # the tiles, and a margin of the texture going on round them (what a wrap would have shown)
+        big = Image.new('RGBA', (tw * (nu + 2), th * (nv + 2)))
+        for a in range(nu + 2):
+            for b in range(nv + 2):
+                big.paste(tile, (a * tw, b * th))
+        big = big.crop((tw - PAD, th - PAD, tw * (nu + 1) + PAD, th * (nv + 1) + PAD))
+        atlas.paste(big, (x - PAD, y - PAD))
+        place[k] = (x, y, tw * nu, th * nv)
+    aname = name + '_atlas'
+    atlas.save(os.path.join(out, 'tex', aname + '.png'), optimize=True)
+    # the atlas's meshes as one part, the rest as they were
+    merged = {k: [] for k in ('p', 'n', 'uv', 'j', 'w', 'a')}
+    tris, base = [], 0
+    for pi, src, box, w, h, key in rects:
+        tex, V, T, head = parts[pi]
+        x, y, pw, ph = place[key]
+        uv = V['uv'].copy()
+        uv[:, 0] = (x + (uv[:, 0] - box[0]) / box[2] * pw) / ATLAS
+        uv[:, 1] = (y + (uv[:, 1] - box[1]) / box[3] * ph) / AH
+        for k in merged:
+            merged[k].append(uv if k == 'uv' else V[k])
+        tris.append(T + base)
+        base += len(V['p'])
+    result = []
+    if base:
+        result.append((aname, {k: np.concatenate(v) for k, v in merged.items()}, np.concatenate(tris), False))
+    for pi in alone:
+        tex, V, T, head = parts[pi]
+        src = find_tex(tex_dir, tex) if tex else None
+        tname = ''
+        if src:
+            tname = (name + '_' + os.path.basename(src)[:-4])[-31:]
+            im = Image.open(src).convert('RGBA')
+            k = max(im.width, im.height) / 128
+            if k > 1:
+                im = im.resize((max(1, int(im.width / k)), max(1, int(im.height / k))), Image.LANCZOS)
+            im.save(os.path.join(out, 'tex', tname + '.png'), optimize=True)
+        result.append((tname, V, T, True))          # True: wraps
+    print(name, 'atlas', ATLAS, 'x', AH, 'scale %.2f' % scale, len(place), 'textures,', len(alone), 'parts alone')
+    return result
+
+
+def export3d(name, meshes, skins, c, alt, tex_dir, layers, bones, work):
+    # assets/band3d/<name>.b3d: the mesh (thinned, bone weights kept, textures in one atlas), every frame's skin matrices
+    # in the sheet's order, and the fret hand's layers; alt/<name>.b3a: the wilder loop's matrices and layers for the
+    # same mesh. Model space: x from the loop's centre, y up from the feet, facing -z
     out = os.path.join(HERE, '..', 'assets', 'band3d')
     os.makedirs(os.path.join(out, 'tex'), exist_ok=True)
     os.makedirs(os.path.join(out, 'alt'), exist_ok=True)
     S = np.stack([np.stack(sk)[:, :3, :] for sk in skins]).astype('<f4')      # frames x bones x 3 x 4
     S[:, :, 0, 3] -= c[0]      # the loop's centre at x = z = 0, as each sheet is centred on its own loop
     S[:, :, 2, 3] -= c[2]
+    lb, L = (np.zeros(0, '<i4'), np.zeros((0, 0, 0, 0, 3, 4), '<f4')) if layers is None else layers
+    L = L.astype('<f4').copy()
+    if L.size:
+        L[..., 0, 3] -= c[0]
+        L[..., 2, 3] -= c[2]
+    lhead = struct.pack('<iiii', len(lb), L.shape[0] if L.size else 0, L.shape[1] if L.size else 0,
+                        L.shape[2] if L.size else 0)
     if alt:
         with open(os.path.join(out, 'alt', name + '.b3a'), 'wb') as o:
-            o.write(b'B3A1' + struct.pack('<ii', S.shape[1], S.shape[0]))
+            o.write(b'B3A2' + struct.pack('<ii', S.shape[1], S.shape[0]) + lhead)
             o.write(S.tobytes())
-        print(name, '3d alt', S.shape[0], 'frames')
+            o.write(np.asarray(lb, '<i4').tobytes())
+            o.write(L.tobytes())
+        print(name, '3d alt', S.shape[0], 'frames', len(lb), 'hand bones')
         return
-    import pyfqmr
-    from scipy.spatial import cKDTree
     total = sum(len(T) for _, _, T in meshes)
-    # small parts (drums, cymbals, sticks, the mic) kept whole: they fall apart decimated; the bodies take the cut
-    budget = DRUM_BUDGET if name.startswith('drummer') else TRI_BUDGET
-    SMALL = 500
-    small = sum(len(T) for _, _, T in meshes if len(T) <= SMALL)
-    big = total - small
-    ratio = min(1.0, max(budget - small, big * 0.15) / max(big, 1))
-    parts = []
-    for tex, V, T in meshes:
-        P0 = np.asarray(V['p'], np.float64)
-        T0 = np.asarray(T, np.int64)
-        if ratio < 1 and len(T0) > SMALL:
-            m = pyfqmr.Simplify()
-            m.setMesh(P0, T0)
-            m.simplify_mesh(target_count=max(24, int(len(T0) * ratio)), aggressiveness=5, preserve_border=False, verbose=0)
-            P1, T1, _ = m.getMesh()
-            # each new vertex takes what the nearest old one had: its texture place, normal and bones
-            near = cKDTree(P0).query(P1)[1]
-        else:
-            P1, T1, near = P0, T0, np.arange(len(P0))
-        if len(T1) == 0:
-            continue
-        j = np.asarray(V['j'])[near].copy()
-        w = np.asarray(V['w'])[near].copy()
-        # the two strongest bones only (the game skins on the CPU): the rest are slivers
-        o_ = np.argsort(-w, axis=1)
-        j = np.take_along_axis(j, o_, 1)
-        w = np.take_along_axis(w, o_, 1)
-        w[:, 2:] = 0
-        j[:, 2:] = 0
-        w = w / np.maximum(w.sum(1, keepdims=True), 1e-6)
+    parts = thin(meshes, bones, DRUM_BUDGET if name.startswith('drummer') else TRI_BUDGET, work, name)
+    parts = pack_atlas(parts, tex_dir, name, out)
+    recs = []
+    for tname, V, T, wraps in parts:
+        n = V['n'] / (np.linalg.norm(V['n'], axis=1, keepdims=True) + 1e-9)
+        w = V['w'] / np.maximum(V['w'].sum(1, keepdims=True), 1e-6)
         wq = np.round(w * 255).astype(np.int32)
         wq[:, 0] += 255 - wq.sum(1)
-        n = np.asarray(V['n'])[near]
-        n = n / (np.linalg.norm(n, axis=1, keepdims=True) + 1e-9)
-        rec = np.zeros(len(P1), np.dtype([('p', '<f4', 3), ('n', '<f4', 3), ('uv', '<f4', 2), ('j', 'u1', 4), ('w', 'u1', 4)]))
-        rec['p'] = P1
+        rec = np.zeros(len(V['p']), np.dtype([('p', '<f4', 3), ('n', '<f4', 3), ('uv', '<f4', 2), ('j', 'u1', 4), ('w', 'u1', 4)]))
+        rec['p'] = V['p']
         rec['n'] = n
-        rec['uv'] = np.asarray(V['uv'])[near]
-        rec['j'] = j
-        rec['w'] = np.clip(wq, 0, 255)
-        tname = ''
-        src = find_tex(tex_dir, tex) if tex else None
-        if src:
-            tname = os.path.basename(src)[:-4][:31]
-            dst = os.path.join(out, 'tex', tname + '.png')
-            if not os.path.exists(dst):
-                im = Image.open(src).convert('RGBA')
-                k = max(im.width, im.height) / TEX_MAX
-                if k > 1:
-                    im = im.resize((max(1, int(im.width / k)), max(1, int(im.height / k))), Image.LANCZOS)
-                im.save(dst, optimize=True)
-        parts.append((tname, rec, np.asarray(T1, '<u2')))
+        rec['uv'] = V['uv']
+        rec['j'][:, :2] = V['j']
+        rec['w'][:, :2] = np.clip(wq, 0, 255)
+        rec['w'][:, 3] = np.clip(np.round(V['a'] * 255), 0, 255)       # the vertex's own alpha
+        # 65535 vertices a part at most (u16 indices)
+        assert len(rec) < 65536, name
+        recs.append((tname, rec, np.asarray(T, '<u2'), wraps))
     with open(os.path.join(out, name + '.b3d'), 'wb') as o:
-        o.write(b'B3D1' + struct.pack('<iiiff', len(parts), S.shape[1], S.shape[0], 0.0, 0.0))
-        for tname, rec, T1 in parts:
+        o.write(b'B3D2' + struct.pack('<iii', len(recs), S.shape[1], S.shape[0]) + lhead)
+        for tname, rec, T1, wraps in recs:
             o.write(tname.encode().ljust(32, b'\0'))
-            o.write(struct.pack('<ii', len(rec), len(T1)))
+            o.write(struct.pack('<iii', len(rec), len(T1), 1 if wraps else 0))
             o.write(rec.tobytes())
             o.write(T1.tobytes())
         o.write(S.tobytes())
-    print(name, '3d', sum(len(r) for _, r, _ in parts), 'verts', sum(len(t) for _, _, t in parts), 'tris (from', total,
-          ')', os.path.getsize(os.path.join(out, name + '.b3d')) // 1024, 'KB')
+        o.write(np.asarray(lb, '<i4').tobytes())
+        o.write(L.tobytes())
+        # what a camera aims at: the head, the chest and the pelvis (the bone, and where its joint is in the mesh)
+        low = {b[0].lower(): i for i, b in enumerate(bones)}
+        o.write(struct.pack('<i', 3))
+        for bn in ('bone_head', 'bone_chest', 'bone_pelvis'):
+            i = low.get(bn, 0)
+            o.write(struct.pack('<i3f', i, *np.linalg.inv(bones[i][4])[:3, 3]))
+    print(name, '3d', sum(len(r) for _, r, _, _ in recs), 'verts', sum(len(t) for _, _, t, _ in recs), 'tris (from', total,
+          ')', len(recs), 'parts', len(lb), 'hand bones', os.path.getsize(os.path.join(out, name + '.b3d')) // 1024, 'KB')
 
 
 def bake(path, work, tex_dir, alt=False):
@@ -506,7 +634,26 @@ def bake(path, work, tex_dir, alt=False):
 
     c = np.mean(centre, axis=0) if centre else np.zeros(3)
     if THREED:
-        export3d(name, meshes, skins, c, alt, tex_dir)
+        layers = None
+        if g0 is not None:
+            # the fret hand apart from the body: every groove step with the hand at each of LAYER_FRETS in each of
+            # LAYER_CHORDS; the bones that differ between them are the layer's (the arm, the hand, the fingers)
+            male = sex_of(tex_dir, name) != 'f'
+            all_ = np.zeros((GROOVE, len(LAYER_FRETS), len(LAYER_CHORDS), len(bones), 3, 4))
+            for g in range(GROOVE):
+                f = s0 + g * span // GROOVE
+                pose = blended(clip, f, (s0, s0 + span))
+                for pi, fret in enumerate(LAYER_FRETS):
+                    for ci, chord in enumerate(LAYER_CHORDS):
+                        rig = wc.Rig(bones, pose_over(bones, pose, hand_pose(anims, role == 'bassist', male, 0,
+                                                                             STRUM_K[0], chord, fret)))
+                        wc.solve(rig, rest, role, (f - s0) / span * BEATS, g0)
+                        guitar_hands(rig)
+                        all_[g, pi, ci] = np.stack([(m @ b[4])[:3, :] for m, b in zip(rig.W, bones)])
+            spread = np.abs(all_ - all_[:, :1, :1]).max(axis=(0, 1, 2, 4, 5))
+            lb = np.nonzero(spread > 1e-4)[0]
+            layers = (lb.astype('<i4'), all_[:, :, :, lb])
+        export3d(name, meshes, skins, c, alt, tex_dir, layers, bones, work)
         return
     binp = os.path.join(work, name + '.bin')
     ca, sa = math.cos(PITCH), math.sin(PITCH)

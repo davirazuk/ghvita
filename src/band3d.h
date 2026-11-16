@@ -5,27 +5,42 @@
 #include <stdint.h>
 
 typedef struct Band3D Band3D;
+// the fret hand, from the chart: the frame's two groove steps (ga < 0: as the frames have it), where along the neck
+// (0 by the nut .. the last place, by the body; between two: blended), and two chord shapes, cb by wc
+typedef struct Band3DHands {
+    int ga, gb;
+    float fret;
+    int ca, cb;
+    float wc;
+} Band3DHands;
 
 Band3D * band3d_load(const char * name);        // assets/band3d/<name>.b3d (+ alt/<name>.b3a); NULL: none
 void band3d_free(Band3D * m);
 int band3d_frames(const Band3D * m, bool alt);  // 0: no such frames
+bool band3d_has_hands(const Band3D * m);        // the fret hand can be driven (a guitar, a bass)
 
 typedef struct {
     bool alt_a, alt_b;          // which frames: the main loop's or the wilder one's
     int fa, fb;                 // two frames, blended: fb by wb
     float wb;
-    float x, feet, ppm;         // where the feet are on the screen, pixels per metre
-    float yaw;                  // turned about their own up (radians), 0 facing the camera
-    float squash;               // across the screen (1: as is)
-    float lean, dip;            // the top of them moved by this many pixels (sideways, down)
+    // where they stand: metres from what the camera looks at (x to the right of the stage as the audience sees it, y up,
+    // z toward the audience), turned about their own up (0 facing the audience)
+    float pos[3], yaw;
+    // the camera: round the target by cam_yaw (to the audience's right), above it by cam_pitch (radians), cam_dist
+    // metres away; the target lands on the screen at (cx, cy), a metre there ppm pixels
+    float cam_yaw, cam_pitch, cam_dist, cx, cy, ppm;
     float top[3], bot[3];       // the light from head to toe, per channel
+    float key[3];               // where the key light comes from, as the camera sees it (x right, y up, z to the camera)
+    float fill;                 // how much of the light reaches the unlit side (0 hard .. 1 flat)
     uint32_t tint;
     float rim[3], rim_k;        // the backlight's colour and how strong
-    float depth;                // 0 the furthest member .. 3 the nearest (each its own depth range)
     bool ink;                   // the cut-out look's ink line round them
-    bool shadow;                // their shape lying on the floor in front of them, as the sheets' cut-outs had
+    bool shadow;                // their shape lying on the floor in front of them
+    float floor_y;              // the shadow's: the floor on the screen
+    Band3DHands hands;          // the guitar's fret hand, driven by the chart (ga < 0: as the frames have it)
 } Band3DDraw;
 
-void band3d_begin(bool clear);  // before a member (clear: the first, the depth buffer cleared)
+void band3d_anchor(const Band3D * m, const Band3DDraw * d, int which, float out[3]);    // 0 head, 1 chest, 2 pelvis
+void band3d_begin(bool clear);  // before a member (clear: the depth buffer cleared)
 void band3d_draw(Band3D * m, const Band3DDraw * d);
 void band3d_end(void);

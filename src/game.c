@@ -67,6 +67,11 @@ typedef struct {
     float mic;                  // the singer's: 0 down, 1 at the mouth
     float pulse;
     bool was;
+    bool on;                    // playing right now (the camera goes to whoever is)
+    // a guitar's fret hand (the 3D band): the frets of the note it's on, where along the neck it is, two chord shapes
+    int fret_now;
+    float hand_fret, chord_w;
+    int chord_a, chord_b;
     float walk, front;          // metres along the stage they've wandered, 1 out front for a solo
     float turn;                 // walking, a standee shows its edge a little
 } BandPart;
@@ -181,6 +186,12 @@ static struct {
     Tex * band[4];                      // drummer, vocalist, guitarist, bassist
     Tex * band_alt[4];                  // their wilder loops, for the big sections (NULL: none)
     Band3D * band3d[4];                 // their 3D models, drawn instead (NULL: the pictures)
+    // the 3D band's director: a cut to one of them as Guitar Hero's camera has them (cine_shot >= 0), or the whole
+    // stage (-1); who it's on, the beat it cut on and how many beats it holds, which side of the board they're on
+    int cine_shot, cine_who, cine_slot;
+    double cine_t0, cine_len;
+    float cine_side, cine_fade, cine_aim[3];
+    Tex * venue_blur;                   // the venue out of focus, behind a close shot
     const float (*marks)[3];
     // the camera's shots of the venue (tools/venues.py SHOTS): 0 the wide one, then stage left, stage right, low front
     Tex * shot_tex[VENUE_SHOTS], * shot_glow[VENUE_SHOTS];
@@ -384,9 +395,17 @@ static void pick_band(const Song * song, uint32_t h)
         for (int j = 0; j < n; j++)
             if (cfg.band_pick[r][0] && strcmp(res.band_names[found[j]], cfg.band_pick[r]) == 0)
                 pick = found[j];            // chosen in the options
-        G.band[r] = res_band_sheet(r, res.band_names[pick]);
-        G.band_alt[r] = res_band_alt(r);
         G.band3d[r] = cfg.band_pictures ? NULL : res_band3d(r, res.band_names[pick]);
+        if (G.band3d[r]) {
+            // the model stands in for the pictures: their sheets (megabytes each) aren't loaded, only a sheet's
+            // measures kept for the code that picks frames
+            static Tex stand = {.w = 255 * 8, .h = 384 * 8}, kit = {.w = 266 * 8, .h = 232 * 8};
+            res_band_sheet(r, NULL);
+            G.band[r] = r ? &stand : &kit;
+        } else {
+            G.band[r] = res_band_sheet(r, res.band_names[pick]);
+            G.band_alt[r] = res_band_alt(r);
+        }
         G.band_rise[r] = res.band_has_rise[pick] ? res.band_rise[pick] : NULL;
     }
     (void)song;
@@ -402,7 +421,9 @@ void game_force_venue(const char * zone)
 // the song's venue: each song always plays the same one (like YargLook's pick), or as the options say
 static void pick_venue(const Song * song)
 {
-    G.venue = G.venue_lights = NULL;
+    G.venue = G.venue_lights = G.venue_blur = NULL;
+    G.cine_shot = -1;
+    G.cine_slot = -1000;
     G.venue_title = NULL;
     G.marks = NULL;
     if (!res.venue_count || (!forced_venue && strcmp(cfg.venue, "classic") == 0))
@@ -426,6 +447,7 @@ static void pick_venue(const Song * song)
     G.shot = 0;
     if (res_venue(zone, &G.venue, &G.venue_lights)) {
         G.venue_title = res_venue_title(zone);
+        G.venue_blur = res_venue_blur(zone);
         G.marks = res_venue_marks(zone);
         G.shot_tex[0] = G.venue;
         G.shot_glow[0] = G.venue_lights;
@@ -455,6 +477,7 @@ static void pick_venue(const Song * song)
 }
 
 static void draw_band(double beat);
+static void cine_direct(double beat, bool solo);
 static uint32_t with_alpha(uint32_t c, float a);
 static uint32_t col3(const float c[3], float a);
 static void sprite_rot(const Sprite * s, float x, float y, float w, float h, float px, float py, float angle,
@@ -469,6 +492,29 @@ static void party(void)
 // where a member really stands, in the venue picture's pixels: x, y of the feet, pixels per metre. The venues' own marks
 // can be off the screen or behind the rock meter, so they're brought in to where they're seen. The singer's is behind
 // the highway: beside the kit they can be seen
+// The 3D band's shots, as Guitar Hero's camera frames them: what the camera looks at (metres up from their feet), how
+// many metres of them fill the screen's height at the cut and by its end (it pushes in), the orbit and the pitch at
+// both ends (degrees; a negative pitch looks up at them), how far the camera stands (the nearer, the more the lens
+// bends), and where on the screen the target lands (sx on the left: mirrored for whoever is on the right)
+typedef struct {
+    int anchor;                 // what it looks at: 0 the head, 1 the chest, 2 the pelvis
+    float up;                   // and this far above it (metres)
+    float vis0, vis1, yaw0, yaw1, pitch0, pitch1, dist, sx, sy;
+} CineShot;
+enum { CS_MEDIUM, CS_HERO, CS_FACE, CS_NECK, CS_DRUMS, CS_LINE, CS_WAIST, CS_COUNT };
+static const CineShot cine_shots[CS_COUNT] = {
+    [CS_MEDIUM] = {1, 0.02f, 1.50f, 1.34f, 26, 12, -7, -5, 4.0f, 0.25f, 0.42f},     // chest up, beside the board
+    [CS_HERO] = {2, 0.0f, 2.30f, 2.05f, 38, 24, -20, -16, 2.6f, 0.21f, 0.50f},       // from the floor, legs long
+    [CS_FACE] = {0, -0.03f, 1.02f, 0.92f, 34, 18, -8, -5, 3.4f, 0.50f, 0.24f},       // the face over the top of the board
+    [CS_NECK] = {1, -0.06f, 1.50f, 1.32f, -30, -18, -2, 2, 2.8f, 0.23f, 0.46f},     // from the neck's side, the fret hand near
+    [CS_DRUMS] = {1, -0.15f, 2.9f, 2.6f, 24, 8, 14, 10, 5.0f, 0.50f, 0.25f},         // the kit from above the cymbals
+    [CS_LINE] = {2, 0.25f, 5.0f, 4.5f, 10, -6, -8, -6, 8.0f, 0.50f, 0.27f},          // the whole band strung across
+    [CS_WAIST] = {1, -0.10f, 1.95f, 1.75f, -22, -8, -10, -8, 3.6f, 0.25f, 0.46f},    // waist up, the guitar in the picture
+};
+
+// where each stands in the band-line shot (metres: x across the stage, y up, z toward the audience)
+static const float cine_line[4][3] = {{0.75f, 0.35f, -2.4f}, {-0.95f, 0, 0.6f}, {2.6f, 0, 0}, {-2.7f, 0, 0}};
+
 static void member_spot(int r, float m[3])
 {
     m[0] = G.marks[r][0];
@@ -1126,6 +1172,165 @@ static void run_cues(void)
     }
 }
 
+// The director of the 3D band: every two bars a new shot, as Guitar Hero cuts. The count-in on the whole band in a
+// line; then round the members, more often whoever plays your part, the singer's face while there's a line to sing,
+// now and then the whole stage (the venue's own picture); a solo stays on you; Star Power cuts to you from the floor;
+// the last chord goes back to the stage for the fireworks
+static void cine_direct(double beat, bool solo)
+{
+    bool any = false;
+    for (int r = 0; r < 4; r++)
+        any = any || (G.band[r] && G.band3d[r]);
+    if (!any || cfg.stage_only || !G.marks || cfg.backdrop) {
+        G.cine_shot = -1;
+        return;
+    }
+    // a shot holds two bars, or one where two would be longer than about four and a half seconds
+    double bps = G.t > 0 ? chart_quarters(G.chart, G.t + 0.5) - chart_quarters(G.chart, G.t) : 1;
+    int per = bps * 2 > 0.1 && 8 / (bps * 2) > 4.5 ? 4 : 8;
+    int me = member_me(), slot = (int)floor(beat / per);
+    bool over = G.t > G.last_note_end && G.last_note_end > 0;
+    int shot = G.cine_shot, who = G.cine_who;
+    bool cut = false;
+    static bool was_sp, was_solo;
+    if (G.t < G.intro_end || G.t <= 0) {
+        shot = CS_LINE;
+        who = 1;
+        cut = G.cine_shot != CS_LINE;
+        slot = G.cine_slot;
+    } else if (over) {
+        shot = -1;
+        cut = G.cine_shot != -1;
+        slot = G.cine_slot;
+    } else if (G.sp_active && !was_sp) {
+        shot = CS_HERO;
+        who = me;
+        cut = true;
+    } else if (solo && !was_solo) {
+        shot = me == 0 ? CS_DRUMS : me == 1 ? CS_FACE : CS_NECK;
+        who = me;
+        cut = true;
+    } else if (slot != G.cine_slot && beat - G.cine_t0 >= per * 0.5) {     // not straight after a cut Star Power made
+        cut = true;
+        int other = me == 2 ? 3 : 2;            // the other guitar
+        if (solo) {
+            static const int mine[4] = {CS_WAIST, CS_HERO, CS_NECK, CS_MEDIUM};
+            shot = mine[slot & 3];
+            who = me;
+        } else {
+            // a round of twelve shots; the big sections lean on the low and the wide ones
+            static const int8_t round_shot[12] = {-1, CS_MEDIUM, CS_FACE, CS_HERO, CS_DRUMS, CS_WAIST, CS_LINE, CS_FACE,
+                                                  -1, CS_MEDIUM, CS_NECK, CS_HERO};
+            static const int8_t round_who[12] = {0, 4, 1, 5, 0, 4, 1, 1, 0, 5, 4, 4};   // 4: you, 5: the other guitar
+            static int turn;
+            int k = turn++ % 12;                // the round in order: everybody gets their shot
+            shot = round_shot[k];
+            who = round_who[k] == 4 ? me : round_who[k] == 5 ? other : round_who[k];
+            if (G.big_section && shot == CS_MEDIUM)
+                shot = CS_HERO;
+            // the singer's face only while there's something to sing; else whoever's playing
+            if (who == 1 && !G.band_part[1].on && shot != CS_LINE) {
+                who = G.band_part[other].on ? other : me;
+                shot = CS_WAIST;
+            }
+        }
+    }
+    was_sp = G.sp_active;
+    was_solo = solo;
+    if (!cut)
+        return;
+    if (shot >= 0 && shot != CS_LINE) {
+        // nobody there to cut to: you, or the stage
+        if (!G.band[who] || !G.band3d[who])
+            who = me;
+        if (!G.band[who] || !G.band3d[who])
+            shot = -1;
+        // each to the shots that suit them
+        if (who == 0)
+            shot = shot < 0 ? -1 : CS_DRUMS;
+        else if (shot == CS_DRUMS)
+            shot = CS_MEDIUM;
+        if (who == 1 && (shot == CS_NECK || shot == CS_WAIST))
+            shot = CS_MEDIUM;
+    }
+    if (shot == G.cine_shot && who == G.cine_who && shot >= 0 && slot != G.cine_slot && !solo)
+        shot = shot == CS_MEDIUM ? CS_WAIST : CS_MEDIUM;        // never the same shot twice running
+    G.cine_slot = slot;
+    if (shot != G.cine_shot || who != G.cine_who) {
+        G.cine_shot = shot;
+        G.cine_who = who;
+        G.cine_t0 = beat;
+        G.cine_len = per;
+        G.cine_side = who == 2 ? 1 : who == 3 ? -1 : (slot & 1) ? 1 : -1;
+        G.cine_fade = 1;
+#ifndef __vita__
+        plat_log("cine: shot %d on %d at %.2f", shot, who, G.t);
+#endif
+    }
+}
+
+// a close shot's camera now: the shot's two ends eased between, a hand-held drift on top
+typedef struct {
+    float ppm, yaw, pitch, dist, cx, cy;
+} CineCam;
+
+static CineCam cine_cam(double beat)
+{
+    const CineShot * cs = &cine_shots[G.cine_shot];
+    float u = (float)((beat - G.cine_t0) / G.cine_len);
+    u = u < 0 ? 0 : u > 1 ? 1 : u;
+    u = u * (2 - u);                    // the move slows into its end
+    float side = G.cine_shot == CS_DRUMS || G.cine_shot == CS_LINE ? ((G.cine_slot & 1) ? 1 : -1) : G.cine_side;
+    float t = (float)G.t, rad = 3.14159265f / 180;
+    CineCam c;
+    c.ppm = SCREEN_H / (cs->vis0 + (cs->vis1 - cs->vis0) * u) * (1 + 0.012f * G.band_loud);
+    c.yaw = -side * (cs->yaw0 + (cs->yaw1 - cs->yaw0) * u) * rad + sinf(t * 0.61f) * 0.012f;
+    c.pitch = (cs->pitch0 + (cs->pitch1 - cs->pitch0) * u) * rad + sinf(t * 0.47f + 1) * 0.008f;
+    c.dist = cs->dist;
+    float sx = G.cine_shot == CS_DRUMS || G.cine_shot == CS_LINE || G.cine_shot == CS_FACE ? cs->sx
+               : side > 0 ? 1 - cs->sx : cs->sx;
+    if (G.cine_shot == CS_FACE)
+        sx = 0.5f - side * 0.06f;
+    float kick = cfg.flashes < 2 ? G.kick : 0;
+    c.cx = SCREEN_W * sx + sinf(t * 0.83f) * 3 + sinf(t * 61) * 7 * kick;
+    c.cy = SCREEN_H * cs->sy + sinf(t * 0.71f + 2) * 2 + sinf(t * 47 + 2) * 5 * kick;
+    return c;
+}
+
+// behind a close shot: the venue out of focus, sliding as the camera goes round, the rig's lights as soft discs
+static void draw_cine_back(double beat, float pulse)
+{
+    CineCam c = cine_cam(beat);
+    Tex * t = G.venue_blur ? G.venue_blur : G.venue;
+    if (t) {
+        const Sprite s = sprite_whole(t);
+        float z = 1.9f, w = SCREEN_W * z, h = SCREEN_H * z;
+        // what's behind them slides the other way as the camera goes round, and rises as it looks up
+        float x = (SCREEN_W - w) / 2 - c.yaw * 420 + (c.cx - SCREEN_W / 2) * 0.25f, y = (SCREEN_H - h) / 2 - 60 - c.pitch * 500;
+        x = x > 0 ? 0 : x < SCREEN_W - w ? SCREEN_W - w : x;
+        y = y > 0 ? 0 : y < SCREEN_H - h ? SCREEN_H - h : y;
+        float lit[3];
+        for (int i = 0; i < 3; i++)
+            lit[i] = fminf(1, 0.30f + 0.62f * G.stage_col[i]);
+        gfx_sprite(&s, x, y, w, h, col3(lit, 1));
+    } else
+        gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(10, 6, 18, 255));
+    if (cfg.light_fx)
+        return;
+    // the rig's lamps, far out of focus: discs of the show's colours up where the trusses are
+    const Sprite * dot = atlas_get(res.stage, "dot");
+    gfx_blend(BLEND_ADD);
+    for (int i = 0; i < 9; i++) {
+        uint32_t k = (uint32_t)(i * 2654435761u + G.cine_slot * 40503u);
+        float bx = (float)(k >> 8 & 1023) / 1023 * (SCREEN_W + 400) - 200 - c.yaw * 700;
+        float by = 20 + (float)(k >> 18 & 255) / 255 * 190 - c.pitch * 300;
+        float size = 70 + (float)(k >> 4 & 63) * 1.6f, tw = 0.5f + 0.5f * sinf((float)G.t * (1.3f + i * 0.37f) + i);
+        float a = (0.10f + 0.16f * tw + 0.14f * pulse * G.band_loud) * (i & 1 ? 1 : 0.7f);
+        gfx_sprite(dot, bx - size / 2, by - size / 2, size, size, col3(i % 3 ? G.key_col : G.light_col, a));
+    }
+    gfx_blend(BLEND_ALPHA);
+}
+
 static void draw_stage(void)
 {
     if (!G.venue && cfg.backdrop == 1 && G.art) {
@@ -1339,7 +1544,29 @@ static void draw_stage(void)
         G.focus = turns[(slot / 2) & 3];
     if (G.focus >= 0 && !G.band[G.focus])
         G.focus = -1;
+    cine_direct(beat, solo);
 #ifndef __vita__
+    if (getenv("GHV_CINE")) {           // tests: this shot on this member, held ("shot who"), -1: the stage
+        int cs = -1, cw = 2;
+        sscanf(getenv("GHV_CINE"), "%d %d", &cs, &cw);
+        if (cs != G.cine_shot || cw != G.cine_who) {
+            G.cine_t0 = beat;
+            G.cine_len = 8;
+        }
+        G.cine_shot = cs >= CS_COUNT ? -1 : cs;
+        G.cine_who = cw & 3;
+        G.cine_side = cw == 2 ? 1 : -1;
+    }
+#endif
+    if (G.cine_shot >= 0)
+        G.focus = -1;
+#ifndef __vita__
+    if (getenv("GHV_FOCUS")) {          // tests: the camera held on one member (-1: the whole stage), GHV_VIEW the view
+        G.focus = atoi(getenv("GHV_FOCUS"));
+        intro = false;
+    }
+    if (getenv("GHV_VIEW"))
+        G.view_mode = atoi(getenv("GHV_VIEW"));
     static int was_focus = -2;
     if (G.focus != was_focus)
         plat_log("cam: focus %d at %.2f", G.focus, G.t);
@@ -1362,6 +1589,13 @@ static void draw_stage(void)
         float rx = 480 * (zoom - 1) - 14, ry = 272 * (zoom - 1) - 8;
         aim_x = aim_x > rx ? rx : aim_x < -rx ? -rx : aim_x;
         aim_y = aim_y > ry ? ry : aim_y < -ry ? -ry : aim_y;
+#ifndef __vita__
+        if (getenv("GHV_ZOOM")) {       // tests: this close, the member in the middle of the screen
+            zoom = (float)atof(getenv("GHV_ZOOM"));
+            aim_x = 480 - 480 - (m[0] - 480) * zoom;
+            aim_y = 272 - 272 - ((m[1] - 1.1f * m[2]) - 272) * zoom;
+        }
+#endif
     }
     if (G.shots > 1 && G.t >= G.intro_end) {
         // the slow push in on whatever shot it is (8 bars to its closest)
@@ -1422,6 +1656,16 @@ static void draw_stage(void)
         gfx_sprite(&cs, x, y, w, w, col3(c, 1));
         if (!cfg.no_vignette)
             vignette();
+        return;
+    }
+    if (G.cine_shot >= 0) {
+        // a cut to the band: only them, over the venue out of focus
+        draw_cine_back(beat, pulse);
+        draw_band(beat);
+        if (!cfg.no_vignette)
+            vignette();
+        if (!cfg.no_crowd && !cfg.light_fx)
+            draw_flashes();
         return;
     }
     stage_layer(G.venue, col3(G.stage_col, 1));
@@ -1561,6 +1805,8 @@ static bool band_playing(int r, double beat_len)
         if (end > b->held)
             b->held = end;
         b->pulse = 1;
+        if (r >= 2)
+            b->fret_now = n->frets;
         if (r == 0 && (n->frets & 8) && !(n->flags & NOTE_TOM_G))
             G.crash_t = n->time / 1e6;          // the green cymbal: a crash
         if (n->time / 1e6 >= b->hit_t && n->time / 1e6 > b->last_hit && band_strikes(r, n, b->last_hit)) {
@@ -1643,7 +1889,12 @@ static void draw_band(double beat)
 {
     if (!G.marks)
         return;
-    static const int order[4] = {0, 1, 3, 2};
+    bool cine = G.cine_shot >= 0;
+    CineCam cc = {0};
+    if (cine)
+        cc = cine_cam(beat);
+    static const int order_stage[4] = {0, 1, 3, 2}, order_line[4] = {0, 3, 2, 1};
+    const int * order = cine ? order_line : order_stage;
     double bpm = G.t > 0 ? (chart_quarters(G.chart, G.t + 0.5) - chart_quarters(G.chart, G.t)) * 120 : 120;
     double speed = 1;
     while (bpm > 1 && bpm * speed > 150)
@@ -1672,7 +1923,7 @@ static void draw_band(double beat)
     uint32_t col = col3(lit, 1);
     // their shadows on the floor, and a pool of light under whoever the camera's on
     const Sprite * dot = atlas_get(res.stage, "dot");
-    for (int r = 0; r < 4; r++) {
+    for (int r = 0; r < 4 && !cine; r++) {
         if (!G.band[r])
             continue;
         float m[3];
@@ -1691,7 +1942,6 @@ static void draw_band(double beat)
         strip_top[i] = 1.12f + G.key_col[i] * 0.4f * (0.6f + 0.4f * G.band_loud);
         strip_bot[i] = 0.6f + G.stage_col[i] * 0.15f;
     }
-    bool drew3d = false;
     for (int i = 0; i < 4; i++) {
         int r = order[i & 3];
         Tex * t = G.band[r];
@@ -1706,6 +1956,7 @@ static void draw_band(double beat)
         // each plays when their part does (no music, no playing), and between parts holds still
         BandPart * bp = &G.band_part[r & 3];
         bool playing = band_playing(r, beat_len) && G.band_loud > 0.03f;
+        bp->on = playing;
 #ifndef __vita__
         if (playing != bp->was)
             plat_log("band: member %d %s at %.2f", r, playing ? "plays" : "stops", G.t);
@@ -1795,10 +2046,18 @@ static void draw_band(double beat)
                 tint = RGBA(255, 110, 90, 255);
         }
         bp->pulse *= powf(0.82f, G.fstep);
+        if (r == 1) {
+            // the mic comes up for a line and goes down after it
+            float want = playing ? 1 : 0, step = want - bp->mic;
+            bp->mic += (step > 0.17f ? 0.17f : step < -0.17f ? -0.17f : step) * fminf(G.fstep, 2);
+        }
         Band3D * m3 = G.band3d[r];
+        if (cine && (!m3 || (G.cine_shot != CS_LINE && r != G.cine_who)))
+            continue;                   // a cut to somebody else: not in the picture
         if (m3) {
             // World Tour's model, posed by the same frames the sheet has, two of them blended so it moves smoothly
             Band3DDraw d3 = {0};
+            d3.hands.ga = -1;
             bool alt3 = wild_now && band3d_frames(m3, true) > 0;
             d3.fa = d3.fb = f;
             if (r >= 2 && jump_f < 0 && f < 48) {
@@ -1815,38 +2074,131 @@ static void draw_band(double beat)
                     d3.wb = bp->mic;
                 }
             }
-            d3.x = m[0];
-            d3.feet = bottom + y0 * m[2];
-            d3.ppm = m[2];
-            d3.squash = 1;
+            if (r >= 2 && jump_f < 0 && f < 48 && band3d_has_hands(m3)) {
+                // the fret hand goes where the notes are: green by the nut, orange up by the body, a finger for a
+                // single note and a barre for a chord, the hand open while the part rests. It starts for the next
+                // note a moment before it lands
+                int frets = bp->fret_now & 31;
+                if (bp->part && bp->next < bp->part->note_count && bp->part->notes[bp->next].time / 1e6 - G.t < 0.07)
+                    frets = bp->part->notes[bp->next].frets & 31;
+                int low = -1, count = 0;
+                for (int l = 0; l < 5; l++)
+                    if (frets & (1 << l)) {
+                        low = low < 0 ? l : low;
+                        count++;
+                    }
+                int shape = count >= 2 ? 2 : low < 0 ? bp->chord_b % 3 : (low & 1);
+                if (low >= 0) {
+                    float aim = low * 0.75f + (count >= 2 ? 0.15f : 0);
+                    if (r == me && G.whammy > 0.15f && G.t < bp->held)
+                        aim += sinf((float)G.t * 30) * 0.05f * G.whammy;
+                    bp->hand_fret += (aim - bp->hand_fret) * ease(0.32f);
+                }
+                if (shape != bp->chord_b) {
+                    if (bp->chord_w > 0.5f)
+                        bp->chord_a = bp->chord_b;
+                    else
+                        bp->chord_w = 1 - bp->chord_w;
+                    bp->chord_b = shape;
+                    bp->chord_w = bp->chord_w >= 1 ? 0 : bp->chord_w;
+                }
+                bp->chord_w = fminf(1, bp->chord_w + 0.2f * G.fstep);
+                d3.hands.ga = d3.fa / 3;
+                d3.hands.gb = d3.fb / 3;
+                d3.hands.fret = bp->hand_fret;
+                d3.hands.ca = bp->chord_a;
+                d3.hands.cb = bp->chord_b;
+                d3.hands.wc = bp->chord_w;
+            }
             if (r && !jumps && spun > 0 && spun < 0.6f) {
                 // the Star Power spin, really round this time
                 float k = spun / 0.6f;
                 d3.yaw = k * k * (3 - 2 * k) * 2 * pi;
-            } else if (r >= 2)
+            } else if (r >= 2 && !cine)
                 d3.yaw = bp->turn * 0.5f * (i & 1 ? 1 : -1);
-            d3.lean = lean;
-            d3.dip = dip;
-            memcpy(d3.top, strip_top, sizeof(d3.top));
-            memcpy(d3.bot, strip_bot, sizeof(d3.bot));
-            d3.tint = tint;
-            bool strong = G.focus == r || G.sp_active;
-            if (!cfg.light_fx) {
+            // off the floor: the hop on the beat, a jump (pixels of the stage's picture, here in metres)
+            float up = ((m[1] - y0 * m[2]) - bottom) / (m[2] > 1 ? m[2] : 1);
+            float show = 0.6f + 0.4f * G.band_loud;
+            if (cine) {
+                d3.cx = cc.cx;
+                d3.cy = cc.cy;
+                d3.ppm = cc.ppm;
+                d3.cam_yaw = cc.yaw;
+                d3.cam_pitch = cc.pitch;
+                d3.cam_dist = cc.dist;
+                if (G.cine_shot == CS_LINE) {
+                    for (int c = 0; c < 3; c++)
+                        d3.pos[c] = cine_line[r][c];
+                    d3.pos[1] += up - 1.2f;
+                    // the guitars turned a little in toward the middle
+                    d3.yaw += r == 2 ? -0.3f : r == 3 ? 0.3f : 0;
+                } else {
+                    // the camera's on their head (or chest, or hips), following it loosely as an operator would
+                    const CineShot * cs = &cine_shots[G.cine_shot];
+                    float at[3];
+                    band3d_anchor(m3, &d3, cs->anchor, at);
+                    at[1] += cs->up;
+                    if (G.cine_fade >= 1)
+                        memcpy(G.cine_aim, at, sizeof(at));     // a cut: straight onto them
+                    for (int c = 0; c < 3; c++)
+                        G.cine_aim[c] += (at[c] - G.cine_aim[c]) * ease(0.06f);
+                    float cyw = cosf(d3.yaw), syw = sinf(d3.yaw);
+                    d3.pos[0] = -(cyw * G.cine_aim[0] - syw * G.cine_aim[2]);
+                    d3.pos[1] = up - G.cine_aim[1];
+                    d3.pos[2] = -(syw * G.cine_aim[0] + cyw * G.cine_aim[2]);
+                    G.cine_fade = 0;
+                }
+                // lit as a stage is: a hard key from the side the camera isn't on, the show's colour on the edges
+                d3.key[0] = cc.yaw > 0 ? 0.75f : -0.75f;
+                d3.key[1] = 0.55f;
+                d3.key[2] = 0.5f;
+                d3.fill = 0.46f;
+                // a follow spot's white on them, the wash only a tinge: faces stay faces under a green or a red show
+                float wash = fmaxf(G.stage_col[0], fmaxf(G.stage_col[1], G.stage_col[2])), lum = 0.55f + 0.45f * fminf(wash, 1);
+                float spot[3];
                 for (int c = 0; c < 3; c++)
+                    spot[c] = lum * (0.80f + 0.20f * G.stage_col[c] / fmaxf(wash, 0.05f));
+                if (G.miss_pulse <= 0.15f || r != me)
+                    tint = col3(spot, 1);
+                for (int c = 0; c < 3; c++) {
+                    d3.top[c] = 1.12f + G.key_col[c] * 0.16f * show;
+                    d3.bot[c] = 0.92f;
                     d3.rim[c] = G.sp_active ? 0.35f + 0.65f * G.key_col[c] * 0.3f : G.key_col[c];
-                d3.rim_k = (strong ? 0.6f : 0.25f) * (0.6f + 0.6f * on_beat * G.band_loud);
+                }
+                d3.rim_k = cfg.light_fx ? 0 : 0.75f * (0.6f + 0.6f * on_beat * G.band_loud);
+            } else {
+                // on their mark in the venue's picture, seen as the picture was taken: from far off, 15 degrees down
+                d3.cx = m[0];
+                d3.cy = m[1] - up * m[2];
+                d3.ppm = m[2];
+                d3.cam_pitch = 0.2618f;
+                d3.cam_dist = 16;
+                d3.key[0] = r == 2 ? -0.35f : 0.35f;
+                d3.key[1] = 0.6f;
+                d3.key[2] = 0.72f;
+                d3.fill = 0.42f;
+                memcpy(d3.top, strip_top, sizeof(d3.top));
+                memcpy(d3.bot, strip_bot, sizeof(d3.bot));
+                bool strong = G.focus == r || G.sp_active;
+                if (!cfg.light_fx) {
+                    for (int c = 0; c < 3; c++)
+                        d3.rim[c] = G.sp_active ? 0.35f + 0.65f * G.key_col[c] * 0.3f : G.key_col[c];
+                    d3.rim_k = (strong ? 0.6f : 0.3f) * (0.6f + 0.6f * on_beat * G.band_loud);
+                }
+                d3.shadow = r != 1;
+                d3.floor_y = m[1];
+                if (r != 1) {
+                    const Sprite * pool = atlas_get(res.stage, "dot");
+                    float pw = cw * (m[2] / ppm) * 1.5f, ph = pw * 0.26f;
+                    gfx_blend(BLEND_ADD);
+                    gfx_sprite(pool, m[0] - pw / 2, m[1] - ph / 2, pw, ph, col3(G.key_col, G.focus == r ? 0.75f : 0.3f + 0.2f * G.band_loud));
+                    gfx_blend(BLEND_ALPHA);
+                }
             }
-            d3.depth = (float)i;
-            d3.ink = true;
-            d3.shadow = r != 1;
-            if (r != 1) {
-                const Sprite * pool = atlas_get(res.stage, "dot");
-                float pw = cw * (m[2] / ppm) * 1.5f, ph = pw * 0.26f;
-                gfx_blend(BLEND_ADD);
-                gfx_sprite(pool, m[0] - pw / 2, d3.feet - ph / 2, pw, ph, col3(G.key_col, G.focus == r ? 0.75f : 0.3f + 0.2f * G.band_loud));
-                gfx_blend(BLEND_ALPHA);
-            }
-            band3d_begin(!drew3d);
+            d3.tint = tint;
+            (void)lean;
+            (void)dip;
+            band3d_begin(true);
 #ifndef __vita__
             uint64_t t3 = (uint64_t)SDL_GetPerformanceCounter() / (SDL_GetPerformanceFrequency() / 1000000);
 #endif
@@ -1866,14 +2218,11 @@ static void draw_band(double beat)
             }
 #endif
             band3d_end();
-            drew3d = true;
             continue;
         }
         if (r == 1) {
             // the singer keeps moving: 32 frames with the mic at the mouth for a line, 16 with it down for the rests,
             // one over the other for the moment it comes up
-            float want = playing ? 1 : 0, step = want - bp->mic;
-            bp->mic += step > 0.17f ? 0.17f : step < -0.17f ? -0.17f : step;
             int sing = (int)(phase * 32) % 32, down = 32 + (int)(phase * 16) % 16;
             if (jump_f >= 0)
                 band_frame(t, jump_f, cw, ch, m[0], bottom, w, h, lean, dip, tint);

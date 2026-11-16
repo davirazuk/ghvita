@@ -66,6 +66,7 @@ Tex * res_highway_preview(const char * name);
 Tex * res_venue_preview(const char * zone);
 // a venue's two pictures, the stage and its lights alone (loaded on demand, one venue at a time); false: no such venue
 bool res_venue(const char * zone, Tex ** stage, Tex ** lights);
+Tex * res_venue_blur(const char * zone);
 // shot 1.. of a venue (0 is res_venue's); kept loaded with the venue
 bool res_venue_shot(const char * zone, int shot, Tex ** stage, Tex ** lights);
 int res_venue_shot_count(const char * zone);

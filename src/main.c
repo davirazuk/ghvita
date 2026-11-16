@@ -4510,7 +4510,7 @@ enum { O_SPEED, O_HIGHWAY, O_VENUE, O_BAND, O_SING, O_SINGDIFF, O_OFFSET, O_LAYO
        O_CAMERA, O_HWALPHA, O_VLIGHT, O_FLASH, O_POPUPS, O_TIMING, O_LIVE, O_VANISH, O_MISSSND, O_REAR, O_BEND, O_COUNTDOWN,
        O_RESET, O_FIVEPADS, O_DOUBLEKICK, O_EASYSUS, O_COUNTIN, O_SCREENS, O_PROGRESS, O_CUPS, O_AUTOREPRESS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, O_CROWDHANDS, O_VIGNETTE, O_LYRICS, O_MENUMUSIC, O_SINGSP, O_SHRINKCHECK, O_GHOST, O_RIVAL, O_WINDOW, O_LIGHTFX, O_SONGSPEED,
        O_FRAMERATE, O_STILLCAM, O_PRESET,
-       O_BACKDROP, O_RATINGS, O_HWLEN, O_SUDDEN, O_HARDROCK, O_ENGINE, O_STEPS, O_PICK0, O_PICK1, O_PICK2, O_PICK3, O_BAND3D, O_KEEPSING, O_VOICESTYLE, O_COUNT };
+       O_BACKDROP, O_RATINGS, O_HWLEN, O_SUDDEN, O_HARDROCK, O_ENGINE, O_STEPS, O_PICK0, O_PICK1, O_PICK2, O_PICK3, O_BAND3D, O_BANDCAM, O_KEEPSING, O_VOICESTYLE, O_COUNT };
 
 // the options by subject, L and R between them
 enum { OPT_TABS = 8, OPT_TAB_MAX = 18 };
@@ -4519,7 +4519,7 @@ static const int opt_tabs[OPT_TABS][OPT_TAB_MAX + 1] = {
     {O_SPEED, O_SONGSPEED, O_OFFSET, O_WINDOW, O_ENGINE, O_STEPS, O_SUDDEN, O_HARDROCK, O_NOFAIL, O_EASYSUS, O_AUTOREPRESS, O_VANISH, O_COUNTDOWN, O_SING, O_SINGDIFF, O_KEEPSING, O_RIVAL, O_RESET, -1},
     {O_LAYOUT, O_DRUMKEYS, O_FIVEPADS, O_DOUBLEKICK, O_LEFTY, O_TILT, O_REAR, O_SINGSP, -1},
     {O_HIGHWAY, O_HWALPHA, O_CAMERA, O_CUPS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, -1},
-    {O_VENUE, O_VLIGHT, O_BAND, O_BAND3D, O_PICK1, O_PICK2, O_PICK3, O_PICK0, O_CROWDHANDS, O_VIGNETTE, O_SCREENS, O_FLASH, -1},
+    {O_VENUE, O_VLIGHT, O_BAND, O_BAND3D, O_BANDCAM, O_PICK1, O_PICK2, O_PICK3, O_PICK0, O_CROWDHANDS, O_VIGNETTE, O_SCREENS, O_FLASH, -1},
     {O_LYRICS, O_POPUPS, O_PROGRESS, O_TIMING, O_LIVE, O_GHOST, O_LIGHTFX, O_FPS, -1},
     {O_PRESET, O_FRAMERATE, O_FPS, O_BACKDROP, O_RATINGS, O_HWLEN, O_STILLCAM, O_LIGHTFX, O_BAND, O_FIRE, O_FLASH, O_CROWDHANDS, O_VIGNETTE, -1},
     {O_MUSIC, O_SFX, O_CROWD, O_MENUMUSIC, O_COUNTIN, O_DRUMHITS, O_MISSSND, O_BEND, O_VOICESTYLE, -1},
@@ -4610,6 +4610,7 @@ static void option_text(int i, char * name, char * value, size_t n)
         break;
     case O_BAND: strcpy(name, "Band on stage"); snprintf(value, n, "%s", cfg.no_band ? "Off" : "On"); break;
     case O_BAND3D: strcpy(name, "Band look"); snprintf(value, n, "%s", cfg.band_pictures ? "Pictures" : "3D models"); break;
+    case O_BANDCAM: strcpy(name, "Band camera"); snprintf(value, n, "%s", cfg.band_pictures ? "-" : cfg.stage_only ? "Whole stage" : "Close-ups"); break;
     case O_PICK0: case O_PICK1: case O_PICK2: case O_PICK3: {
         static const char * roles[4] = {"Drummer", "Singer", "Guitarist", "Bassist"};
         int r = i - O_PICK0;
@@ -4780,6 +4781,7 @@ static void change_option(int i, int d)
     }
     case O_BAND: cfg.no_band = !cfg.no_band; break;
     case O_BAND3D: cfg.band_pictures = !cfg.band_pictures; break;
+    case O_BANDCAM: cfg.stage_only = !cfg.stage_only; break;
     case O_PICK0: case O_PICK1: case O_PICK2: case O_PICK3: {
         // each song's own, then every one of that role
         static const char * roles[4] = {"drummer", "vocalist", "guitarist", "bassist"};
@@ -6041,6 +6043,12 @@ static void career_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "The band is filmed the way Guitar Hero films it: the camera cuts every bar or two between close shots of the members - a face over the top of the board, chest up beside it, from the floor, along the guitar's neck, the kit from above, the whole band in a line - and the venue's whole stage now and then.",
+        "The guitarist's and bassist's fret hand plays the notes: down by the nut for green, up by the body for orange, one finger for a note, a barre for a chord.",
+        "A solo keeps the camera on you; Star Power cuts to you from the floor; the count-in has the whole band.",
+        "The 3D band redone: twice the detail, their real faces and clothes (most had come out as flat colour), lit by a white spot with the show's colour on their edges.",
+        "Options > Stage, Band camera: Close-ups or Whole stage (the band on the venue's picture, as before).",
+        "With the 3D band on, the old band pictures are no longer loaded: tens of megabytes of memory back.",
         "The band is real 3D now: World Tour's own models playing World Tour's moves, with an ink outline and a shadow on the stage, in place of the flat pictures.",
         "Options > Stage, Band look: 3D models or Pictures. If the game runs slower with the 3D band, pick Pictures.",
         "Singing with the Vita's speakers on: the mic heard the song too, and the replay played that copy back as a muddy echo. Now the game keeps what the speakers played and takes it back out of your singing after the song (a few seconds).",

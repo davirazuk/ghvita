@@ -360,6 +360,27 @@ Tex * res_venue_preview(const char * zone)
     return tex;
 }
 
+// the venue out of focus (tools/venue_blur.py), behind a close shot of the 3D band; NULL: none
+Tex * res_venue_blur(const char * zone)
+{
+    static Tex * tex;
+    static char loaded[16];
+    if (!zone) {
+        tex_free(tex);
+        tex = NULL;
+        loaded[0] = 0;
+        return NULL;
+    }
+    if (tex && strcmp(loaded, zone) == 0)
+        return tex;
+    tex_free(tex);
+    char path[96];
+    snprintf(path, sizeof(path), "venues/%s_blur.jpg", zone);
+    tex = load_tex(path, 0);
+    snprintf(loaded, sizeof(loaded), "%s", zone);
+    return tex;
+}
+
 bool res_venue(const char * zone, Tex ** stage, Tex ** lights)
 {
     static Tex * base, * glow;
@@ -506,6 +527,14 @@ Tex * res_band_alt(int role)
 
 Tex * res_band_sheet(int role, const char * name)
 {
+    if (!name) {
+        // none wanted (the 3D model's there): what was loaded goes
+        tex_free(sheet[role]);
+        tex_free(alt_sheet[role]);
+        sheet[role] = alt_sheet[role] = NULL;
+        loaded[role][0] = 0;
+        return NULL;
+    }
     if (!sheet[role] || strcmp(loaded[role], name) != 0) {
         tex_free(sheet[role]);
         char path[64];

@@ -562,13 +562,29 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   180 px/m, ink MaxFilter 7); draw_band/band_frame take cells from each sheet's width, so either size works. Play:
   strum held through a sustain, your misses aren't strummed, your whammy shakes your member on a ringing note.
   Not done: fret hand along the neck (needs 5x the frames).
-- 3D band (v256, on main since 2026-11-15; was the band3d branch): the band as GHWT's 3D models. tools/band.py --3d (run with ~/.cache/ghv-venv/bin/python:
-  pyfqmr + scipy) writes assets/band3d/<name>.b3d (decimated mesh, 3500 tris, drummer 5500, small parts whole, two bone
-  weights) + alt/<name>.b3a + tex/ (<=256 px); the same posed frames as the sheets. src/band3d.c: a worker thread
-  (core 1) skins into a back buffer, the main thread draws the front one through a modelview matrix (screen place,
-  lean shear, depth slice per member), ink line = second pass along the normals, floor shadow = flattened pass.
-  Option "Band look: 3D models / Pictures" (cfg.band_pictures). PC: 1.7 us a member on the main thread.
-  Not seen on a Vita yet. assets/band3d now lives in assets/ (copy kept in ~/.cache/ghv-work/band3d_assets).
+- 3D band (v260 first; v261 the camera, the hands, the rebake). tools/band.py --3d (~/.cache/ghv-venv/bin/python, and
+  Blender 4.2 at ~/mods/refs/blender-4.2.3-linux-x64 for the thinning: tools/band_decimate_bl.py, Decimate keeps UVs and
+  weights) writes assets/band3d/<name>.b3d "B3D2": the mesh (7000 tris, drummer + kit 12500; props kept at 0.85 or the
+  cymbals collapse), ALL its textures in one 1024 atlas (tex/<name>_atlas.png: a mesh whose UVs run -1..1 gets its
+  texture laid out twice: v260 loaded them clamped, so most faces and clothes were flat colour), 64 frames of skin
+  matrices as the sheets have, the fret hand's layers (16 groove steps x 4 neck places (frets 1, 6, 11, 16) x 4 chord
+  shapes, only the bones that differ: 29), and 3 camera anchors (head, chest, pelvis: bone + joint place). alt/<name>.b3a
+  "B3A2" the same for the wilder loop. Full rebake: both commands in ~/.cache/ghv-work/bake3d2.log's order (--3d, then
+  --3d --alt), about 2 minutes.
+  src/band3d.c: a worker thread (core 1) skins into a back buffer (if it can't keep up the band just moves at half
+  rate), the main thread draws the front one. Band3DDraw is a camera now: pos/yaw of the member, cam_yaw/pitch/dist,
+  target on screen (cx, cy) at ppm; perspective by w = 1 - z / dist in the modelview matrix (gfx_2d's ortho stays).
+  Key light + fill (half-lambert), rim, top-to-toe gradient. Hands by value in Band3DDraw (a pointer to the caller's
+  stack went to the worker: ASan caught it).
+  game.c: cine_direct picks a shot every 2 bars (1 bar under ~105 bpm): cine_shots[] CS_MEDIUM/HERO/FACE/NECK/DRUMS/
+  LINE/WAIST (anchor, metres visible, orbit, pitch, distance, screen place), -1 = the venue's picture (the old stage
+  view). Count-in LINE, solo on you, Star Power HERO on you, the end the stage. draw_cine_back: venues/<zone>_blur.jpg
+  (tools/venue_blur.py) sliding with the orbit + bokeh discs. cfg.stage_only ("Band camera: Whole stage") turns the
+  cuts off. With a model, the sheets aren't loaded (a static Tex with a sheet's measures stands in).
+  Fret hand: BandPart.fret_now (every note the part passes), hand_fret eased to lane * 0.75, chord 0/1 single by lane
+  parity, 2 for chords. Tests: GHV_CINE="shot who" holds a shot, ~/.cache/ghv-work/scripts/cshot.sh, bshot.sh
+  (GHV_FOCUS/GHV_ZOOM/GHV_VIEW). Reference footage of GH3/WT/5/Metallica/WoR: ~/.cache/ghv-work/ghref (grid.png).
+  Not seen on a Vita yet: frame rate with four models in LINE and the stage view is the question.
 - v253 replays + singing (main). src/replay.c: every game_update frame is an RFrame (G.t, held/pressed lanes after
   lefty/touch, whammy bar+dw, SP request bit (select/cymbals/tilt; tilt() now returns the trigger), mic pitch+level
   when singing). game_update -> game_tick(pad, pressed, rf); in a replay game_update runs every frame whose t <= audio
