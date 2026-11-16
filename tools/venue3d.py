@@ -18,6 +18,7 @@ wc = band.wc
 OUT = os.path.join(HERE, '..', 'assets', 'venue3d')
 NEAR_M, MID_M = 16.0, 70.0              # metres from the stage: what's near keeps its shape, the skyline hardly any
 BUDGET = {'near': 9500, 'mid': 4000, 'far': 3200}
+THIN_KEEP = 2600                        # triangles of trusses and rails kept (after their light thinning)
 BEHIND = 11.0                           # nothing's seen this far out toward the audience: the camera's nearer
 ROLES = ['drummer', 'vocalist', 'guitarist', 'bassist']
 
@@ -74,12 +75,41 @@ def bake(zone, tex_dir, work):
         c = P[np.unique(T)].mean(0)
         dist = math.hypot(c[0], c[2] - 1.5)
         keep.append((tex, P, np.asarray(V['uv'], np.float32), np.asarray(V['a'], np.float32), T, dist))
+    # thin things (a lighting truss's tubes, railings: thousands of slivers) fall to shards when thinned: the nearest of
+    # them stay, lightly thinned, up to THIN_KEEP triangles; the rest go
+    thin_ix = []
+    for i, (tex, P, uv, a, T, dist) in enumerate(keep):
+        if len(T) < 200:
+            continue
+        e1, e2 = P[T[:, 1]] - P[T[:, 0]], P[T[:, 2]] - P[T[:, 0]]
+        area = np.linalg.norm(np.cross(e1, e2), axis=1) / 2
+        edge = np.maximum(np.linalg.norm(e1, axis=1), np.linalg.norm(e2, axis=1))
+        # slivers: long for their area, or tiny
+        if np.median(area / np.maximum(edge * edge, 1e-9)) < 0.06 or np.median(area) < 0.004:
+            thin_ix.append(i)
+    thin_ix.sort(key=lambda i: keep[i][5])
+    budget, thin_old, drop = THIN_KEEP, {}, set()
+    for i in thin_ix:
+        cost = len(keep[i][4]) * 0.45
+        if cost <= budget:
+            budget -= cost
+            thin_old[i] = 0.45
+        else:
+            drop.add(i)
+    thin_ratio, kept = {}, []
+    for i, k in enumerate(keep):
+        if i in drop:
+            continue
+        if i in thin_old:
+            thin_ratio[len(kept)] = thin_old[i]
+        kept.append(k)
+    keep = kept
     total = {k: 0 for k in BUDGET}
     cls = []
     for tex, P, uv, a, T, dist in keep:
         k = 'near' if dist < NEAR_M else 'mid' if dist < MID_M else 'far'
         cls.append(k)
-        if len(T) > 40:
+        if len(T) > 40 and len(cls) - 1 not in thin_ratio:
             total[k] += len(T)
     ratio = {k: min(1.0, BUDGET[k] / max(total[k], 1)) for k in BUDGET}
     arrs = {'count': len(keep)}
@@ -90,7 +120,7 @@ def bake(zone, tex_dir, work):
         n = len(used)
         arrs.update({'p%d' % i: P[used].astype(np.float32), 'uv%d' % i: uv[used], 'j%d' % i: np.zeros((n, 4), np.int32),
                      'w%d' % i: np.tile(np.array([1, 0, 0, 0], np.float32), (n, 1)), 'a%d' % i: a[used],
-                     't%d' % i: remap[T].astype(np.int32), 'r%d' % i: 1.0 if len(T) <= 40 else max(ratio[cls[i]], 0.07)})
+                     't%d' % i: remap[T].astype(np.int32), 'r%d' % i: 1.0 if len(T) <= 40 else thin_ratio[i] if i in thin_ratio else max(ratio[cls[i]], 0.07)})
     src, dst = os.path.join(work, zone + '_in.npz'), os.path.join(work, zone + '_out.npz')
     np.savez(src, **arrs)
     subprocess.run([band.BLENDER, '-b', '--python', os.path.join(HERE, 'band_decimate_bl.py'), '--', src, dst], check=True,

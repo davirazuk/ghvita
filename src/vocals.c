@@ -323,7 +323,7 @@ void vox_start(int diff, bool autoplay)
     V.target = 0;
     memset(V.marks, 0, V.note_count * sizeof(float));
     V.run = V.running = true;
-    plat_thread("mic", mic_thread, NULL, PLAT_BACKGROUND);       // never in the way of the game or the audio
+    plat_thread("mic", mic_thread, NULL, 2);       // never in the way of the game or the audio
 }
 
 void vox_seek(double t)

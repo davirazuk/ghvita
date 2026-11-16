@@ -66,6 +66,7 @@ void plat_init(void)
     plat_set_perf(1);
 
     // 2x MSAA keeps the highway's far lines and the gem rims from crawling
+    sceKernelChangeThreadCpuAffinityMask(sceKernelGetThreadId(), 0x10000);      // core 0: the game's own
     vglInitExtended(0, SCREEN_W, SCREEN_H, 8 * 1024 * 1024, SCE_GXM_MULTISAMPLE_2X);
     vglSetupRuntimeShaderCompiler(SHARK_OPT_UNSAFE, SHARK_ENABLE, SHARK_ENABLE, SHARK_ENABLE);
     vglWaitVblankStart(GL_TRUE);
@@ -344,7 +345,10 @@ void plat_thread(const char * name, int (*fn)(void * arg), void * arg, int core)
 {
     ThreadStart ts = {fn, arg};
     // the arguments are copied onto the new thread's stack
-    int prio = core == PLAT_BACKGROUND ? 120 : 80, cores = core == PLAT_BACKGROUND ? 0x60000 : core == 1 ? 0x20000
+    // 64 is the most urgent a program's thread can be, 191 the least; the game's own thread runs at 160. A background
+    // thread at 120 outranked it: a download converting audio could take the game's core from it (the lag while
+    // downloading). Now below everything, and the game's thread is kept on core 0, which no worker uses
+    int prio = core == PLAT_BACKGROUND ? 185 : 80, cores = core == PLAT_BACKGROUND ? 0x60000 : core == 1 ? 0x20000
                                                                                                          : 0x40000;
     SceUID th = sceKernelCreateThread(name, thread_entry, prio, 0x40000, 0, cores, NULL);
     sceKernelStartThread(th, sizeof(ts), &ts);
