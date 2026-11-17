@@ -4380,23 +4380,17 @@ static void pad_rect(int k, float * x0, float * x1, float * top, float * reach)
 {
     int n = G.lanes > 0 ? G.lanes : 5;
     if (cfg.touch_frets == 1) {
-        // held in both hands: round buttons, three under the left thumb, two under the right (two and two for drums),
-        // in the bottom corners with the highway left clear; the box is the button's
-        int left = (n + 1) / 2, right = n - left;
-        const float r = 50, gap = 106;
-        float cx, cy;
-        if (k < left) {
-            cx = 62 + k * gap;
-            cy = SCREEN_H - 64 - (k == 1 ? 30 : 0);         // an arc, as a thumb sweeps
-        } else {
-            int j = k - left;
-            cx = SCREEN_W - 62 - (right - 1 - j) * gap;
-            cy = SCREEN_H - 64 - (right > 1 && j == 0 ? 30 : 0);
-        }
-        *x0 = cx - r;
-        *x1 = cx + r;
-        *top = cy - r;
-        *reach = cy - r;
+        // held in both hands: round buttons in the two bottom corners, outside the highway (it spreads over the middle
+        // 200..760 of the bottom), each thumb's on an arc as it sweeps. Five lanes: green, red, yellow left, blue and
+        // orange right; four (drums): two and two
+        static const float five[5][2] = {{54, 488}, {148, 470}, {78, 392}, {812, 470}, {906, 488}};
+        static const float four[4][2] = {{54, 488}, {148, 470}, {812, 470}, {906, 488}};
+        const float r = 46;
+        const float * c = n == 4 ? four[k & 3] : five[k < 5 ? k : 4];
+        *x0 = c[0] - r;
+        *x1 = c[0] + r;
+        *top = c[1] - r;
+        *reach = c[1] - r;
         return;
     }
     // fingers, one hand or two: five big equal pads across the screen (a fifth of it each, about 2.5 cm on a phone);
@@ -4440,7 +4434,7 @@ static int touch_lane_at(float x, float y)
                 return pad_lane(k);
         }
         // holding it: the open note or the kick is the middle strip at the bottom, between the thumbs
-        if (open_bar() && cfg.touch_frets == 1 && y >= SCREEN_H - 70 && x > 300 && x < SCREEN_W - 300)
+        if (open_bar() && cfg.touch_frets == 1 && y >= 300 && y < 346 && x > SCREEN_W - 200)
             return LANE_OPEN;
         return -1;
     }
@@ -6086,10 +6080,10 @@ static void draw_touch_pads(void)
             uint32_t c = lane_colour[6];
             float ox0, ox1, otop, oreach;
             pad_rect(0, &ox0, &ox1, &otop, &oreach);
-            float bx = thumbs ? 304 : 3, bw = thumbs ? SCREEN_W - 608 : SCREEN_W - 6, by = thumbs ? SCREEN_H - 70 : otop;
-            float bh = thumbs ? 66 : OPEN_H - 3;
+            float bx = thumbs ? SCREEN_W - 196 : 3, bw = thumbs ? 190 : SCREEN_W - 6, by = thumbs ? 300 : otop;
+            float bh = thumbs ? 44 : OPEN_H - 3;
             gfx_rect_grad(bx, by, bw, bh, ALPHA(c, down ? 190 : 60), ALPHA(c, down ? 230 : 110));
-            font_draw(res.ui, G.drums ? "KICK" : "OPEN", bx + bw / 2, by + (thumbs ? 20 : 2), 20, RGBA(255, 255, 255, 220),
+            font_draw(res.ui, G.drums ? "KICK" : "OPEN", bx + bw / 2, by + (thumbs ? 11 : 2), 20, RGBA(255, 255, 255, 220),
                       ALIGN_CENTER);
         }
         gfx_rect(SCREEN_W - 96, 8, 88, 44, RGBA(0, 0, 0, 120));
@@ -6129,7 +6123,10 @@ static void draw_hud(void)
         // laid out as World Tour's solo HUD (footage in ~/.cache/ghv-work/lampref): the score bar, the streak counter
         // under it, both a little wider than the dome, which sits on the bar
         // (placed as World Tour's footage has it: against the highway's left rail, the plates tucked just under it)
-        const float bar_x = 72, bar_w = 188, bar_y = 413, bar_h = 36;       // the score bar's leather, on the screen
+        // touch pads along the bottom (Fingers) or the left thumb's buttons in its corner (Thumbs): the group goes up out of
+        // their way
+        const float lift = !game_touch_pads || G.vocal ? 0 : cfg.touch_frets == 1 ? 210 : 100;   // (Fingers: over its pads)
+        const float bar_x = 72, bar_w = 188, bar_y = 413 - lift, bar_h = 36;  // the score bar's leather, on the screen
         const float cnt_w = 174, cnt_h = 32, cnt_y = bar_y + bar_h + 2;
         const float k = 0.73f, ks = k / 0.6f;                                // the dome's 256x256 texture
         const float dx = bar_x + bar_w / 2 - 128 * k, dy = bar_y + 6 - 172 * k;
