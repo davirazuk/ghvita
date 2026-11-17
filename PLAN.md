@@ -818,3 +818,18 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   across, panned smoothly) instead of a small strip with two thirds of the screen black, and under it a thumb pad: a
   cross of arrows (pressed as the finger lands, repeating while held) and big OK / BACK (main.c draw_menu_pad,
   menu_focus; plat_menu_focus / plat_menu_band). Songs keep their own portrait layout; landscape and the Vita as before.
+
+- Android updates: the updater says what it did (a toast while it downloads, Android/data/org.ghvita.app/files/update.log
+  for every check), asks for "Install unknown apps" in the phone's settings when it isn't allowed and installs once
+  it's back, checks again on returning to the app (10 minutes apart), and fetches release assets past GitHub's
+  redirect without the token. An APK from before the updater existed has to be installed by hand once.
+- Search on a phone: the phone's own keyboard comes up with the game's (either types; Enter searches).
+- Touch scrolling: the song list scrolls by the pixel under the finger and glides after a flick (list_scrolls /
+  touch_scroll, gfx_clip for its edges); other lists step a row per row's height of drag.
+- Touch play on its side: a nearer, wider highway (camera_phone) and the one-hand columns built round each lane's place
+  at the cups, so a gem falls into the column that plays it (they were 150 wide round the middle while the lanes were
+  86 apart: green's gems fell over red's column).
+- HUD: placed clear of the highway's left rail for any highway camera (hud_rail_x), up the screen if it must.
+- Venue camera "Wide shot only" holds the whole stage with the 3D band too.
+- Singer: medium shots aim at her head; the bake turns her back toward the audience (a quarter of the loop's turn kept:
+  GHWT's singing loops swing her chest up to 50 degrees away).

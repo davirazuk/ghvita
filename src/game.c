@@ -221,6 +221,7 @@ static struct {
     int count_done;
     int fail_frames;                    // the power-down after a failed song
     int sus_dropped, camera, mult_seen;
+    bool camera_phone;                  // the highway's camera is the phone's (played on the glass, on its side)
     bool big_section;                   // a chorus or a solo: the band goes harder
     float mult_pop;                     // the multiplier jumps as it goes up
     double press_t[6];                  // when each lane last went down
@@ -1259,8 +1260,8 @@ static void cine_direct(double beat, bool solo)
     bool any = false;
     for (int r = 0; r < 4; r++)
         any = any || (G.band[r] && G.band3d[r]);
-    if (!any || cfg.stage_only || !G.marks || cfg.backdrop) {
-        G.cine_shot = -1;
+    if (!any || cfg.stage_only || cfg.still_camera || !G.marks || cfg.backdrop) {
+        G.cine_shot = -1;               // the whole stage (Venue camera "Wide shot only" too: no cuts at all)
         return;
     }
     // a shot holds two bars, or one where two would be longer than about four and a half seconds
@@ -1426,7 +1427,8 @@ static CineCam cine_cam(double beat)
         sx = 0.5f - side * 0.06f;
     float kick = cfg.flashes < 2 ? G.kick : 0;
     c.cx = SCREEN_W * sx + sinf(t * 0.83f) * 3 + sinf(t * 61) * 7 * kick;
-    c.cy = SCREEN_H * cs->sy + sinf(t * 0.71f + 2) * 2 + sinf(t * 47 + 2) * 5 * kick;
+    float sy = G.cine_who == 1 && cs->anchor == 1 ? 0.36f : cs->sy;      // (the singer's: the head a third down)
+    c.cy = SCREEN_H * sy + sinf(t * 0.71f + 2) * 2 + sinf(t * 47 + 2) * 5 * kick;
     return c;
 }
 
@@ -2443,8 +2445,15 @@ static void draw_band(double beat)
                     // the camera's on their head (or chest, or hips), following it loosely as an operator would
                     const CineShot * cs = &cine_shots[G.cine_shot];
                     float at[3];
-                    band3d_anchor(m3, &d3, cs->anchor, at);
-                    at[1] += cs->up;
+                    // the singer's chest shots aim at the head: arms up and leaning back, a chest-centred
+                    // frame cut the top of the head off
+                    bool head = r == 1 && cs->anchor == 1;
+                    band3d_anchor(m3, &d3, head ? 0 : cs->anchor, at);
+                    at[1] += head ? -0.12f : cs->up;
+#ifndef __vita__
+                    if (getenv("GHV_AIMLOG"))
+                        fprintf(stderr, "aim r%d shot %d head %d at %.2f %.2f %.2f cy %.0f\n", r, G.cine_shot, head, at[0], at[1], at[2], cc.cy);
+#endif
                     if (G.cine_fade >= 1)
                         memcpy(G.cine_aim, at, sizeof(at));     // a cut: straight onto them
                     for (int c = 0; c < 3; c++)
@@ -2655,8 +2664,23 @@ static void setup_camera(void)
     static const float eyes[3][3] = {{0, 5.4f, -9.5f}, {0, 4.0f, -5.5f}, {0, 5.7f, -6.9f}};
     static const float ats[3] = {8.75f, 3.9f, 5.4f}, fovs[3] = {34, 40, 40};
     G.camera = cfg.camera;
-    const float * eye = eyes[cfg.camera], at[3] = {0, 0, ats[cfg.camera]}, up[3] = {0, 1, 0};
+    float eye_v[3], at[3] = {0, 0, ats[cfg.camera]}, up[3] = {0, 1, 0};
+    memcpy(eye_v, eyes[cfg.camera], sizeof(eye_v));
+    const float * eye = eye_v;
     float fov = fovs[cfg.camera];
+    G.camera_phone = game_touch_pads && plat_below() <= 0 && cfg.camera == 0;
+    if (G.camera_phone) {
+        // a phone on its side, played on the glass: nearer and lower, the highway wide across the screen so its
+        // gems are a finger's size and each lane stands over its own column
+        eye_v[1] = 4.8f;
+        eye_v[2] = -4.4f;
+        at[2] = 4.4f;
+        fov = 46;
+#ifndef __vita__
+        if (getenv("GHV_PHONECAM"))     // tests: "height back ahead fov"
+            sscanf(getenv("GHV_PHONECAM"), "%f %f %f %f", &eye_v[1], &eye_v[2], &at[2], &fov);
+#endif
+    }
     mat_perspective(G.proj, fov, (float)SCREEN_W / SCREEN_H, 0.5f, 60);
     mat_lookat(G.view, eye, at, up);
     memcpy(cam_eye, eye, sizeof(cam_eye));
@@ -4408,6 +4432,20 @@ static void pad_rect(int k, float * x0, float * x1, float * top, float * reach)
             *x0 = SCREEN_W - side + (k - left) * side / right;
             *x1 = SCREEN_W - side + (k - left + 1) * side / right;
         }
+        *top = SCREEN_H - 14;
+        *reach = SCREEN_H * 0.4f;
+        return;
+    }
+    if (cfg.touch_frets == 0 && plat_below() <= 0) {
+        // one hand on its side: each lane's column stands under that lane where the highway meets its cups (the
+        // middle way between neighbours), the outer two reaching on to the screen's edges: a gem falls into the column
+        // that plays it
+        float sx[6], sy;
+        for (int l = 0; l < n; l++)
+            project(lane_x(pad_lane(l)), 0, 0, &sx[l], &sy);
+        float sp = n > 1 ? (sx[n - 1] - sx[0]) / (n - 1) : 150;
+        *x0 = k == 0 ? fmaxf(0, sx[0] - sp * 0.5f - 60) : (sx[k - 1] + sx[k]) / 2;
+        *x1 = k == n - 1 ? fminf(SCREEN_W, sx[n - 1] + sp * 0.5f + 60) : (sx[k] + sx[k + 1]) / 2;
         *top = SCREEN_H - 14;
         *reach = SCREEN_H * 0.4f;
         return;
@@ -6207,6 +6245,29 @@ static void draw_touch_pads(void)
     }
 }
 
+// where the highway's left rail is on the screen at a height (its outermost there, the near end included): the HUD
+// keeps to the left of it
+static float hud_rail_x(float y)
+{
+    float px = SCREEN_W, py = SCREEN_H * 2;
+    for (float z = -1.0f; z <= z_far; z += 0.25f) {
+        float x, yy, x2, y2;
+        project(-HALF_W * 1.05f, 0, z, &x, &yy);
+        project(HALF_W * 1.05f, 0, z, &x2, &y2);
+        if (x2 < x)
+            x = x2;                     // whichever rail is on the left (the camera has the world's x turned round)
+        if (yy <= y) {
+            // between this step and the last (nearer, lower on the screen)
+            if (py > yy + 0.01f && py < SCREEN_H * 2)
+                return x + (px - x) * (y - yy) / (py - yy);
+            return x;
+        }
+        px = x;
+        py = yy;
+    }
+    return px;
+}
+
 static void draw_hud(void)
 {
     gfx_2d();
@@ -6244,8 +6305,19 @@ static void draw_hud(void)
         if (upright)
             gfx_2d_tall(below);
         const float lift = 0;
-        const float bar_x = upright ? PORTRAIT_CROP + 24 : 72, bar_w = 188,
-                    bar_y = upright ? SCREEN_H + 150 : 413 - lift, bar_h = 36;  // the score bar's leather
+        // on its side the group keeps clear of the highway whatever the camera: where it sits by World Tour's if the
+        // highway's left rail leaves room there, else against the screen's edge, else up the screen where the rail has
+        // narrowed away from it
+        float hud_x = 72, hud_y = 413 - lift;
+        if (!upright) {
+            const float need = 188 + 8;         // the plates' width and a gap
+            if (hud_rail_x(hud_y + 70) < hud_x + need)
+                hud_x = 4;
+            while (hud_y > 170 && hud_rail_x(hud_y + 70) < hud_x + need)
+                hud_y -= 10;
+        }
+        const float bar_x = upright ? PORTRAIT_CROP + 24 : hud_x, bar_w = 188,
+                    bar_y = upright ? SCREEN_H + 150 : hud_y, bar_h = 36;  // the score bar's leather
         const float cnt_w = 174, cnt_h = 32, cnt_y = bar_y + bar_h + 2;
         const float k = 0.73f, ks = k / 0.6f;                                // the dome's 256x256 texture
         const float dx = bar_x + bar_w / 2 - 128 * k, dy = bar_y + 6 - 172 * k;
@@ -6507,8 +6579,8 @@ void game_draw(void)
     if (getenv("GHV_SPFX"))
         G.sp_active = true;             // to look at Star Power without playing up to it
 #endif
-    if (G.camera != cfg.camera)
-        setup_camera();         // changed from the pause menu
+    if (G.camera != cfg.camera || G.camera_phone != (game_touch_pads && plat_below() <= 0 && cfg.camera == 0))
+        setup_camera();         // changed from the pause menu, or the phone turned
     // the frame rate (the frames drawn), and how many updates this frame covers: what moves by the frame moves this much
     G.fps_frames++;
     double now = plat_now_us() / 1e6;

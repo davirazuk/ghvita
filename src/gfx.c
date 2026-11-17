@@ -663,6 +663,26 @@ void gfx_2d(void)
     glLoadIdentity();
 }
 
+// only this part of the picture drawn to (x, y, w, h in its 960 x 544); gfx_clip_off ends it
+void gfx_clip(float x, float y, float w, float h)
+{
+    gfx_flush();
+    int vx = 0, vy = 0, vw = SCREEN_W, vh = SCREEN_H;
+#ifndef __vita__
+    int fw, fh;
+    plat_view(&vx, &vy, &vw, &vh, &fw, &fh);
+#endif
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(vx + (int)(x * vw / SCREEN_W), vy + (int)((SCREEN_H - y - h) * vh / SCREEN_H), (int)(w * vw / SCREEN_W + 1),
+              (int)(h * vh / SCREEN_H + 1));
+}
+
+void gfx_clip_off(void)
+{
+    gfx_flush();
+    glDisable(GL_SCISSOR_TEST);
+}
+
 void gfx_3d(const float * proj, const float * view)
 {
     gfx_flush();

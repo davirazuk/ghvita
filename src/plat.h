@@ -87,6 +87,9 @@ void plat_keep_awake(void);
 // typing (text has it so far, for the desktop build to show), 1 entered (text has it), -1 cancelled
 void plat_text_begin(const char * title, const char * initial);
 int plat_text_poll(char * text, int size);
+// a phone's own keyboard kept up beside the game's: what the game's keys typed handed to it, and it put away
+void plat_text_set(const char * text);
+void plat_text_end(void);
 // a test build's scripted input and screenshots (no-ops on the Vita)
 void plat_screenshot(const char * name);// bytes free on the card, -1 if it can't be told
 long long plat_free_bytes(void);

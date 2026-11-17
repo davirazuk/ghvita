@@ -766,6 +766,20 @@ void plat_text_begin(const char * title, const char * initial)
     SDL_StartTextInput();
 }
 
+void plat_text_set(const char * text)
+{
+    if (typing)
+        snprintf(typed, sizeof(typed), "%s", text);
+}
+
+void plat_text_end(void)
+{
+    if (typing) {
+        typing = false;
+        SDL_StopTextInput();
+    }
+}
+
 int plat_text_poll(char * text, int size)
 {
     if (!typing)

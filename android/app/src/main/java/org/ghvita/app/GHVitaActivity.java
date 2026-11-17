@@ -24,16 +24,88 @@ public class GHVitaActivity extends SDLActivity {
             android.util.Log.e("GHVita", "unpacking the art", e);
         }
         super.onCreate(savedInstanceState);
-        // the phone's own updates: the "android" release on GitHub, checked in the background each start
+        startUpdateCheck(true);
+    }
+
+    // the phone's own updates: the "android" release on GitHub, checked in the background at each start and again when
+    // the app comes back to the front (at most every ten minutes); what happened is said on the screen and kept in
+    // update.log beside the songs, so a phone that doesn't update says why
+    private static volatile boolean checking;
+    private long lastCheck;
+    private java.io.File pending;       // downloaded, waiting for the phone to allow installing it
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (pending != null && pending.exists())
+            install(pending);
+        else if (System.currentTimeMillis() - lastCheck > 10 * 60 * 1000)
+            startUpdateCheck(false);
+    }
+
+    private void startUpdateCheck(final boolean first) {
+        if (checking)
+            return;
+        checking = true;
+        lastCheck = System.currentTimeMillis();
         new Thread(new Runnable() {
             public void run() {
                 try {
                     checkUpdate();
                 } catch (Exception e) {
                     android.util.Log.w("GHVita", "update check", e);
+                    note("update check failed: " + e, false);
+                } finally {
+                    checking = false;
                 }
             }
         }).start();
+    }
+
+    private void note(final String what, final boolean show) {
+        try {
+            java.io.File ext = getExternalFilesDir(null);
+            if (ext != null) {
+                java.io.FileWriter w = new java.io.FileWriter(new java.io.File(ext, "update.log"), true);
+                w.write(new java.util.Date() + "  " + what + "\n");
+                w.close();
+            }
+        } catch (Exception e) {
+            // nothing to do
+        }
+        if (show)
+            runOnUiThread(new Runnable() {
+                public void run() {
+                    android.widget.Toast.makeText(GHVitaActivity.this, what, android.widget.Toast.LENGTH_LONG).show();
+                }
+            });
+    }
+
+    // the installer, once the phone lets this app install (Android 8 asks once, in its settings)
+    private void install(final java.io.File apk) {
+        runOnUiThread(new Runnable() {
+            public void run() {
+                if (android.os.Build.VERSION.SDK_INT >= 26 && !getPackageManager().canRequestPackageInstalls()) {
+                    pending = apk;
+                    android.widget.Toast.makeText(GHVitaActivity.this,
+                        "GH Vita update ready: allow \"Install unknown apps\" for GH Vita, then come back", android.widget.Toast.LENGTH_LONG).show();
+                    try {
+                        startActivity(new android.content.Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                            android.net.Uri.parse("package:" + getPackageName())));
+                    } catch (Exception e) {
+                        android.util.Log.w("GHVita", "unknown sources settings", e);
+                    }
+                    return;
+                }
+                pending = null;
+                android.net.Uri uri = androidx.core.content.FileProvider.getUriForFile(GHVitaActivity.this, getPackageName() + ".files", apk);
+                android.content.Intent i = new android.content.Intent(android.content.Intent.ACTION_VIEW);
+                i.setDataAndType(uri, "application/vnd.android.package-archive");
+                i.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION | android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                android.widget.Toast.makeText(GHVitaActivity.this, "A new GH Vita is ready: install it", android.widget.Toast.LENGTH_LONG).show();
+                startActivity(i);
+            }
+        });
     }
 
     // The repository is private: as on the Vita, a read-only token in update.txt (here in Android/data/org.ghvita.app/
@@ -70,6 +142,27 @@ public class GHVitaActivity extends SDLActivity {
         return c;
     }
 
+    // a release asset: the API answers with a redirect to the file's storage, which is fetched without the token
+    private InputStream asset(String url, String token) throws Exception {
+        java.net.HttpURLConnection c = open(url, token, "application/octet-stream");
+        c.setInstanceFollowRedirects(false);
+        int code = c.getResponseCode();
+        if (code >= 300 && code < 400) {
+            String to = c.getHeaderField("Location");
+            c.disconnect();
+            java.net.HttpURLConnection d = (java.net.HttpURLConnection) new java.net.URL(to).openConnection();
+            d.setRequestProperty("User-Agent", "GHVita-Android");
+            d.setConnectTimeout(15000);
+            d.setReadTimeout(60000);
+            if (d.getResponseCode() != 200)
+                throw new java.io.IOException("asset: HTTP " + d.getResponseCode());
+            return d.getInputStream();
+        }
+        if (code != 200)
+            throw new java.io.IOException("asset: HTTP " + code);
+        return c.getInputStream();
+    }
+
     private String readAll(InputStream in) throws Exception {
         java.io.ByteArrayOutputStream b = new java.io.ByteArrayOutputStream();
         byte[] buf = new byte[1 << 14];
@@ -82,8 +175,10 @@ public class GHVitaActivity extends SDLActivity {
 
     private void checkUpdate() throws Exception {
         String token = readToken();
-        if (token == null || token.isEmpty())
+        if (token == null || token.isEmpty()) {
+            note("no update token in this build", false);
             return;
+        }
         org.json.JSONObject rel = new org.json.JSONObject(readAll(open(API, token, "application/vnd.github+json").getInputStream()));
         org.json.JSONArray assets = rel.getJSONArray("assets");
         String apk = null, ver = null;
@@ -94,18 +189,23 @@ public class GHVitaActivity extends SDLActivity {
             if (a.getString("name").equals("version.txt"))
                 ver = a.getString("url");
         }
-        if (apk == null || ver == null)
+        if (apk == null || ver == null) {
+            note("the android release has no APK yet", false);
             return;
-        int latest = Integer.parseInt(readAll(open(ver, token, "application/octet-stream").getInputStream()).trim());
+        }
+        int latest = Integer.parseInt(readAll(asset(ver, token)).trim());
         int mine = getPackageManager().getPackageInfo(getPackageName(), 0).versionCode;
-        if (latest <= mine)
+        if (latest <= mine) {
+            note("up to date (build " + mine + ", newest " + latest + ")", false);
             return;
+        }
+        note("downloading GH Vita build " + latest + " (this is " + mine + ")", true);
         java.io.File dir = new java.io.File(getExternalCacheDir(), "update");
         dir.mkdirs();
         java.io.File out = new java.io.File(dir, "GHVita-" + latest + ".apk");
         if (!out.exists() || out.length() < 1000000) {
             java.io.File part = new java.io.File(dir, "download.part");
-            InputStream in = open(apk, token, "application/octet-stream").getInputStream();
+            InputStream in = asset(apk, token);
             OutputStream o = new FileOutputStream(part);
             byte[] buf = new byte[1 << 16];
             int n;
@@ -115,16 +215,13 @@ public class GHVitaActivity extends SDLActivity {
             in.close();
             part.renameTo(out);
         }
-        final android.net.Uri uri = androidx.core.content.FileProvider.getUriForFile(this, getPackageName() + ".files", out);
-        runOnUiThread(new Runnable() {
-            public void run() {
-                android.content.Intent i = new android.content.Intent(android.content.Intent.ACTION_VIEW);
-                i.setDataAndType(uri, "application/vnd.android.package-archive");
-                i.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION | android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
-                android.widget.Toast.makeText(GHVitaActivity.this, "A new GH Vita is ready: install it", android.widget.Toast.LENGTH_LONG).show();
-                startActivity(i);
-            }
-        });
+        if (out.length() < 1000000) {
+            note("the download came out too small (" + out.length() + " bytes)", true);
+            out.delete();
+            return;
+        }
+        note("build " + latest + " downloaded", false);
+        install(out);
     }
 
     private void unpack() throws Exception {

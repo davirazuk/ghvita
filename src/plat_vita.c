@@ -496,6 +496,15 @@ void plat_text_begin(const char * title, const char * initial)
     ime_active = r >= 0;
 }
 
+void plat_text_set(const char * text)
+{
+    (void)text;
+}
+
+void plat_text_end(void)
+{
+}
+
 int plat_text_poll(char * text, int size)
 {
     if (!ime_active)

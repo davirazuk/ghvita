@@ -60,6 +60,10 @@ enum { TAP_ROW, TAP_BTN, TAP_KEY };
 static struct { float x, y, w, h; int kind, val; } tap_items[96];
 static int tap_item_count;
 static int tapped_key = -1;     // this frame's tapped key (the keyboard's), -1 none
+// a list that scrolls under the finger itself (the song list): it says so as it's drawn (list_scrolls), and the next
+// frame's drag or flick comes to it as pixels (touch_scroll: how far the rows go up) instead of steps of the choice
+static bool list_scrolls, list_scrolls_last, touch_dragging;
+static float touch_scroll;
 
 static void tap_add(float x, float y, float w, float h, int kind, int val)
 {
@@ -331,6 +335,10 @@ static void menu_touch(void)
     static bool q_cross, rows;
     bool playing = screen == S_PLAY;
     tapped_key = -1;
+    list_scrolls_last = list_scrolls;
+    list_scrolls = false;
+    touch_scroll = 0;
+    static float drag_y;            // the dragging finger's place last frame
     // a tap on a row: the steps to it, one a frame, then the pick
     if (q_moves && !playing) {
         uint32_t b = q_moves > 0 ? BTN_DOWN : BTN_UP;
@@ -392,6 +400,8 @@ static void menu_touch(void)
         t0 = last_t = now_s;
         moved = two = false;
         vel = fling = 0;
+        drag_y = pad.touch_y[0];
+        touch_dragging = false;
         ntaps = tap_item_count < 96 ? tap_item_count : 96;
         rows = false;
         for (int i = 0; i < ntaps; i++) {
@@ -406,9 +416,22 @@ static void menu_touch(void)
         touch_used = true;
     }
     tap_count = tap_item_count = 0;     // what can be tapped is drawn again this frame
-    const float step = 46, wide = 80;
+    // a step of the choice for as far as a row is tall: the choice keeps up with the finger
+    float step = 46;
+    for (int i = 0; i < ntaps; i++)
+        if (taps[i].kind == TAP_ROW && taps[i].h > 20) {
+            step = taps[i].h + 2;
+            break;
+        }
+    const float wide = 80;
     if (id < 0) {
         // a flick going on by itself, slowing
+        touch_dragging = false;
+        if (fabsf(fling) > 40 && !playing && list_scrolls_last) {
+            touch_scroll -= fling / 60;     // the list glides on, slowing
+            fling *= 0.95f;
+            return;
+        }
         if (fabsf(fling) > 120 && !playing) {
             fling_acc += fling / 60;
             while (fling_acc <= -step) {
@@ -438,7 +461,11 @@ static void menu_touch(void)
             last_y = y;
             last_t = now_s;
         }
-        if (!playing && moved && !two) {
+        if (!playing && moved && !two && list_scrolls_last && fabsf(y - sy) >= fabsf(x - sx)) {
+            touch_scroll -= y - drag_y;     // the rows go with the finger
+            drag_y = y;
+            touch_dragging = true;
+        } else if (!playing && moved && !two) {
             while (y - ly <= -step) {
                 pressed |= BTN_DOWN;            // the list goes up under the finger: the choice goes down it
                 repeat |= BTN_DOWN;
@@ -467,7 +494,7 @@ static void menu_touch(void)
     // lifted
     id = -1;
     if (moved) {
-        if (rows && !playing && fabsf(vel) > 700) {
+        if (rows && !playing && fabsf(vel) > (list_scrolls_last ? 250 : 700)) {
             fling = vel;                        // flicked: it carries on
             fling_acc = 0;
         }
@@ -1822,8 +1849,43 @@ static int kb_x, kb_y;
 
 enum { KEY_SPACE = 40, KEY_DEL, KEY_GO, KEY_CANCEL };
 
+static bool sys_on;                 // the phone's keyboard is up for the game's
+static char sys_last[128];          // what it last had
+
+// after the game's keys: the phone's keyboard told what they typed, and put away when the typing's over
+static void kb_sync(void)
+{
+    if (!touch_only || !sys_on)
+        return;
+    if (!dl_typing) {
+        plat_text_end();
+        sys_on = false;
+    } else if (strcmp(dl_typed, sys_last)) {
+        plat_text_set(dl_typed);
+        snprintf(sys_last, sizeof(sys_last), "%s", dl_typed);
+    }
+}
+
 static void kb_update(void)
 {
+    // a phone: its own keyboard comes up too, and either one types (what one types the other is told)
+    if (touch_only) {
+        if (!sys_on) {
+            plat_text_begin("Search", dl_typed);
+            snprintf(sys_last, sizeof(sys_last), "%s", dl_typed);
+            sys_on = true;
+        }
+        char got[128];
+        int r = plat_text_poll(got, sizeof(got));
+        if (r >= 0 && strcmp(got, sys_last)) {
+            snprintf(dl_typed, sizeof(dl_typed), "%s", got);
+            snprintf(sys_last, sizeof(sys_last), "%s", got);
+        }
+        if (r == 1)
+            pressed |= BTN_START;
+        else if (r < 0)
+            sys_on = false;             // put away (Enter, or the phone's own way): the game's keys go on
+    }
     // a key tapped: typed straight away, as a phone's keyboard does
     if (tapped_key >= 0) {
         size_t n = strlen(dl_typed);
@@ -1882,17 +1944,20 @@ static void kb_update(void)
             kb_apply = NULL;
             plat_log("typed for a filter \"%s\"", t);
             apply(t);
+            kb_sync();
             return;
         }
         if (kb_library) {
             snprintf(find_text, sizeof(find_text), "%s", t);
             view_stale = true;
+            kb_sync();
             return;
         }
         snprintf(dl_query[dl_site], sizeof(dl_query[0]), "%s", t);
         plat_log("search: typed \"%s\"", t);
         dl_new_search();
     }
+    kb_sync();
 }
 
 static void kb_draw(void)
@@ -3053,9 +3118,26 @@ static void song_list(void)
             pos = (repeat & BTN_DOWN) && old == n - 1 ? 0 : n - 1;
         sel = view[pos];
     }
-    if (pos != old) {
+    if (pos != old && !touch_scroll) {
         ui_sound(SND_UI_MOVE);
         sel_t = now_s;
+    }
+    // a finger on the list: the rows go with it (and glide on after a flick); the choice stays on the screen
+    static float scroll_px;         // how far down the list it's scrolled, in pixels (a row is 56)
+    float scroll_max = n > rows ? (float)(n - rows) * 56 : 0;
+    list_scrolls = true;
+    if (touch_scroll != 0 && n) {
+        scroll_px += touch_scroll;
+        scroll_px = scroll_px < 0 ? 0 : scroll_px > scroll_max ? scroll_max : scroll_px;
+        top = (int)(scroll_px / 56);
+        int lo = top + (scroll_px - top * 56 > 28 ? 1 : 0), hi = top + rows - 1 < n - 1 ? top + rows - 1 : n - 1;
+        if (pos < lo)
+            pos = lo;
+        if (pos > hi)
+            pos = hi;
+        if (pos != old)
+            sel_t = now_s;
+        sel = view[pos];
     }
     if (pos < top)
         top = pos;
@@ -3063,6 +3145,8 @@ static void song_list(void)
         top = pos - rows + 1;
     if (top > 0 && top + rows > n)
         top = n > rows ? n - rows : 0;
+    if (touch_scroll == 0 && !touch_dragging)
+        scroll_px += ((float)top * 56 - scroll_px) * (fabsf(top * 56 - scroll_px) < 0.5f ? 1 : 0.3f);   // settles on a row
     Song * s = n ? songs_get(sel) : NULL;
     if (pressed & BTN_CIRCLE) {
         // back out of a search first
@@ -3130,12 +3214,19 @@ static void song_list(void)
     font_draw_fit(res.ui, t, SCREEN_W - 24, 30, 24, 420, RGBA(230, 230, 230, 255), ALIGN_RIGHT);
     // the list: each row with its cover
     thumb_loads = 0;
-    for (int r = 0; r < rows && top + r < n; r++) {
-        int i = view[top + r];
+    // the rows where the scroll has them (a part of one at either end, cut at the list's edges)
+    int base = (int)floorf(scroll_px / 56);
+    float frac = scroll_px - base * 56.0f;
+    gfx_clip(0, 102, 610, rows * 56 + 2);
+    for (int r = 0; r <= rows && base + r < n; r++) {
+        if (base + r < 0)
+            continue;
+        int i = view[base + r];
         Song * x = songs_get(i);
-        float y = 104 + r * 56;
-        bool on = top + r == pos;
-        tap_item(14, y, 580, 54, top + r - pos);
+        float y = 104 + r * 56 - frac;
+        bool on = base + r == pos;
+        if (y > 90 && y + 54 < 104 + rows * 56 + 14)
+            tap_item(14, y, 580, 54, base + r - pos);
         if (on)
             select_bar(14, y, 580, 54, WHITE);
         else
@@ -3161,6 +3252,7 @@ static void song_list(void)
         if (x->fav)
             gfx_sprite(atlas_get(res.hud, "hud_star_gold"), 56, y + 34, 18, 18, WHITE);
     }
+    gfx_clip_off();
     if (!n) {
         font_draw_shadow(res.ui, find_text[0] ? "No song matches that" : "No songs here", 304, 240, 30,
                          RGBA(240, 235, 225, 255), ALIGN_CENTER);

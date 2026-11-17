@@ -53,6 +53,8 @@ void gfx_begin(float r, float g, float b);
 void gfx_end(void);
 // 960x544 pixels, y down
 void gfx_2d(void);
+void gfx_clip(float x, float y, float w, float h);   // drawing kept to this part of the picture
+void gfx_clip_off(void);
 // column-major 4x4 matrices
 void gfx_3d(const float * proj, const float * view);
 void gfx_blend(int mode);

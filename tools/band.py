@@ -72,6 +72,31 @@ def blended(clip, f, end):
     return (name, fps, 1, animp, (q * (1 - w) + b * w)[None], (P[f] * (1 - w) + P[f - span] * w)[None])
 
 
+# the singer turned back toward the audience: GHWT's singing loops swing the chest up to 50 degrees round (an idle
+# one nearly 90), and a camera off to one side then had the back of her head. A quarter of the turn is kept
+SING_TURN_KEPT = 0.25
+
+
+def face_front(rig, rest, N):
+    ch = N['bone_chest']
+    f = rest[ch][:3, :3].T @ np.array([0, 0, -1.0])      # the chest's own forward, from the rest pose
+    w = rig.W[ch][:3, :3] @ f
+    yaw = math.atan2(w[0], -w[2])
+    a = -(1 - SING_TURN_KEPT) * yaw
+    c, s = math.cos(a), math.sin(a)
+    R = np.array([[c, 0, s], [0, 1.0, 0], [-s, 0, c]])
+    # check the sense: turned by R the chest must face nearer -z, else the other way round
+    w2 = R @ w
+    if abs(math.atan2(w2[0], -w2[2])) > abs(yaw):
+        R = R.T
+    piv = rig.W[N['bone_pelvis']][:3, 3].copy()
+    T = np.eye(4)
+    T[:3, :3] = R
+    T[:3, 3] = piv - R @ piv
+    for k in range(len(rig.W)):             # every bone (the mic and the IK targets with them)
+        rig.W[k] = T @ rig.W[k]
+
+
 def hold_mic(rig, sing, rest_up=np.array([0, 1.0, 0])):
     # BandAnimator.Solve for the singer: the mic is in the right hand; a left hand out of reach hangs at the side
     mic = rig.p('Bone_Mic_Microphone')
@@ -881,6 +906,7 @@ def bake(path, work, tex_dir, alt=False):
         if role != 'drummer' or 'bone_ik_hand_slave_l' in N:
             wc.solve(rig, rest, role, (f - s0) / span * BEATS, g0)
         if role == 'vocalist':
+            face_front(rig, rest, N)
             hold_mic(rig, i < REST)
         if g0 is not None:
             guitar_hands(rig)
