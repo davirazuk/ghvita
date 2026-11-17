@@ -755,3 +755,9 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   line across the top is a 5 px gold bar with the chart's sections as ticks.
 - Touch pads lie under their lanes (pad_span: half way between projected lanes at the strikeline, outer ones to the
   edges); an OPEN / KICK strip across the top of the pads' area when the chart has open notes or it's drums.
+- Touch reworked (the user: "still doesn't behave like a touchscreen"): tap_items are rows, buttons (tap_btn) and keys
+  (tap_key); a tap on nothing does nothing (only a screen with no targets takes it as Cross: the title). A drag scrolls
+  the list a row each 46 px and a flick (> 700 px/s) carries on, slowing. A BACK chip top right wherever the help bar
+  has Back (not on the main menu, its clock is there). Options: the chosen row's value, left quarter down, right up.
+  Song select: the part's arrows. The search keyboard: every key types on a tap, and SPACE, DELETE, SEARCH, CANCEL
+  keys; while it's up only its keys can be tapped.

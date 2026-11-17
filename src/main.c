@@ -44,7 +44,6 @@ static volatile bool shrink_running;    // the settings' shrink is working throu
 static Pad pad;
 static uint32_t pressed, repeat;    // repeat: pressed, plus held directions repeating
 // what the help bar drew last frame, for a finger: each button's stretch of the bar; and whether the screen's been touched
-static struct { float x0, x1; uint32_t btn; } tap_spots[12];
 static int tap_count;
 // touch_used: the screen's been touched (a Vita with its buttons still shows them); touch_only: a phone, nothing but
 // the screen, so nothing on it speaks of buttons
@@ -54,20 +53,39 @@ static const bool touch_only = true;
 #else
 static bool touch_only;         // GHV_TOUCH=1 on the desktop, to look at a phone's screens
 #endif
-// the rows of the list on the screen, as drawn: a tap on one goes to it (so many steps up or down from the choice) and
-// picks it, as a touch screen should
-static struct { float x, y, w, h; int delta; } tap_items[64];
+// What can be tapped on the screen, as it was last drawn: a list's row (a tap goes to it, so many steps from the choice,
+// and picks it), an on-screen button (presses that button), a key of the search keyboard. A tap that lands on none of
+// them does nothing, as on any touch screen; only a screen with nothing at all to tap takes it as Cross (the title)
+enum { TAP_ROW, TAP_BTN, TAP_KEY };
+static struct { float x, y, w, h; int kind, val; } tap_items[96];
 static int tap_item_count;
+static int tapped_key = -1;     // this frame's tapped key (the keyboard's), -1 none
 
-static void tap_item(float x, float y, float w, float h, int delta)
+static void tap_add(float x, float y, float w, float h, int kind, int val)
 {
-    if (tap_item_count < 64) {
+    if (tap_item_count < 96) {
         tap_items[tap_item_count].x = x;
         tap_items[tap_item_count].y = y;
         tap_items[tap_item_count].w = w;
         tap_items[tap_item_count].h = h;
-        tap_items[tap_item_count++].delta = delta;
+        tap_items[tap_item_count].kind = kind;
+        tap_items[tap_item_count++].val = val;
     }
+}
+
+static void tap_item(float x, float y, float w, float h, int delta)
+{
+    tap_add(x, y, w, h, TAP_ROW, delta);
+}
+
+static void tap_btn(float x, float y, float w, float h, uint32_t btn)
+{
+    tap_add(x, y, w, h, TAP_BTN, (int)btn);
+}
+
+static void tap_key(float x, float y, float w, float h, int id)
+{
+    tap_add(x, y, w, h, TAP_KEY, id);
 }
 static bool autoplay;
 
@@ -181,31 +199,35 @@ static void help_bar(const char * const * items, int n)
             {"btn_l", BTN_L}, {"btn_r", BTN_R}, {"btn_start", BTN_START}, {"btn_select", BTN_SELECT},
             {"btn_left", BTN_LEFT}, {"btn_up", BTN_UP},
         };
-        for (size_t m = 0; m < sizeof(map) / sizeof(map[0]) && tap_count < 12; m++)
+        for (size_t m = 0; m < sizeof(map) / sizeof(map[0]); m++)
             if (strcmp(items[i], map[m].name) == 0) {
-                tap_spots[tap_count].x0 = x0 - 8;
-                tap_spots[tap_count].x1 = x - 10 * k;
-                tap_spots[tap_count++].btn = map[m].btn;
+                tap_btn(x0 - 8, SCREEN_H - 46, x - 10 * k - x0 + 8, 46, map[m].btn);
+                if (map[m].btn == BTN_CIRCLE && (touch_only || touch_used) && screen != S_MAIN) {
+                    // back, where a thumb finds it: the top right corner
+                    gfx_rect(SCREEN_W - 112, 0, 112, 34, RGBA(0, 0, 0, 190));
+                    gfx_rect(SCREEN_W - 112, 32, 112, 2, RGBA(255, 200, 90, 220));
+                    font_draw(res.ui, "< BACK", SCREEN_W - 56, 5, 22, RGBA(240, 240, 240, 240), ALIGN_CENTER);
+                    tap_btn(SCREEN_W - 124, 0, 124, 48, BTN_CIRCLE);
+                }
             }
     }
 }
 
-// Touch in the menus. A finger dragged up or down moves the choice as the d-pad would (a step every 46 pixels), across
-// as left and right; a tap on one of the help bar's buttons presses that button, a tap anywhere else is Cross, and a
-// tap with two fingers is Circle (back). In a song the notes have the touch screen: only the top corners are taken,
-// the right one for Start (pause), the left one for Select (Star Power)
+// Touch in the menus, as a touch screen: a tap on a row picks it, a tap on a button presses it, a key types; a tap on
+// nothing does nothing. A finger dragged up or down a list scrolls it (the choice follows, a row every 46 pixels) and a
+// flick carries on, slowing; dragged across, left and right. Two fingers at once are Back. In a song the notes have the
+// screen: only the top corners are taken, the right one pause, the left one Star Power
 static void menu_touch(void)
 {
     static int id = -1;
-    static float sx, sy, lx, ly;
-    static double t0;
+    static float sx, sy, lx, ly, last_y, vel, fling, fling_acc;
+    static double t0, last_t;
     static bool moved, two;
-    static struct { float x0, x1; uint32_t btn; } spots[12];
-    static int nspots;
-    static struct { float x, y, w, h; int delta; } rows[64];
-    static int nrows, q_moves;
-    static bool q_cross;
+    static struct { float x, y, w, h; int kind, val; } taps[96];
+    static int ntaps, q_moves;
+    static bool q_cross, rows;
     bool playing = screen == S_PLAY;
+    tapped_key = -1;
     // a tap on a row: the steps to it, one a frame, then the pick
     if (q_moves && !playing) {
         uint32_t b = q_moves > 0 ? BTN_DOWN : BTN_UP;
@@ -229,40 +251,61 @@ static void menu_touch(void)
         if (pad.touch_id[i] == id)
             at = i;
     if (id < 0 && pad.ntouch > 0) {
-        // a finger lands: the help bar as it was drawn when it did
+        // a finger lands: what could be tapped, as it was drawn when it did
         id = pad.touch_id[0];
         at = 0;
         sx = lx = pad.touch_x[0];
-        sy = ly = pad.touch_y[0];
-        t0 = now_s;
+        sy = ly = last_y = pad.touch_y[0];
+        t0 = last_t = now_s;
         moved = two = false;
-        nspots = tap_count < 12 ? tap_count : 12;
-        for (int i = 0; i < nspots; i++) {
-            spots[i].x0 = tap_spots[i].x0;
-            spots[i].x1 = tap_spots[i].x1;
-            spots[i].btn = tap_spots[i].btn;
-        }
-        nrows = tap_item_count < 64 ? tap_item_count : 64;
-        for (int i = 0; i < nrows; i++) {
-            rows[i].x = tap_items[i].x;
-            rows[i].y = tap_items[i].y;
-            rows[i].w = tap_items[i].w;
-            rows[i].h = tap_items[i].h;
-            rows[i].delta = tap_items[i].delta;
+        vel = fling = 0;
+        ntaps = tap_item_count < 96 ? tap_item_count : 96;
+        rows = false;
+        for (int i = 0; i < ntaps; i++) {
+            taps[i].x = tap_items[i].x;
+            taps[i].y = tap_items[i].y;
+            taps[i].w = tap_items[i].w;
+            taps[i].h = tap_items[i].h;
+            taps[i].kind = tap_items[i].kind;
+            taps[i].val = tap_items[i].val;
+            rows |= taps[i].kind == TAP_ROW;
         }
         touch_used = true;
     }
-    tap_count = tap_item_count = 0;     // the bar and the rows are drawn again this frame
-    if (id < 0)
+    tap_count = tap_item_count = 0;     // what can be tapped is drawn again this frame
+    const float step = 46, wide = 80;
+    if (id < 0) {
+        // a flick going on by itself, slowing
+        if (fabsf(fling) > 120 && !playing) {
+            fling_acc += fling / 60;
+            while (fling_acc <= -step) {
+                pressed |= BTN_DOWN;
+                repeat |= BTN_DOWN;
+                fling_acc += step;
+            }
+            while (fling_acc >= step) {
+                pressed |= BTN_UP;
+                repeat |= BTN_UP;
+                fling_acc -= step;
+            }
+            fling *= 0.93f;
+        } else
+            fling = 0;
         return;
+    }
     if (pad.ntouch >= 2)
         two = true;
     if (at >= 0) {
         float x = pad.touch_x[at], y = pad.touch_y[at];
-        if (fabsf(x - sx) > 16 || fabsf(y - sy) > 16)
+        if (fabsf(x - sx) > 14 || fabsf(y - sy) > 14)
             moved = true;
+        double dt = now_s - last_t;
+        if (dt > 0.001) {
+            vel = vel * 0.6f + 0.4f * (float)((y - last_y) / dt);
+            last_y = y;
+            last_t = now_s;
+        }
         if (!playing && moved && !two) {
-            const float step = 46, wide = 80;
             while (y - ly <= -step) {
                 pressed |= BTN_DOWN;            // the list goes up under the finger: the choice goes down it
                 repeat |= BTN_DOWN;
@@ -273,22 +316,31 @@ static void menu_touch(void)
                 repeat |= BTN_UP;
                 ly += step;
             }
-            while (x - lx >= wide) {
-                pressed |= BTN_RIGHT;
-                repeat |= BTN_RIGHT;
-                lx += wide;
-            }
-            while (x - lx <= -wide) {
-                pressed |= BTN_LEFT;
-                repeat |= BTN_LEFT;
-                lx -= wide;
+            if (!rows || fabsf(x - sx) > 2 * fabsf(y - sy)) {
+                while (x - lx >= wide) {
+                    pressed |= BTN_RIGHT;
+                    repeat |= BTN_RIGHT;
+                    lx += wide;
+                }
+                while (x - lx <= -wide) {
+                    pressed |= BTN_LEFT;
+                    repeat |= BTN_LEFT;
+                    lx -= wide;
+                }
             }
         }
         return;
     }
     // lifted
     id = -1;
-    if (moved || now_s - t0 > 0.6)
+    if (moved) {
+        if (rows && !playing && fabsf(vel) > 700) {
+            fling = vel;                        // flicked: it carries on
+            fling_acc = 0;
+        }
+        return;
+    }
+    if (now_s - t0 > 0.6)
         return;
     uint32_t b = 0;
     if (playing) {
@@ -298,26 +350,22 @@ static void menu_touch(void)
             b = BTN_SELECT;
     } else if (two)
         b = BTN_CIRCLE;
-    else {
-        b = BTN_CROSS;
-        bool hit = false;
-        if (sy > SCREEN_H - 62)
-            for (int i = 0; i < nspots; i++)
-                if (sx >= spots[i].x0 && sx <= spots[i].x1) {
-                    b = spots[i].btn;
-                    hit = true;
-                }
-        // a row of the list: go to it, then pick it (the one already chosen is picked at once)
-        for (int i = 0; i < nrows && !hit; i++)
-            if (sx >= rows[i].x && sx <= rows[i].x + rows[i].w && sy >= rows[i].y && sy <= rows[i].y + rows[i].h) {
-                hit = true;
-                if (rows[i].delta) {
-                    q_moves = rows[i].delta;
+    else if (!ntaps)
+        b = BTN_CROSS;                          // nothing on the screen to tap: the screen itself (the title)
+    else
+        for (int i = 0; i < ntaps; i++)
+            if (sx >= taps[i].x && sx <= taps[i].x + taps[i].w && sy >= taps[i].y && sy <= taps[i].y + taps[i].h) {
+                if (taps[i].kind == TAP_BTN)
+                    b = (uint32_t)taps[i].val;
+                else if (taps[i].kind == TAP_KEY)
+                    tapped_key = taps[i].val;
+                else if (taps[i].val) {
+                    q_moves = taps[i].val;
                     q_cross = true;
-                    b = 0;
-                }
+                } else
+                    b = BTN_CROSS;
+                break;
             }
-    }
     pressed |= b;
     repeat |= b;
 }
@@ -1633,8 +1681,30 @@ static const char * hit_badge(const DlHit * h, uint32_t * color, char * buf, siz
 static const char * kb_rows[4] = {"1234567890", "QWERTYUIOP", "ASDFGHJKL'", "ZXCVBNM-.&"};
 static int kb_x, kb_y;
 
+enum { KEY_SPACE = 40, KEY_DEL, KEY_GO, KEY_CANCEL };
+
 static void kb_update(void)
 {
+    // a key tapped: typed straight away, as a phone's keyboard does
+    if (tapped_key >= 0) {
+        size_t n = strlen(dl_typed);
+        if (tapped_key < 40 && n + 1 < sizeof(dl_typed)) {
+            char c = kb_rows[tapped_key / 10][tapped_key % 10];
+            dl_typed[n] = c >= 'A' && c <= 'Z' ? c + 32 : c;
+            dl_typed[n + 1] = 0;
+            kb_y = tapped_key / 10;
+            kb_x = tapped_key % 10;
+        } else if (tapped_key == KEY_SPACE && n + 1 < sizeof(dl_typed)) {
+            dl_typed[n] = ' ';
+            dl_typed[n + 1] = 0;
+        } else if (tapped_key == KEY_DEL && n)
+            dl_typed[n - 1] = 0;
+        else if (tapped_key == KEY_GO)
+            pressed |= BTN_START;
+        else if (tapped_key == KEY_CANCEL)
+            pressed |= BTN_CIRCLE;
+        ui_sound(SND_UI_MOVE);
+    }
     if (repeat & BTN_LEFT)
         kb_x = (kb_x + 9) % 10;
     if (repeat & BTN_RIGHT)
@@ -1688,6 +1758,7 @@ static void kb_update(void)
 
 static void kb_draw(void)
 {
+    tap_item_count = 0;         // over everything: only its keys can be tapped while it's up
     gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(0, 0, 0, 238));
     char t[140];
     snprintf(t, sizeof(t), "%s%s", dl_typed, fmod(now_s, 1.0) < 0.5 ? "_" : " ");
@@ -1699,9 +1770,20 @@ static void kb_draw(void)
             gfx_rect(px, py, 60, 54, on ? RGBA(255, 200, 80, 255) : RGBA(50, 50, 60, 255));
             char c[2] = {kb_rows[y][x], 0};
             font_draw(res.ui, c, px + 30, py + 11, 30, on ? RGBA(0, 0, 0, 255) : WHITE, ALIGN_CENTER);
+            tap_key(px - 3, py - 4, 66, 62, y * 10 + x);
         }
-    font_draw(res.ui, "Cross type   Square delete   Triangle space   Start search   Circle cancel", SCREEN_W / 2, 430, 20,
-              RGBA(220, 220, 230, 255), ALIGN_CENTER);
+    // the row under the letters: space, delete, search, cancel
+    static const char * const big[4] = {"SPACE", "DELETE", "SEARCH", "CANCEL"};
+    static const float bx[4] = {150, 352, 486, 620}, bw[4] = {195, 127, 127, 127};
+    for (int i = 0; i < 4; i++) {
+        float py = 170 + 4 * 62;
+        gfx_rect(bx[i], py, bw[i], 54, i == 2 ? RGBA(40, 130, 60, 255) : i == 3 ? RGBA(120, 40, 40, 255) : RGBA(70, 70, 82, 255));
+        font_draw(res.ui, big[i], bx[i] + bw[i] / 2, py + 14, 24, WHITE, ALIGN_CENTER);
+        tap_key(bx[i] - 3, py - 4, bw[i] + 6, 62, KEY_SPACE + i);
+    }
+    if (!touch_only)
+        font_draw(res.ui, "Cross type   Square delete   Triangle space   Start search   Circle cancel", SCREEN_W / 2, 486, 18,
+                  RGBA(220, 220, 230, 255), ALIGN_CENTER);
 }
 
 // the queue: what's waiting, what's under way, what failed, and the retry. It's saved with the game closed, so this
@@ -3043,6 +3125,8 @@ static void draw_select(const Song * s, bool loading)
     char t[96];
     snprintf(t, sizeof(t), "<  %s  >", part_name(sel_part));
     font_draw_shadow(res.title, t, 310, 198, 40, RGBA(255, 255, 255, 255), ALIGN_CENTER);
+    tap_btn(60, 188, 200, 54, BTN_LEFT);
+    tap_btn(360, 188, 200, 54, BTN_RIGHT);
     for (int d = 0; d < DIFF_COUNT; d++) {
         float y = 254 + d * 46;
         bool on = d == sel_diff, has = sel_diffs[sel_part] & (1 << d);
@@ -5282,6 +5366,15 @@ static void options_screen(void)
         option_text(i, name, value, sizeof(value));
         float y = 140 + r * 32;
         bool on = opt_top + r == menu_index;
+        if (on) {
+            // the chosen row: its value's left half takes it down, its right half up
+            tap_btn(130 + 700 * 0.5f, y - 3, 700 * 0.25f, 32, BTN_LEFT);
+            tap_btn(130 + 700 * 0.75f, y - 3, 700 * 0.25f, 32, BTN_RIGHT);
+            if (touch_only || touch_used) {
+                font_draw(res.ui, "<", 130 + 700 * 0.53f, y + 1, 24, RGBA(255, 240, 200, 220), ALIGN_CENTER);
+                font_draw(res.ui, ">", 130 + 700 * 0.98f, y + 1, 24, RGBA(255, 240, 200, 220), ALIGN_CENTER);
+            }
+        }
         tap_item(130, y - 3, 700, 32, opt_top + r - menu_index);
         if (on)
             select_bar(130, y - 3, 700, 34, WHITE);
