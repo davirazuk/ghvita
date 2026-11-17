@@ -567,6 +567,11 @@ int plat_battery(bool * charging)
     return pct >= 0 && pct <= 100 ? pct : -1;
 }
 
+void plat_song_keys(bool on)
+{
+    (void)on;
+}
+
 float plat_below(void)
 {
     return 0;

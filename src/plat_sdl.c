@@ -31,7 +31,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <sys/statvfs.h>
+#endif
 #include <stdarg.h>
 #include "audio.h"
 #include "plat.h"
@@ -51,6 +55,12 @@ static char shot_dir[512] = ".";
 // brought back into those 960x544
 static int win_w = SCREEN_W, win_h = SCREEN_H;
 static bool portrait_song;      // plat_portrait_song
+static bool song_keys;          // plat_song_keys
+
+void plat_song_keys(bool on)
+{
+    song_keys = on;
+}
 static float menu_x0, menu_w = SCREEN_W;    // plat_menu_focus
 #define MENU_PAD 0.66f          // a menu held upright: the thumb pad under the picture, this much of the width tall
 
@@ -351,9 +361,24 @@ bool plat_poll(Pad * pad)
         {SDL_SCANCODE_A, BTN_SQUARE}, {SDL_SCANCODE_S, BTN_TRIANGLE}, {SDL_SCANCODE_Q, BTN_L},
         {SDL_SCANCODE_W, BTN_R}, {SDL_SCANCODE_RETURN, BTN_START}, {SDL_SCANCODE_BACKSPACE, BTN_SELECT},
     };
-    for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]) && !typing; i++)
+    for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]) && !typing; i++) {
+        if (song_keys && (keys[i].sc == SDL_SCANCODE_A || keys[i].sc == SDL_SCANCODE_S || keys[i].sc == SDL_SCANCODE_Q ||
+                          keys[i].sc == SDL_SCANCODE_W))
+            continue;                   // in a song those letters are frets
         if (k[keys[i].sc])
             pad->buttons |= keys[i].bit;
+    }
+    if (song_keys && !typing) {
+        // the frets as the keyboard plays them: one hand on A S D F G, or two on A S and J K L; Space the open note
+        static const struct { int sc, lane; } fk[] = {
+            {SDL_SCANCODE_A, 0}, {SDL_SCANCODE_S, 1}, {SDL_SCANCODE_D, 2}, {SDL_SCANCODE_F, 3}, {SDL_SCANCODE_G, 4},
+            {SDL_SCANCODE_J, 2}, {SDL_SCANCODE_K, 3}, {SDL_SCANCODE_L, 4}, {SDL_SCANCODE_SPACE, 5}};
+        for (size_t i = 0; i < sizeof(fk) / sizeof(fk[0]); i++)
+            if (k[fk[i].sc])
+                pad->key_frets |= (uint8_t)(1u << fk[i].lane);
+        if (k[SDL_SCANCODE_RSHIFT] || k[SDL_SCANCODE_LSHIFT])
+            pad->buttons |= BTN_SELECT;     // Star Power
+    }
     if (back_key) {
         pad->buttons |= BTN_CIRCLE;
         back_key = false;
@@ -852,8 +877,13 @@ void plat_screenshot(const char * name)
 
 long long plat_free_bytes(void)
 {
+#ifdef _WIN32
+    ULARGE_INTEGER avail;
+    return GetDiskFreeSpaceExA(".", &avail, NULL, NULL) ? (long long)avail.QuadPart : -1;
+#else
     struct statvfs v;
     return statvfs(".", &v) ? -1 : (long long)v.f_bavail * (long long)v.f_frsize;
+#endif
 }
 
 void plat_local_time(struct tm * out)

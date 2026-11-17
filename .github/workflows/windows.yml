@@ -1,0 +1,70 @@
+# Builds GH Vita for Windows (64-bit) with MSYS2's MinGW-w64: the game, the DLLs it needs, the art from the latest Vita
+# release, and an empty songs folder, zipped. Runs by hand (Actions > Windows > Run workflow) or when a pushed commit's
+# message has [pc] in it. Published as the "windows" pre-release (never "latest": the Vita's updater reads that).
+name: Windows
+
+on:
+  push:
+    branches: ['**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  exe:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[pc]')
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: msys2 {0}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            git zip unzip
+            mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja mingw-w64-x86_64-pkgconf
+            mingw-w64-x86_64-SDL2 mingw-w64-x86_64-curl mingw-w64-x86_64-libarchive mingw-w64-x86_64-opusfile
+            mingw-w64-x86_64-opus mingw-w64-x86_64-libvorbis mingw-w64-x86_64-libogg mingw-w64-x86_64-mpg123
+            mingw-w64-x86_64-zlib mingw-w64-x86_64-ntldd mingw-w64-x86_64-github-cli
+
+      - name: Build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DGHV_BUILD=$(git rev-list --count HEAD)
+          cmake --build build
+
+      - name: Package (the exe, its DLLs, the art, a songs folder)
+        run: |
+          mkdir -p out/GHVita/data/songs out/GHVita/assets
+          cp build/ghvita.exe out/GHVita/GHVita.exe
+          # every DLL it loads that isn't Windows' own
+          ntldd -R build/ghvita.exe | grep -i mingw64 | sed 's/.*=> *//; s/ (0x.*//' | tr '\\' '/' | while read -r d; do cp "$(cygpath -u "$d")" out/GHVita/; done
+          ls out/GHVita
+          gh release download --pattern GHVita.vpk --dir /tmp/last
+          mkdir -p /tmp/last/x && (cd /tmp/last/x && unzip -q ../GHVita.vpk)
+          cp -r /tmp/last/x/assets/. out/GHVita/assets/
+          cp -r assets/. out/GHVita/assets/
+          rm -f out/GHVita/assets/update_token
+          printf 'GH Vita for Windows, build %s\r\n\r\nRun GHVita.exe. Put songs (Clone Hero / YARG folders) in data\\songs, or download them in the game.\r\nMenus: arrow keys move, Z picks, X goes back, Enter opens options.\r\nPlaying: frets on A S D F G with one hand, or A S + J K L with two (pressing a fret plays the note).\r\nSpace: open notes / the kick. Shift: Star Power. Enter: pause.\r\n' "$(git rev-list --count HEAD)" > out/GHVita/README.txt
+          (cd out && zip -qr ../GHVita-windows.zip GHVita)
+          ls -la GHVita-windows.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GHVita-windows
+          path: GHVita-windows.zip
+
+      - name: Publish as the "windows" pre-release
+        run: |
+          gh release view windows >/dev/null 2>&1 || gh release create windows --prerelease --title "GH Vita for Windows" --notes "The Windows build of GH Vita."
+          gh release upload windows GHVita-windows.zip --clobber
+          gh release edit windows --prerelease --notes "GH Vita for Windows, build $(git rev-list --count HEAD) ($(git rev-parse --short HEAD)). Download GHVita-windows.zip, unzip it anywhere and run GHVita.exe."

@@ -888,7 +888,8 @@ void config_defaults(void)
     cfg.crowd_vol = 5;
     cfg.flat_notes = false;
     cfg.rival = 1;     // notes facing you: they read better than lying on the neck
-    cfg.note_size = 1;
+    cfg.note_size = 2;          // big: a phone's and a Vita's screen are small
+    cfg.touch_frets = 1;        // two hands, as the keyboard's A S | J K L
     cfg.last_diff = DIFF_MEDIUM;
     cfg.sing_diff = DIFF_MEDIUM;    // singing along judges the voice at Medium, not at the instrument's own
 }
@@ -896,7 +897,7 @@ void config_defaults(void)
 void config_load(void)
 {
     config_defaults();
-    int look = 0, notes_look = 0, old_flash = 0;
+    int look = 0, notes_look = 0, old_flash = 0, defaults2 = 0;
     bool flat = false;   // notes_look: settings saved since notes face you by default
     char path[400];
     snprintf(path, sizeof(path), "%ssettings.txt", player_dir());
@@ -1023,6 +1024,8 @@ void config_load(void)
             cfg.five_pads = n != 0;
         else if (strcmp(k, "touch_frets") == 0)
             cfg.touch_frets = 0;                                // the old layouts: one hand to start
+        else if (strcmp(k, "defaults2") == 0)
+            defaults2 = n;
         else if (strcmp(k, "touch_hands") == 0)
             cfg.touch_frets = n < 0 || n > 2 ? 0 : n;
         else if (strcmp(k, "no_band") == 0)
@@ -1085,6 +1088,11 @@ void config_load(void)
         snprintf(cfg.highway, sizeof(cfg.highway), "judy");
     if (!look)
         cfg.sing_along = false;     // lyrics over the top of the picture when you aren't singing: only if asked for
+    if (!defaults2) {
+        // big notes and the two-handed touch layout became the defaults: a file from before gets them, once
+        cfg.note_size = 2;
+        cfg.touch_frets = 1;
+    }
 }
 
 bool cfg_borrowed;
@@ -1118,7 +1126,7 @@ void config_save(void)
     fprintf(f, "no_popups = %d\ntiming_bar = %d\nlive_stats = %d\nvanish = %d\n"
                "no_miss_sound = %d\nno_rear_whammy = %d\nno_bend = %d\nno_countdown = %d\n",
             cfg.no_popups, cfg.timing_bar, cfg.live_stats, cfg.vanish, cfg.no_miss_sound, cfg.no_rear_whammy, cfg.no_bend, cfg.no_countdown);
-    fprintf(f, "touch_hands = %d\n", cfg.touch_frets);
+    fprintf(f, "touch_hands = %d\ndefaults2 = 1\n", cfg.touch_frets);
     fprintf(f, "double_kick = %d\nfive_pads = %d\neasy_sustains = %d\nno_count_in = %d\nstage_screens = %d\nno_progress = %d\ncup_skin = %d\n", cfg.double_kick, cfg.five_pads, cfg.easy_sustains,
             cfg.no_count_in, cfg.stage_screens, cfg.no_progress, cfg.cup_skin);
     fprintf(f, "no_ghost = %d\nnotes_look = 1\nrival = %d\nhit_window = %d\nlight_fx = %d\nmetronome = %d\nsong_speed = %d\n", cfg.no_ghost, cfg.rival, cfg.hit_window,

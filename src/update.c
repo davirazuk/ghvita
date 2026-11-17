@@ -138,9 +138,9 @@ static int check_thread(void * arg)
 
 void update_check(bool now)
 {
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(_WIN32)
     (void)now;
-    return;                     // a phone gets a new APK from the releases page, not the Vita's updater
+    return;                     // a phone or a PC gets its own build from the releases page, not the Vita's updater
 #endif
     // at the first menu, then again every RECHECK_S or on waking (now) while nothing's on offer: before, it asked once a
     // launch, and a Vita that only ever sleeps never asked again
@@ -299,7 +299,7 @@ void update_install(void)
 
 void update_boot(void)
 {
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(_WIN32)
     return;
 #endif
     char flag[300], path[300], line[200] = "";

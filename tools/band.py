@@ -72,6 +72,67 @@ def blended(clip, f, end):
     return (name, fps, 1, animp, (q * (1 - w) + b * w)[None], (P[f] * (1 - w) + P[f - span] * w)[None])
 
 
+# the singer kept near upright: GHWT's singing loops (the wilder ones above all) lean the body back up to 37 degrees with
+# the head thrown back, which from the camera's height is a body lying across the shot. The upper body is turned about
+# the hips until the head is within SING_LEAN of over them; the hair, the hats and what hangs on the chest are bones of
+# the pelvis's in these models (Bone_ACC_*), so they're turned with it or they'd stay behind in the air
+SING_LEAN = 12.0
+
+
+def straighten(rig, N):
+    p = rig.W[N['bone_pelvis']][:3, 3].copy()
+    v = rig.W[N['bone_head']][:3, 3] - p
+    up = np.array([0, 1.0, 0])
+    tilt = math.degrees(math.atan2(math.hypot(v[0], v[2]), v[1]))
+    if tilt <= SING_LEAN:
+        return
+    axis = np.cross(v, up)
+    if np.linalg.norm(axis) < 1e-6:
+        return
+    axis /= np.linalg.norm(axis)
+    a = math.radians(tilt - SING_LEAN)
+    K = np.array([[0, -axis[2], axis[1]], [axis[2], 0, -axis[0]], [-axis[1], axis[0], 0]])
+    R = np.eye(3) + math.sin(a) * K + (1 - math.cos(a)) * K @ K
+    T = np.eye(4)
+    T[:3, :3] = R
+    T[:3, 3] = p - R @ p
+    moved = set(rig.subtree(N['bone_stomach_lower']))
+    for name, i in N.items():
+        if name.lower().startswith(('bone_acc_head', 'bone_acc_torso')):
+            moved.update(rig.subtree(i))
+    for k in moved:
+        rig.W[k] = T @ rig.W[k]
+
+
+HEAD_TILT = 25.0        # the head against the chest, at most (a head thrown right back read as a broken neck)
+
+
+def level_head(rig, N, rest):
+    h, c = N['bone_head'], N['bone_chest']
+    hu = rig.W[h][:3, :3] @ rest[h][:3, :3].T @ np.array([0, 1.0, 0])
+    cu = rig.W[c][:3, :3] @ rest[c][:3, :3].T @ np.array([0, 1.0, 0])
+    ang = math.degrees(math.acos(float(np.clip(hu @ cu, -1, 1))))
+    if ang <= HEAD_TILT:
+        return
+    axis = np.cross(hu, cu)
+    if np.linalg.norm(axis) < 1e-6:
+        return
+    axis /= np.linalg.norm(axis)
+    a = math.radians(ang - HEAD_TILT)
+    K = np.array([[0, -axis[2], axis[1]], [axis[2], 0, -axis[0]], [-axis[1], axis[0], 0]])
+    R = np.eye(3) + math.sin(a) * K + (1 - math.cos(a)) * K @ K
+    p = rig.W[h][:3, 3].copy()
+    T = np.eye(4)
+    T[:3, :3] = R
+    T[:3, 3] = p - R @ p
+    moved = set(rig.subtree(h))
+    for name, i in N.items():
+        if name.lower().startswith('bone_acc_head'):
+            moved.update(rig.subtree(i))
+    for k in moved:
+        rig.W[k] = T @ rig.W[k]
+
+
 # the singer turned back toward the audience: GHWT's singing loops swing the chest up to 50 degrees round (an idle
 # one nearly 90), and a camera off to one side then had the back of her head. A quarter of the turn is kept
 SING_TURN_KEPT = 0.25
@@ -81,6 +142,8 @@ def face_front(rig, rest, N):
     ch = N['bone_chest']
     f = rest[ch][:3, :3].T @ np.array([0, 0, -1.0])      # the chest's own forward, from the rest pose
     w = rig.W[ch][:3, :3] @ f
+    if math.hypot(w[0], w[2]) < 0.4:
+        return                              # the chest faces up or down: no way round to speak of
     yaw = math.atan2(w[0], -w[2])
     a = -(1 - SING_TURN_KEPT) * yaw
     c, s = math.cos(a), math.sin(a)
@@ -906,6 +969,8 @@ def bake(path, work, tex_dir, alt=False):
         if role != 'drummer' or 'bone_ik_hand_slave_l' in N:
             wc.solve(rig, rest, role, (f - s0) / span * BEATS, g0)
         if role == 'vocalist':
+            straighten(rig, N)
+            level_head(rig, N, rest)
             face_front(rig, rest, N)
             hold_mic(rig, i < REST)
         if g0 is not None:
@@ -918,6 +983,9 @@ def bake(path, work, tex_dir, alt=False):
                 M[:3, :3] = rig.W[tg][:3, :3]
                 rig.set_world(pm, M)
         skin = [m @ b[4] for m, b in zip(rig.W, bones)]
+        if os.environ.get('LEANLOG') and role == 'vocalist':
+            v = rig.W[N['bone_head']][:3, 3] - rig.W[N['bone_pelvis']][:3, 3]
+            print('lean', i, int(math.degrees(math.atan2(math.hypot(v[0], v[2]), v[1]))))
         if role != 'drummer' and i >= JUMP:
             # the jump: the stand isn't in it (it ran up through them), and they're brought down to the floor so the
             # cell holds them; game.c lifts the frame by SINGER_RISE, these numbers

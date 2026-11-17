@@ -17,6 +17,7 @@ enum {
 
 typedef struct {
     uint32_t buttons;               // held
+    uint8_t key_frets;              // a PC keyboard's frets held in a song: bit per lane (0-4), bit 5 the open note
     float lx, ly, rx, ry;           // sticks, -1..1
     int ntouch;                     // front touch screen, in screen pixels
     float touch_x[MAX_TOUCH], touch_y[MAX_TOUCH];
@@ -32,6 +33,8 @@ typedef struct {
 void plat_init(void);
 void plat_quit(void);
 // reads the pad; false when the app should close (the desktop window was closed)
+// in a song a PC keyboard's letters are frets (A S D F G, J K L, Space): not the Vita buttons they stand for in menus
+void plat_song_keys(bool on);
 bool plat_poll(Pad * pad);
 void plat_swap(void);
 // where the 960x544 picture sits in the window (pixels, from the bottom left), and the window's size (not the Vita's)

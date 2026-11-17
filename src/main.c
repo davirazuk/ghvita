@@ -7150,6 +7150,7 @@ int main(void)
         update_repeat();
         menu_touch();
         plat_portrait_song(screen == S_PLAY || screen == S_PAUSE || screen == S_RESUME);
+        plat_song_keys(screen == S_PLAY);
         game_touch_pads = touch_only;   // the drawn pads are a phone's: a Vita's screen plays its cups as it always did
         int drawn = screen;
         switch (screen) {

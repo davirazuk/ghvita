@@ -536,7 +536,7 @@ static const CineShot cine_shots[CS_COUNT] = {
     [CS_HERO] = {2, 0.0f, 2.30f, 2.05f, 38, 24, -20, -16, 2.6f, 0.21f, 0.50f},       // from the floor, legs long
     [CS_FACE] = {0, -0.03f, 1.02f, 0.92f, 34, 18, -8, -5, 3.4f, 0.50f, 0.24f},       // the face over the top of the board
     [CS_NECK] = {1, -0.06f, 1.50f, 1.32f, -30, -18, -2, 2, 2.8f, 0.23f, 0.46f},     // from the neck's side, the fret hand near
-    [CS_DRUMS] = {1, -0.15f, 2.9f, 2.6f, 24, 8, 14, 10, 5.0f, 0.50f, 0.25f},         // the kit from above the cymbals
+    [CS_DRUMS] = {1, 0.05f, 2.5f, 2.2f, 24, 8, 34, 28, 4.6f, 0.50f, 0.36f},          // the kit from above, the drummer over it
     [CS_LINE] = {2, 0.25f, 5.0f, 4.5f, 10, -6, -8, -6, 8.0f, 0.50f, 0.27f},          // the whole band strung across
     [CS_WAIST] = {1, -0.10f, 1.95f, 1.75f, -22, -8, -10, -8, 3.6f, 0.25f, 0.46f},    // waist up, the guitar in the picture
 };
@@ -1239,6 +1239,40 @@ static bool cine_clear(int shot, int who, float side)
         }
     }
     return true;
+}
+
+// a member standing in the close shot's line of sight, nearer the camera than the one it's on: left out of the shot
+static bool cine_in_the_way(int r)
+{
+    if (G.cine_shot < 0 || G.cine_shot == CS_LINE)
+        return false;
+    const CineShot * cs = &cine_shots[G.cine_shot];
+    float at[3], mk[3], rad = 3.14159265f / 180;
+    cine_mark(G.cine_who, at);
+    at[1] += G.cine_who ? 1.3f : 1.0f;
+    float yaw = -G.cine_side * (cs->yaw0 + cs->yaw1) * 0.5f * rad, pitch = (cs->pitch0 + cs->pitch1) * 0.5f * rad;
+    float eye[3] = {at[0] + cs->dist * sinf(yaw) * cosf(pitch), at[1] + cs->dist * sinf(pitch), at[2] + cs->dist * cosf(yaw) * cosf(pitch)};
+    cine_mark(r, mk);
+    mk[1] += 1.2f;
+    float d[3], q[3], len = 0, t = 0;
+    for (int c = 0; c < 3; c++) {
+        d[c] = at[c] - eye[c];
+        q[c] = mk[c] - eye[c];
+        len += d[c] * d[c];
+    }
+    len = sqrtf(len);
+    if (len < 0.1f)
+        return false;
+    for (int c = 0; c < 3; c++)
+        t += q[c] * d[c] / len;
+    if (t < 0.2f || t > len - 0.4f)
+        return false;           // behind the camera, or level with them or beyond: in the background
+    float off = 0;
+    for (int c = 0; c < 3; c++) {
+        float e = q[c] - d[c] / len * t;
+        off += e * e;
+    }
+    return sqrtf(off) < 1.5f;      // near the lens a body fills a wide part of the picture
 }
 
 // who the camera wants now: someone's solo (theirs, from their own chart), the drums with nobody else playing (a fill,
@@ -2316,6 +2350,8 @@ static void draw_band(double beat)
         bool behind = cine && G.cine_shot != CS_LINE && r != G.cine_who;
         if (cine && !m3)
             continue;
+        if (behind && cine_in_the_way(r))
+            continue;           // standing between the camera and the one it's on (the singer before the kit)
         if (m3) {
             // World Tour's model, posed by the same frames the sheet has, two of them blended so it moves smoothly
             Band3DDraw d3 = {0};
@@ -4809,6 +4845,22 @@ static int game_tick(const Pad * pad, uint32_t pressed, const RFrame * rf)
             held |= 1 << lane;
         if (pressed & b)
             lanes_pressed |= 1 << lane;
+    }
+    {
+        // a PC keyboard's frets (lefty turns them as it does the lanes); the open note on Space, the kick on drums
+        static uint8_t keys_was;
+        uint8_t kf = pad->key_frets;
+        for (int k = 0; k < 6; k++) {
+            if (!(kf & (1u << k)))
+                continue;
+            int lane = k == 5 ? LANE_OPEN : k < G.lanes && lefty_now() ? G.lanes - 1 - k : k;
+            if (k < 5 && k >= G.lanes)
+                continue;
+            held |= 1u << lane;
+            if (!(keys_was & (1u << k)))
+                lanes_pressed |= 1u << lane;
+        }
+        keys_was = kf;
     }
     int new_ids[MAX_TOUCH], new_count = 0;
     // a finger landing on the screen above the pads (the highway, the stage; not the pause corner) sets Star Power off:

@@ -13,6 +13,13 @@
 #else
 #include <GL/gl.h>
 #endif
+// Windows' own gl.h stops at OpenGL 1.1: these two came after
+#ifndef GL_CLAMP_TO_EDGE
+#define GL_CLAMP_TO_EDGE 0x812F
+#endif
+#ifndef GL_TEXTURE_MAX_LEVEL
+#define GL_TEXTURE_MAX_LEVEL 0x813D
+#endif
 #include "gfx.h"
 #include "plat.h"
 #define STBI_ONLY_PNG

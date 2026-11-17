@@ -846,3 +846,12 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 - Android updates never installed: each CI runner signed with its own fresh debug key, and Android refuses an update
   signed by a different key. Every build is now signed with android/ghvita.keystore (sideload key, kept in the repo).
   Phones with an older APK must uninstall once (back up Android/data/org.ghvita.app/files first) and install this one.
+- Singers: the bake keeps them within 12 degrees of upright (GHWT's wild singing loops leaned 37 degrees back) and
+  the head within 25 degrees of the chest, the Bone_ACC_* hair and hats (pelvis children in these models) turned with
+  them; the facing correction ignores a chest pointing up.
+- Close shots leave out a member standing between the camera and the one it's on; the drum close-up looks down over
+  the kit (the drummer was hidden behind his drums).
+- Defaults: big notes, the two-handed touch layout (A S | J K L); applied once to older settings files (defaults2).
+- PC: keyboard frets in songs (A S D F G, J K L as yellow blue orange, Space open/kick, Shift Star Power).
+- Windows: .github/workflows/windows.yml ([pc] in a commit message) builds with MSYS2 MinGW-w64 and publishes
+  GHVita-windows.zip (exe, DLLs, art, data/songs) as the "windows" pre-release. src/wincompat.h for mkdir.

@@ -89,6 +89,15 @@ if (VITA)
         VERSION ${VITA_VERSION}
         NAME ${VITA_APP_NAME}
         ${VPK_FILES})
+elseif(WIN32)
+    # Windows (MSYS2's MinGW-w64, .github/workflows/windows.yml): the libraries from its packages, found by pkg-config
+    find_package(SDL2 REQUIRED)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(DEPS REQUIRED libcurl libarchive opusfile opus vorbisfile vorbis ogg libmpg123 zlib)
+    add_executable(ghvita WIN32 ${SRCS} src/plat_sdl.c)
+    target_compile_options(ghvita PRIVATE -include ${CMAKE_SOURCE_DIR}/src/wincompat.h)
+    target_include_directories(ghvita PRIVATE ${DEPS_INCLUDE_DIRS} src/ext/include)
+    target_link_libraries(ghvita SDL2::SDL2main SDL2::SDL2 opengl32 ${DEPS_LIBRARIES} winmm ws2_32 m)
 else()
     find_package(SDL2 REQUIRED)
     add_executable(ghvita ${SRCS} src/plat_sdl.c)
