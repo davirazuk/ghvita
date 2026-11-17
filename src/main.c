@@ -730,6 +730,82 @@ static bool daily_finished(const Song * s)
     return true;
 }
 
+// one of the band on a menu screen as they'll be on the stage: playing World Tour's loop, turning a little, a pool of
+// light and their shadow under them. cx, cy: where a point 1.02 m up them lands; ppm: pixels a metre (the drummer and
+// kit a little smaller); turn: how far they swing round (radians)
+static void menu_rocker(int r, const char * name, float cx, float cy, float ppm, float turn)
+{
+    Band3D * model = name ? res_band3d(r, name, cfg.band_hue[r] * 40) : NULL;
+    if (!model)
+        return;
+    {
+        double beats = now_s * 100 / 60;
+        float phase = (float)(fmod(beats, 4) / 4), t = (float)now_s;
+        Band3DDraw d = {0};
+        d.hands.ga = -1;
+        if (r >= 2) {
+            int st = (int)(phase * 16) % 16, hit = fmod(beats, 1) < 0.18 ? 1 : fmod(beats, 1) < 0.36 ? 2 : 0;
+            d.fa = st * 3 + hit;
+            d.fb = ((st + 1) % 16) * 3 + hit;
+            d.wb = (float)fmod(phase * 16, 1);
+            if (band3d_has_hands(model)) {
+                d.hands.ga = st;
+                d.hands.gb = (st + 1) % 16;
+                d.hands.fret = 1.5f + 1.4f * sinf(t * 0.9f);
+                d.hands.ca = 0;
+                d.hands.cb = 2;
+                d.hands.wc = 0.5f + 0.5f * sinf(t * 1.7f);
+            }
+        } else if (r == 1) {
+            d.fa = (int)(phase * 32) % 32;
+            d.fb = (d.fa + 1) % 32;
+            d.wb = (float)fmod(phase * 32, 1);
+        } else {
+            float p = (float)fmod(beats / 2, 1) * 8;
+            d.fa = 48 + (int)p % 8;
+            d.fb = 48 + ((int)p + 1) % 8;
+            d.wb = p - (float)(int)p;
+        }
+        d.pos[1] = r ? -1.02f : -0.75f;
+        d.yaw = sinf(t * 0.45f) * turn;
+        d.cam_pitch = 0.07f;
+        d.cam_dist = 6;
+        d.cx = cx;
+        d.cy = cy;
+        d.ppm = r ? ppm : ppm * 0.714f;
+        d.key[0] = -0.5f;
+        d.key[1] = 0.6f;
+        d.key[2] = 0.65f;
+        d.fill = 0.45f;
+        for (int c = 0; c < 3; c++) {
+            d.top[c] = 1.12f;
+            d.bot[c] = 0.88f;
+        }
+        d.tint = WHITE;
+        d.rim[0] = 1.0f;
+        d.rim[1] = 0.62f;
+        d.rim[2] = 0.25f;
+        d.rim_k = 0.5f;
+        // a pool of light and their shadow on the floor under them
+        const Sprite * glow = atlas_get(res.game, "glow");
+        float fy = d.pos[1], rad = r ? 0.75f : 1.6f;
+        const float fp[4][3] = {{-rad * 1.6f, fy, -rad}, {rad * 1.6f, fy, -rad}, {rad * 1.6f, fy, rad}, {-rad * 1.6f, fy, rad}};
+        const float sp[4][3] = {{-rad * 0.8f, fy + 0.01f, -rad * 0.5f}, {rad * 0.8f, fy + 0.01f, -rad * 0.5f},
+                                {rad * 0.8f, fy + 0.01f, rad * 0.5f}, {-rad * 0.8f, fy + 0.01f, rad * 0.5f}};
+        const float uv[4][2] = {{glow->u0, glow->v0}, {glow->u1, glow->v0}, {glow->u1, glow->v1}, {glow->u0, glow->v1}};
+        const uint32_t lc[4] = {RGBA(255, 190, 110, 90), RGBA(255, 190, 110, 90), RGBA(255, 190, 110, 90), RGBA(255, 190, 110, 90)};
+        const uint32_t sc[4] = {RGBA(0, 0, 0, 200), RGBA(0, 0, 0, 200), RGBA(0, 0, 0, 200), RGBA(0, 0, 0, 200)};
+        Band3DDraw floor_cam = d;       // the floor's corners are given from the camera's target already
+        memset(floor_cam.pos, 0, sizeof(floor_cam.pos));
+        band3d_begin(true);
+        band3d_quad(&floor_cam, fp, glow->tex, uv, lc);
+        band3d_quad(&floor_cam, sp, glow->tex, uv, sc);
+        band3d_draw(model, &d);
+        band3d_end();
+        gfx_2d();
+    }
+}
+
 static void main_menu(void)
 {
     static int offered;                 // the build last put up: a newer one found later is offered too
@@ -814,15 +890,32 @@ static void main_menu(void)
         }
         gfx_blend(BLEND_ALPHA);
     }
+    // the guitarist the player picked (or World Tour's first), playing in the middle of the screen
+    {
+        const char * who = cfg.band_pick[2][0] ? cfg.band_pick[2] : NULL;
+        for (int i = 0; i < res.band_count && !who; i++)
+            if (strncmp(res.band_names[i], "guitarist", 9) == 0)
+                who = res.band_names[i];
+        menu_rocker(2, who, 575, 276, 204, 0.5f);
+    }
     if (res.logo)
-        gfx_sprite(&(Sprite){res.logo, 0, 0, 1, 1, 512, 370}, 535, 46, 350, 253, WHITE);
-    panel(40, 100, 420, 366);
+        gfx_sprite(&(Sprite){res.logo, 0, 0, 1, 1, 512, 370}, 34, 8, 196, 142, WHITE);
+    // the list down the left, no box: the choice big, on a wedge of light cut on the slant; the rest smaller, waiting
     for (int i = 0; i < n; i++) {
-        float y = 110 + i * 38.5f;
-        if (i == menu_index)
-            select_bar(50, y - 5, 400, 41, WHITE);
-        font_draw_shadow(res.title, items[i], 80, y, 34, i == menu_index ? RGBA(255, 230, 150, 255)
-                                                                           : RGBA(200, 190, 180, 255), ALIGN_LEFT);
+        float y = 156 + i * 37.0f;
+        bool on = i == menu_index;
+        if (on) {
+            float w = font_width(res.title, items[i], 44) + 120, b = 0.85f + 0.15f * sinf((float)now_s * 5);
+            const float uvq[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+            const float pq[4][3] = {{0, y - 6, 0}, {w, y - 6, 0}, {w - 34, y + 40, 0}, {0, y + 40, 0}};
+            uint32_t c0 = RGBA(255, 150, 20, (int)(235 * b)), c1 = RGBA(200, 40, 10, (int)(120 * b));
+            const uint32_t cq[4] = {c0, c1, c1, c0};
+            gfx_tex(NULL);
+            gfx_quad(pq, uvq, cq);
+            gfx_rect(0, y + 38, w - 34, 3, RGBA(255, 240, 200, 230));
+        }
+        font_draw_shadow(res.title, items[i], on ? 58 : 46, on ? y - 7 : y + 2, on ? 44 : 30,
+                         on ? RGBA(255, 250, 235, 255) : RGBA(215, 200, 180, 255), ALIGN_LEFT);
         if (i == M_DAILY && songs_count()) {
             // a tick once it's done today, else the streak waiting on it
             char d[32] = "";
@@ -831,8 +924,8 @@ static void main_menu(void)
                 snprintf(d, sizeof(d), "done  %d day%s", st, st == 1 ? "" : "s");
             else if (st)
                 snprintf(d, sizeof(d), "%d day streak", st);
-            font_draw_shadow(res.ui, d, 440, y + 8, 20, daily_done_today() ? RGBA(130, 230, 130, 255)
-                                                                            : RGBA(255, 200, 110, 255), ALIGN_RIGHT);
+            font_draw_shadow(res.ui, d, on ? font_width(res.title, items[i], 44) + 70 : 250, y + 10, 18,
+                             daily_done_today() ? RGBA(130, 230, 130, 255) : RGBA(255, 220, 150, 255), ALIGN_LEFT);
         }
     }
     if (menu_index == M_DAILY && songs_count()) {
@@ -850,19 +943,19 @@ static void main_menu(void)
     }
     // who's playing: their card, their rank, their stars and medals
     {
-        const float x = 500, y = 344, w = 420, h = 96;
+        const float x = 650, y = 392, w = 298, h = 96;
         gfx_rect(x, y, w, h, RGBA(0, 0, 0, 150));
         gfx_rect(x, y, w, 2, RGBA(255, 215, 110, 200));
         int me = player_current();
         draw_player_face(me, x + 48, y + 8, 80, true);
-        font_draw_fit(res.title, player_name(me), x + 100, y + 10, 30, 300, RGBA(255, 225, 150, 255), ALIGN_LEFT);
+        font_draw_fit(res.title, player_name(me), x + 100, y + 10, 30, 190, RGBA(255, 225, 150, 255), ALIGN_LEFT);
         char line[96];
         snprintf(line, sizeof(line), "%s   %d stars", player_title_text(), career.stars);
-        font_draw_fit(res.ui, line, x + 100, y + 46, 18, 300, RGBA(215, 210, 200, 255), ALIGN_LEFT);
+        font_draw_fit(res.ui, line, x + 100, y + 46, 16, 190, RGBA(215, 210, 200, 255), ALIGN_LEFT);
         int medals[4];
         medal_totals(medals);
         for (int m = MEDAL_GOLD, k = 0; m >= MEDAL_BRONZE; m--, k++) {
-            float mx = x + 112 + k * 74;
+            float mx = x + 108 + k * 44;
             draw_medal(m, mx, y + 80, 9);
             snprintf(line, sizeof(line), "%d", medals[m]);
             font_draw(res.ui, line, mx + 14, y + 70, 18, medal_cols[m], ALIGN_LEFT);
@@ -872,7 +965,7 @@ static void main_menu(void)
     }
     char t[200], now[160];
     snprintf(t, sizeof(t), "%d %s", songs_count(), songs_count() == 1 ? "song" : "songs");
-    font_draw_shadow(res.ui, t, 60, 470, 22, RGBA(220, 220, 220, 255), ALIGN_LEFT);
+    font_draw_shadow(res.ui, t, 244, 112, 20, RGBA(220, 220, 220, 255), ALIGN_LEFT);
     // which build this is: a card can quietly keep an old one
     font_draw(res.ui, "build " __DATE__ " " __TIME__, SCREEN_W - 20, 490, 16, RGBA(200, 200, 210, 200), ALIGN_RIGHT);
     status_corner();
@@ -6225,73 +6318,7 @@ static void rockers_screen(void)
     }
     // whoever the cursor's on, as they'll be on the stage: turning slowly, playing World Tour's loop
     const char * name = cur ? res.band_names[found[cur - 1]] : cnt ? res.band_names[found[(int)(now_s / 4) % cnt]] : NULL;
-    Band3D * model = name ? res_band3d(r, name, cfg.band_hue[r] * 40) : NULL;
-    if (model) {
-        double beats = now_s * 100 / 60;
-        float phase = (float)(fmod(beats, 4) / 4), t = (float)now_s;
-        Band3DDraw d = {0};
-        d.hands.ga = -1;
-        if (r >= 2) {
-            int st = (int)(phase * 16) % 16, hit = fmod(beats, 1) < 0.18 ? 1 : fmod(beats, 1) < 0.36 ? 2 : 0;
-            d.fa = st * 3 + hit;
-            d.fb = ((st + 1) % 16) * 3 + hit;
-            d.wb = (float)fmod(phase * 16, 1);
-            if (band3d_has_hands(model)) {
-                d.hands.ga = st;
-                d.hands.gb = (st + 1) % 16;
-                d.hands.fret = 1.5f + 1.4f * sinf(t * 0.9f);
-                d.hands.ca = 0;
-                d.hands.cb = 2;
-                d.hands.wc = 0.5f + 0.5f * sinf(t * 1.7f);
-            }
-        } else if (r == 1) {
-            d.fa = (int)(phase * 32) % 32;
-            d.fb = (d.fa + 1) % 32;
-            d.wb = (float)fmod(phase * 32, 1);
-        } else {
-            float p = (float)fmod(beats / 2, 1) * 8;
-            d.fa = 48 + (int)p % 8;
-            d.fb = 48 + ((int)p + 1) % 8;
-            d.wb = p - (float)(int)p;
-        }
-        d.pos[1] = r ? -1.02f : -0.75f;
-        d.yaw = sinf(t * 0.45f) * 0.9f;
-        d.cam_pitch = 0.07f;
-        d.cam_dist = 6;
-        d.cx = 730;
-        d.cy = 268;
-        d.ppm = r ? 196 : 140;
-        d.key[0] = -0.5f;
-        d.key[1] = 0.6f;
-        d.key[2] = 0.65f;
-        d.fill = 0.45f;
-        for (int c = 0; c < 3; c++) {
-            d.top[c] = 1.12f;
-            d.bot[c] = 0.88f;
-        }
-        d.tint = WHITE;
-        d.rim[0] = 1.0f;
-        d.rim[1] = 0.62f;
-        d.rim[2] = 0.25f;
-        d.rim_k = 0.5f;
-        // a pool of light and their shadow on the floor under them
-        const Sprite * glow = atlas_get(res.game, "glow");
-        float fy = d.pos[1], rad = r ? 0.75f : 1.6f;
-        const float fp[4][3] = {{-rad * 1.6f, fy, -rad}, {rad * 1.6f, fy, -rad}, {rad * 1.6f, fy, rad}, {-rad * 1.6f, fy, rad}};
-        const float sp[4][3] = {{-rad * 0.8f, fy + 0.01f, -rad * 0.5f}, {rad * 0.8f, fy + 0.01f, -rad * 0.5f},
-                                {rad * 0.8f, fy + 0.01f, rad * 0.5f}, {-rad * 0.8f, fy + 0.01f, rad * 0.5f}};
-        const float uv[4][2] = {{glow->u0, glow->v0}, {glow->u1, glow->v0}, {glow->u1, glow->v1}, {glow->u0, glow->v1}};
-        const uint32_t lc[4] = {RGBA(255, 190, 110, 90), RGBA(255, 190, 110, 90), RGBA(255, 190, 110, 90), RGBA(255, 190, 110, 90)};
-        const uint32_t sc[4] = {RGBA(0, 0, 0, 200), RGBA(0, 0, 0, 200), RGBA(0, 0, 0, 200), RGBA(0, 0, 0, 200)};
-        Band3DDraw floor_cam = d;       // the floor's corners are given from the camera's target already
-        memset(floor_cam.pos, 0, sizeof(floor_cam.pos));
-        band3d_begin(true);
-        band3d_quad(&floor_cam, fp, glow->tex, uv, lc);
-        band3d_quad(&floor_cam, sp, glow->tex, uv, sc);
-        band3d_draw(model, &d);
-        band3d_end();
-        gfx_2d();
-    }
+    menu_rocker(r, name, 730, 268, 196, 0.9f);
     static const char * help[] = {"btn_up", "Member", "btn_left", "Who", "btn_l", "", "btn_r", "Clothes' colour",
                                   "btn_triangle", "Reset", "btn_circle", "Back"};
     help_bar(help, 12);
