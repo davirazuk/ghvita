@@ -601,10 +601,15 @@ void plat_log(const char * fmt, ...)
 {
     va_list ap;
     va_start(ap, fmt);
+#ifdef __ANDROID__
+    SDL_LogMessageV(SDL_LOG_CATEGORY_APPLICATION, SDL_LOG_PRIORITY_INFO, fmt, ap);      // logcat
+    va_end(ap);
+#else
     vprintf(fmt, ap);
     va_end(ap);
     printf("\n");
     fflush(stdout);
+#endif
 }
 
 bool plat_net_up(char * err, int err_size)

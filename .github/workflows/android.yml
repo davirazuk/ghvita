@@ -1,0 +1,85 @@
+# Builds GH Vita for Android (an APK to sideload) from the same source: SDL2 + OpenGL ES 1.1, touch all the way.
+# Runs by hand (Actions > Android > Run workflow) or when a pushed commit's message has [apk] in it. The art comes out
+# of the latest Vita release's GHVita.vpk. The APK is published as the "android" pre-release (never "latest": the
+# Vita's updater reads the latest release) and kept as a run artifact.
+name: Android
+
+on:
+  push:
+    branches: ['**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[apk]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SDL_VERSION: 2.30.9
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: The art, from the latest release
+        run: |
+          gh release download --pattern GHVita.vpk --dir /tmp/last
+          mkdir -p /tmp/last/x && cd /tmp/last/x && unzip -q ../GHVita.vpk
+          mkdir -p "$GITHUB_WORKSPACE/android/app/src/main/assets/ghv"
+          cp -r /tmp/last/x/assets/. "$GITHUB_WORKSPACE/android/app/src/main/assets/ghv/"
+          cp -r "$GITHUB_WORKSPACE/assets/." "$GITHUB_WORKSPACE/android/app/src/main/assets/ghv/"
+          find "$GITHUB_WORKSPACE/android/app/src/main/assets/ghv" -type f | wc -l
+
+      - name: SDL2's source and its Java side
+        run: |
+          curl -sSL -o /tmp/sdl.tar.gz https://github.com/libsdl-org/SDL/releases/download/release-$SDL_VERSION/SDL2-$SDL_VERSION.tar.gz
+          mkdir -p /tmp/sdl && tar xzf /tmp/sdl.tar.gz -C /tmp/sdl --strip-components=1
+          mkdir -p android/app/src/main/java/org/libsdl/app
+          cp /tmp/sdl/android-project/app/src/main/java/org/libsdl/app/*.java android/app/src/main/java/org/libsdl/app/
+          echo "SDL_SRC=/tmp/sdl" >> "$GITHUB_ENV"
+
+      - name: The libraries the game links (vcpkg, static, for each ABI)
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME"
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME" >> "$GITHUB_ENV"
+          for t in arm64-android x64-android; do
+            "$VCPKG_INSTALLATION_ROOT/vcpkg" install --triplet $t libogg libvorbis opus opusfile mpg123 \
+              "curl[core,mbedtls]" "libarchive[core,bzip2,lzma,zstd]" | tail -5
+          done
+          mkdir -p /tmp/deps
+          ln -s "$VCPKG_INSTALLATION_ROOT/installed/arm64-android" /tmp/deps/arm64-v8a
+          ln -s "$VCPKG_INSTALLATION_ROOT/installed/x64-android" /tmp/deps/x86_64
+          ls /tmp/deps/arm64-v8a/lib/*.a
+          echo "GHV_DEPS=/tmp/deps" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.7
+
+      - name: Build the APK
+        run: |
+          export GHV_BUILD=$(git rev-list --count HEAD)
+          cd android
+          gradle --no-daemon assembleRelease
+          cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/GHVita-android.apk"
+          ls -la "$GITHUB_WORKSPACE/GHVita-android.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GHVita-android
+          path: GHVita-android.apk
+
+      - name: Publish as the "android" pre-release
+        run: |
+          gh release view android >/dev/null 2>&1 || gh release create android --prerelease --title "GH Vita for Android" --notes "The Android build of GH Vita (sideload the APK). Rebuilt by the Android workflow; not the Vita's update."
+          gh release upload android GHVita-android.apk --clobber
+          gh release edit android --prerelease --notes "The Android build of GH Vita, build $(git rev-list --count HEAD) ($(git rev-parse --short HEAD)). Sideload GHVita-android.apk. Songs and saves live in Android/data/org.ghvita.app/files."

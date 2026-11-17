@@ -1,0 +1,48 @@
+// GH Vita for Android: the same C game as the desktop test build (src/plat_sdl.c on SDL2, OpenGL ES 1.1), built by
+// .github/workflows/android.yml. The art (assets/) is packed into the APK and unpacked on the first start.
+plugins {
+    id 'com.android.application'
+}
+
+def ghvBuild = (System.getenv('GHV_BUILD') ?: '1') as int
+
+android {
+    namespace 'org.ghvita.app'
+    compileSdk 34
+    ndkPath System.getenv('ANDROID_NDK_HOME')
+    defaultConfig {
+        applicationId 'org.ghvita.app'
+        minSdk 24
+        targetSdk 34
+        versionCode ghvBuild
+        versionName "build ${ghvBuild}"
+        ndk {
+            abiFilters 'arm64-v8a', 'x86_64'
+        }
+        externalNativeBuild {
+            cmake {
+                arguments "-DANDROID_STL=c++_static", "-DGHV_BUILD=${ghvBuild}",
+                          "-DSDL_SRC=${System.getenv('SDL_SRC') ?: ''}", "-DDEPS=${System.getenv('GHV_DEPS') ?: ''}"
+            }
+        }
+    }
+    externalNativeBuild {
+        cmake {
+            path 'jni/CMakeLists.txt'
+            version '3.22.1'
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.debug      // sideloaded, not a store build
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+    aaptOptions {
+        noCompress 'ogg', 'opus', 'jpg', 'png'
+    }
+}

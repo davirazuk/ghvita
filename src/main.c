@@ -6558,8 +6558,16 @@ static void scan_progress(int found, const char * converting)
     res_loading(1, t);
 }
 
+#ifdef __ANDROID__
+#include <SDL.h>                // SDL's Java side calls SDL_main
+int main(int argc, char * argv[])
+{
+    (void)argc;
+    (void)argv;
+#else
 int main(void)
 {
+#endif
     plat_init();
     update_boot();
     plat_log("GH Vita starting");
