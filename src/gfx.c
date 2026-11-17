@@ -5,6 +5,11 @@
 #ifdef __vita__
 #include <vitaGL.h>
 #include <psp2/gxm.h>
+#elif defined(__ANDROID__) || defined(GHV_GLES)
+// a phone's OpenGL ES 1.1: the same fixed-function calls
+#include <GLES/gl.h>
+#define GHV_ES 1
+#define glOrtho glOrthof
 #else
 #include <GL/gl.h>
 #endif
@@ -86,6 +91,29 @@ static void upload_mipmaps(const uint8_t * px, int w, int h)
     const uint8_t * cur = px;
     uint8_t * owned = NULL;
     int level = 0;
+#ifdef GHV_ES
+    // ES wants the whole chain, down to one pixel (it has no "last level"): a side that's reached 1 stays there
+    while (w > 1 || h > 1) {
+        uint8_t * next;
+        if (w > 1 && h > 1)
+            next = half_size(cur, w, h);
+        else {
+            int nw = w > 1 ? w / 2 : 1, nh = h > 1 ? h / 2 : 1;
+            next = malloc((size_t)nw * nh * 4);
+            for (int i = 0; i < nw * nh; i++)
+                memcpy(next + i * 4, cur + (size_t)i * 2 * 4, 4);
+        }
+        w = w > 1 ? w / 2 : 1;
+        h = h > 1 ? h / 2 : 1;
+        level++;
+        glTexImage2D(GL_TEXTURE_2D, level, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, next);
+        free(owned);
+        owned = next;
+        cur = next;
+    }
+    free(owned);
+    return;
+#endif
     while (w > 1 && h > 1) {
         uint8_t * next = half_size(cur, w, h);
         w /= 2;
@@ -101,7 +129,7 @@ static void upload_mipmaps(const uint8_t * px, int w, int h)
         cur = next;
     }
     free(owned);
-#ifndef __vita__
+#if !defined(__vita__) && !defined(GHV_ES)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, level);
 #endif
 }
@@ -416,9 +444,26 @@ Sprite sprite_whole(Tex * t)
 void gfx_begin(float r, float g, float b)
 {
     draw_calls = 0;
+#ifdef __vita__
     glViewport(0, 0, SCREEN_W, SCREEN_H);
     glClearColor(r, g, b, 1);
     glClear(GL_COLOR_BUFFER_BIT);
+#else
+    // a window or a phone's screen of any shape: black all over, then the picture as big as fits, in the middle
+    int vx, vy, vw, vh, fw, fh;
+    plat_view(&vx, &vy, &vw, &vh, &fw, &fh);
+    glViewport(0, 0, fw, fh);
+    glClearColor(0, 0, 0, 1);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glViewport(vx, vy, vw, vh);
+    if (r > 0 || g > 0 || b > 0) {
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(vx, vy, vw, vh);
+        glClearColor(r, g, b, 1);
+        glClear(GL_COLOR_BUFFER_BIT);
+        glDisable(GL_SCISSOR_TEST);
+    }
+#endif
 }
 
 void gfx_end(void)

@@ -98,7 +98,15 @@ else()
     target_include_directories(ghvita PRIVATE ${SDL2_INCLUDE_DIRS} src/ext/include ${PCDEPS} ${PCDEPS}/opus
                                ${PCDEPS}/x86_64-linux-gnu)
     set(L /usr/lib/x86_64-linux-gnu)
-    target_link_libraries(ghvita ${SDL2_LIBRARIES} GL z
+    # -DGHV_GLES=ON: the desktop build on OpenGL ES 1.1, as the Android build draws (to test that path here)
+    option(GHV_GLES "draw with OpenGL ES 1.1" OFF)
+    if(GHV_GLES)
+        target_compile_definitions(ghvita PRIVATE GHV_GLES=1)
+        set(GHV_GL_LIB GLESv1_CM)
+    else()
+        set(GHV_GL_LIB GL)
+    endif()
+    target_link_libraries(ghvita ${SDL2_LIBRARIES} ${GHV_GL_LIB} z
         ${L}/libcurl.so.4 ${L}/libarchive.so.13
         ${L}/libopusfile.so.0 ${L}/libopus.so.0 ${L}/libmpg123.so.0
         ${L}/libvorbisfile.so.3 ${L}/libvorbis.so.0 ${L}/libogg.so.0 pthread m)

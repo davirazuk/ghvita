@@ -5,6 +5,6 @@
 
 // x: 16 kHz mono from song time t0, worked on in place (the vocals' chart loaded, for its notes; fr: the replay's
 // frames, for the pitch heard). Back: the mix, 16 kHz stereo, from *out_t0 (malloc'd; NULL: left as it was)
-enum { VOICE_STYLES = 4 };
+enum { VOICE_STYLES = 5, VOICE_RAW = 4 };      // VOICE_RAW: As recorded, what a new player gets
 int16_t * voicefx_mix(int16_t * x, int n, float t0, const RFrame * fr, int nf, int style, float * out_t0);
-const char * voicefx_name(int style);         // Natural, Studio, Big hall, Hard tune
+const char * voicefx_name(int style);         // Natural, Studio, Big hall, Hard tune, As recorded

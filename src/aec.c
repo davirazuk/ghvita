@@ -265,7 +265,7 @@ float aec_clean(int16_t * mic, const int16_t * ref, int n)
         // of the echo the filter expects (a phone speaker's never quite linear), doubled to be sure
         for (int k = 0; k < NB; k++) {
             float g = 1 - 2.0f * leak * Py[k] / (Pe[k] + 1);
-            g = g < 0.08f ? 0.08f : g;
+            g = g < 0.35f ? 0.35f : g;       // was 0.08 (-22 dB): that deep it chewed the voice up between words
             gain[k] = g < gain[k] ? g : 0.6f * gain[k] + 0.4f * g;           // down fast, up gently
         }
         memmove(ewin, ewin + BL, BL * sizeof(float));

@@ -127,20 +127,60 @@ static const struct {
     {0.8f, 1.5f, 0.004f, 0.16f, 0.80f, 0.35f, 400, "Studio"},
     {0.8f, 1.5f, 0.004f, 0.30f, 0.87f, 0.25f, 640, "Big hall"},
     {1.0f, 3.0f, 0.05f, 0.14f, 0.80f, 0.35f, 400, "Hard tune"},
+    {0, 0, 0, 0, 0, 0, 400, "As recorded"},      // VOICE_RAW: none of the above is used
 };
 
 const char * voicefx_name(int style)
 {
-    return styles[style < 0 || style >= VOICE_STYLES ? 1 : style].name;
+    return styles[style < 0 || style >= VOICE_STYLES ? VOICE_RAW : style].name;
 }
 
 int16_t * voicefx_mix(int16_t * x, int n, float t0, const RFrame * fr, int nf, int style, float * out_t0)
 {
-    style = style < 0 || style >= VOICE_STYLES ? 1 : style;
+    style = style < 0 || style >= VOICE_STYLES ? VOICE_RAW : style;
     uint64_t start = plat_now_us();
     int hops = n / HOP;
     if (hops < 100)
         return NULL;
+    if (style == VOICE_RAW) {
+        // As recorded: the voice as the mic had it, where it was sung. No gate (it chopped quiet singing in and out), no
+        // tuning, no room, no moving it in time: only the rumble under 90 Hz off, and one level for the whole take so
+        // it sits with the band (never more than x6, and nothing that changes as it goes)
+        Biquad hp;
+        bq_set(&hp, 0, 90, 0.707f, 0);
+        float * lv = malloc((size_t)hops * sizeof(float));
+        int16_t * st = malloc((size_t)n * 2 * sizeof(int16_t));
+        if (!lv || !st) {
+            free(lv);
+            free(st);
+            return NULL;
+        }
+        for (int k = 0; k < hops; k++) {
+            double sum = 0;
+            for (int i = 0; i < HOP; i++) {
+                float s = bq(&hp, x[k * HOP + i]);
+                sum += s * s;
+            }
+            lv[k] = sqrtf((float)(sum / HOP));
+        }
+        qsort(lv, (size_t)hops, sizeof(float), cmp_float);
+        float loud = lv[hops * 9 / 10], gain = loud > 40 ? 4200 / loud : 1;
+        gain = gain < 0.7f ? 0.7f : gain > 6 ? 6 : gain;
+        free(lv);
+        bq_set(&hp, 0, 90, 0.707f, 0);
+        for (int i = 0; i < n; i++) {
+            float s = bq(&hp, x[i]) * gain;
+            // loud peaks rounded off, not cut
+            if (s > 24000)
+                s = 24000 + (s - 24000) * 8000 / (8000 + (s - 24000));
+            else if (s < -24000)
+                s = -24000 + (s + 24000) * 8000 / (8000 - (s + 24000));
+            st[i * 2] = st[i * 2 + 1] = clip(s);
+        }
+        *out_t0 = t0;
+        plat_log("voicefx: as recorded, %d s in %.2f s, level x%.1f", n / R, (plat_now_us() - start) / 1e6, gain);
+        return st;
+    }
     // ---- how loud each 10 ms is (after the rumble's gone), the room's own noise, what counts as singing
     float * env = malloc((size_t)hops * sizeof(float)), * sorted = malloc((size_t)hops * sizeof(float));
     if (!env || !sorted) {

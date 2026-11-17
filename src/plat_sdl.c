@@ -14,8 +14,18 @@
 //   GHV_FIXED=1       the clock runs at exactly 1/60 s per frame (and so does the song)
 //   GHV_SHOTS=dir     where shots go (PPM files)
 //   GHV_DATA=dir      the data folder (default ./data/), GHV_ASSETS=dir the assets (default ./assets/)
+#ifdef __ANDROID__
+#include <SDL.h>
+#else
 #include <SDL2/SDL.h>
+#endif
+#if defined(__ANDROID__) || defined(GHV_GLES)
+// a phone (or GHV_GLES on the desktop, to test the same path): OpenGL ES 1.1, the screen whatever shape it is, fingers
+#include <GLES/gl.h>
+#define GHV_ES 1
+#else
 #include <GL/gl.h>
+#endif
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -36,6 +46,38 @@ static int64_t start_us;
 static char data_dir[512] = "data/";
 static char asset_dir[512] = "assets/";
 static char shot_dir[512] = ".";
+
+// The picture is 960x544 whatever the window is: as big as fits, in the middle (plat_view), and a finger's place is
+// brought back into those 960x544
+static int win_w = SCREEN_W, win_h = SCREEN_H;
+
+void plat_view(int * x, int * y, int * w, int * h, int * full_w, int * full_h)
+{
+    int vw = win_w, vh = win_w * SCREEN_H / SCREEN_W;
+    if (vh > win_h) {
+        vh = win_h;
+        vw = win_h * SCREEN_W / SCREEN_H;
+    }
+    *x = (win_w - vw) / 2;
+    *y = (win_h - vh) / 2;
+    *w = vw;
+    *h = vh;
+    *full_w = win_w;
+    *full_h = win_h;
+}
+
+// a place in the window (0..1 across and down) as the game's pixels
+static void to_screen(float nx, float ny, float * sx, float * sy)
+{
+    int x, y, w, h, fw, fh;
+    plat_view(&x, &y, &w, &h, &fw, &fh);
+    *sx = (nx * fw - x) * SCREEN_W / (w > 0 ? w : 1);
+    *sy = (ny * fh - y) * SCREEN_H / (h > 0 ? h : 1);
+}
+
+// the fingers on the screen, by SDL's ids
+static struct { SDL_FingerID id; float x, y; bool down; } fingers[MAX_TOUCH];
+static bool back_key;           // a phone's back button: Circle for a frame
 
 typedef struct {
     int64_t frame;
@@ -130,18 +172,45 @@ void plat_init(void)
     fixed_clock = getenv("GHV_FIXED") && atoi(getenv("GHV_FIXED"));
     if ((e = getenv("GHV_SCRIPT")))
         load_script(e);
+    SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");          // fingers are fingers, not a mouse as well
+    SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
+    SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
     SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER);
+#ifdef __ANDROID__
+    // the art is unpacked into the app's own storage by GHVitaActivity before this runs; songs and saves go where a
+    // file manager can reach them (Android/data/<package>/files)
+    snprintf(asset_dir, sizeof(asset_dir), "%s/assets/", SDL_AndroidGetInternalStoragePath());
+    const char * ext = SDL_AndroidGetExternalStoragePath();
+    snprintf(data_dir, sizeof(data_dir), "%s/", ext ? ext : SDL_AndroidGetInternalStoragePath());
+#endif
+#ifdef GHV_ES
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 1);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
+#else
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
+#endif
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);     // the 3D band
-    window = SDL_CreateWindow("GH Vita (test)", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, SCREEN_W, SCREEN_H,
-                              SDL_WINDOW_OPENGL);
+    Uint32 wflags = SDL_WINDOW_OPENGL;
+#ifdef __ANDROID__
+    wflags |= SDL_WINDOW_FULLSCREEN | SDL_WINDOW_RESIZABLE;
+#endif
+    int ww = SCREEN_W, wh = SCREEN_H;
+    if ((e = getenv("GHV_WINDOW")))                 // tests: a window of another shape ("1280x600")
+        sscanf(e, "%dx%d", &ww, &wh);
+    window = SDL_CreateWindow("GH Vita (test)", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, ww, wh, wflags);
     if (!window) {
         fprintf(stderr, "SDL_CreateWindow: %s\n", SDL_GetError());
         exit(1);
     }
     context = SDL_GL_CreateContext(window);
+    if (!context) {
+        plat_log("SDL_GL_CreateContext: %s", SDL_GetError());
+        exit(1);
+    }
+    SDL_GL_GetDrawableSize(window, &win_w, &win_h);
     SDL_GL_SetSwapInterval(fixed_clock ? 0 : 1);
     start_us = (int64_t)(SDL_GetPerformanceCounter() * 1000000.0 / SDL_GetPerformanceFrequency());
 }
@@ -167,6 +236,26 @@ bool plat_poll(Pad * pad)
     while (SDL_PollEvent(&ev)) {
         if (ev.type == SDL_QUIT)
             return false;
+        if (ev.type == SDL_WINDOWEVENT && (ev.window.event == SDL_WINDOWEVENT_SIZE_CHANGED || ev.window.event == SDL_WINDOWEVENT_RESIZED))
+            SDL_GL_GetDrawableSize(window, &win_w, &win_h);
+        if (ev.type == SDL_FINGERDOWN || ev.type == SDL_FINGERMOTION || ev.type == SDL_FINGERUP) {
+            int at = -1, spare = -1;
+            for (int i = 0; i < MAX_TOUCH; i++) {
+                if (fingers[i].down && fingers[i].id == ev.tfinger.fingerId)
+                    at = i;
+                else if (!fingers[i].down && spare < 0)
+                    spare = i;
+            }
+            if (at < 0 && ev.type != SDL_FINGERUP)
+                at = spare;
+            if (at >= 0) {
+                fingers[at].id = ev.tfinger.fingerId;
+                fingers[at].down = ev.type != SDL_FINGERUP;
+                to_screen(ev.tfinger.x, ev.tfinger.y, &fingers[at].x, &fingers[at].y);
+            }
+        }
+        if (ev.type == SDL_KEYDOWN && ev.key.keysym.sym == SDLK_AC_BACK)
+            back_key = true;
         if (!typing)
             continue;
         if (ev.type == SDL_TEXTINPUT && strlen(typed) + strlen(ev.text.text) < sizeof(typed))
@@ -193,11 +282,22 @@ bool plat_poll(Pad * pad)
     for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]) && !typing; i++)
         if (k[keys[i].sc])
             pad->buttons |= keys[i].bit;
+    if (back_key) {
+        pad->buttons |= BTN_CIRCLE;
+        back_key = false;
+    }
+    for (int i = 0; i < MAX_TOUCH; i++)
+        if (fingers[i].down && pad->ntouch < MAX_TOUCH) {
+            pad->touch_x[pad->ntouch] = fingers[i].x;
+            pad->touch_y[pad->ntouch] = fingers[i].y;
+            pad->touch_id[pad->ntouch++] = i + 1;
+        }
     int mx, my;
-    if (SDL_GetMouseState(&mx, &my) & SDL_BUTTON(SDL_BUTTON_LEFT)) {
+    if (!pad->ntouch && (SDL_GetMouseState(&mx, &my) & SDL_BUTTON(SDL_BUTTON_LEFT))) {
+        int lw, lh;
+        SDL_GetWindowSize(window, &lw, &lh);
         pad->ntouch = 1;
-        pad->touch_x[0] = mx;
-        pad->touch_y[0] = my;
+        to_screen((float)mx / (lw > 0 ? lw : 1), (float)my / (lh > 0 ? lh : 1), &pad->touch_x[0], &pad->touch_y[0]);
     }
     // the script
     while (script_pos < script_count && script[script_pos].frame <= frame_number) {
@@ -548,7 +648,16 @@ void plat_screenshot(const char * name)
 {
     static unsigned char px[SCREEN_W * SCREEN_H * 3];
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    if (win_w != SCREEN_W || win_h != SCREEN_H)
+        return;                 // shots are of the picture at its own size
+#ifdef GHV_ES
+    static unsigned char rgba[SCREEN_W * SCREEN_H * 4];
+    glReadPixels(0, 0, SCREEN_W, SCREEN_H, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+    for (int i = 0; i < SCREEN_W * SCREEN_H; i++)
+        memcpy(px + i * 3, rgba + i * 4, 3);
+#else
     glReadPixels(0, 0, SCREEN_W, SCREEN_H, GL_RGB, GL_UNSIGNED_BYTE, px);
+#endif
     char path[700];
     snprintf(path, sizeof(path), "%s/%s.ppm", shot_dir, name);
     FILE * f = fopen(path, "wb");
