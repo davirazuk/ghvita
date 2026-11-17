@@ -858,3 +858,11 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 - Each build looks like its device: the Vita names its buttons; a phone has touch chips; a PC (game_pc_keys) shows
   keycaps for the keys in the menus' bar, "PRESS ENTER TO ROCK", and A S D F G under the lanes as a song starts.
 - The main menu says the build number; on a phone the updater's last word under it (update_state.txt).
+- Strum option (Options > Controls > Strum): hold the frets, strum to play (keyboard arrows up/down, Down or Cross,
+  a tap above the touch pads; Star Power then the top-left corner on a phone). Hammer-ons (streak alive) and taps play
+  on the fret alone; a single note may have lower frets held; open notes are a strum with nothing held. strum_presses.
+- PC builds update themselves: Windows from the "windows" release (the zip unpacked over the game, running files
+  renamed .old and cleared next start, then restarted), Linux from the "linux" release (the AppImage replaced and
+  re-run; only when run as an AppImage). update.c PC_TAG / PC_ASSET; version.txt beside each.
+- Linux: .github/workflows/linux.yml ([linux]) builds an AppImage on Ubuntu 22.04 with linuxdeploy; art inside,
+  songs and saves in ~/GHVita (AppRun sets GHV_ASSETS / GHV_DATA).

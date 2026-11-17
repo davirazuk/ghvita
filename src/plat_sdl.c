@@ -365,9 +365,8 @@ bool plat_poll(Pad * pad)
         {SDL_SCANCODE_W, BTN_R}, {SDL_SCANCODE_RETURN, BTN_START}, {SDL_SCANCODE_BACKSPACE, BTN_SELECT},
     };
     for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]) && !typing; i++) {
-        if (song_keys && (keys[i].sc == SDL_SCANCODE_A || keys[i].sc == SDL_SCANCODE_S || keys[i].sc == SDL_SCANCODE_Q ||
-                          keys[i].sc == SDL_SCANCODE_W))
-            continue;                   // in a song those letters are frets
+        if (song_keys && keys[i].sc != SDL_SCANCODE_RETURN && keys[i].sc != SDL_SCANCODE_BACKSPACE)
+            continue;                   // in a song the keyboard is frets and the strum (Enter pauses, Backspace Star Power)
         if (k[keys[i].sc])
             pad->buttons |= keys[i].bit;
     }
@@ -379,6 +378,7 @@ bool plat_poll(Pad * pad)
         for (size_t i = 0; i < sizeof(fk) / sizeof(fk[0]); i++)
             if (k[fk[i].sc])
                 pad->key_frets |= (uint8_t)(1u << fk[i].lane);
+        pad->key_strum = (k[SDL_SCANCODE_UP] ? 1 : 0) | (k[SDL_SCANCODE_DOWN] ? 2 : 0);
         if (k[SDL_SCANCODE_RSHIFT] || k[SDL_SCANCODE_LSHIFT])
             pad->buttons |= BTN_SELECT;     // Star Power
     }

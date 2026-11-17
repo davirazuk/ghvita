@@ -17,6 +17,7 @@ enum {
 
 typedef struct {
     uint32_t buttons;               // held
+    uint8_t key_strum;              // a PC keyboard's strum keys held in a song (the arrows up and down)
     uint8_t key_frets;              // a PC keyboard's frets held in a song: bit per lane (0-4), bit 5 the open note
     float lx, ly, rx, ry;           // sticks, -1..1
     int ntouch;                     // front touch screen, in screen pixels

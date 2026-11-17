@@ -1,0 +1,89 @@
+# Builds GH Vita for Linux as an AppImage (one file, runs on most 64-bit distributions; built on an older Ubuntu so
+# its libraries are old enough for them). Songs and saves live in ~/GHVita. Runs by hand (Actions > Linux > Run
+# workflow) or when a pushed commit's message has [linux] in it. Published as the "linux" pre-release (never
+# "latest": the Vita's updater reads that); the game updates itself from it.
+name: Linux
+
+on:
+  push:
+    branches: ['**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  appimage:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[linux]')
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+      APPIMAGE_EXTRACT_AND_RUN: 1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Libraries
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q cmake ninja-build pkg-config libsdl2-dev libgl1-mesa-dev zlib1g-dev \
+            libcurl4-openssl-dev libarchive-dev libopusfile-dev libopus-dev libvorbis-dev libogg-dev libmpg123-dev file xvfb libgl1-mesa-dri
+
+      - name: Build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DGHV_BUILD=$(git rev-list --count HEAD)
+          cmake --build build
+
+      - name: AppImage (the game, its libraries, the art)
+        run: |
+          D=AppDir
+          mkdir -p $D/usr/bin $D/usr/share/ghvita/assets $D/usr/share/applications $D/usr/share/icons/hicolor/256x256/apps
+          cp build/ghvita $D/usr/bin/ghvita
+          gh release download --pattern GHVita.vpk --dir /tmp/last
+          mkdir -p /tmp/last/x && (cd /tmp/last/x && unzip -q ../GHVita.vpk)
+          cp -r /tmp/last/x/assets/. $D/usr/share/ghvita/assets/
+          cp -r assets/. $D/usr/share/ghvita/assets/
+          # the owner's read-only token (as the phone's and the PC's builds have it): the game updates itself
+          cp android/update_token $D/usr/share/ghvita/assets/update_token
+          python3 -c "from PIL import Image; Image.open('/tmp/last/x/sce_sys/icon0.png').convert('RGBA').resize((256,256)).save('$D/usr/share/icons/hicolor/256x256/apps/ghvita.png')" 2>/dev/null \
+            || cp /tmp/last/x/sce_sys/icon0.png $D/usr/share/icons/hicolor/256x256/apps/ghvita.png
+          printf '[Desktop Entry]\nType=Application\nName=GH Vita\nExec=ghvita\nIcon=ghvita\nCategories=Game;\n' > $D/usr/share/applications/ghvita.desktop
+          cat > AppRun <<'SH'
+          #!/bin/sh
+          # the art inside the AppImage; songs and saves in ~/GHVita (the AppImage itself can't be written to)
+          HERE="$(dirname "$(readlink -f "$0")")"
+          export GHV_ASSETS="$HERE/usr/share/ghvita/assets"
+          export GHV_DATA="${GHV_DATA:-$HOME/GHVita}"
+          mkdir -p "$GHV_DATA/songs"
+          cd "$GHV_DATA" || exit 1
+          exec "$HERE/usr/bin/ghvita" "$@"
+          SH
+          sed -i 's/^          //' AppRun
+          chmod +x AppRun
+          curl -sSL -o linuxdeploy https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          chmod +x linuxdeploy
+          ./linuxdeploy --appdir $D --executable $D/usr/bin/ghvita --desktop-file $D/usr/share/applications/ghvita.desktop \
+            --icon-file $D/usr/share/icons/hicolor/256x256/apps/ghvita.png --custom-apprun AppRun --output appimage
+          mv GH_Vita*.AppImage GHVita-x86_64.AppImage
+          ls -la GHVita-x86_64.AppImage
+
+      - name: Check it starts (on a virtual screen, its songs folder made in ~/GHVita)
+        run: |
+          xvfb-run -a -s "-screen 0 1280x720x24" timeout 20 ./GHVita-x86_64.AppImage > start.log 2>&1 || true
+          ls ~/GHVita
+          cat start.log | head -20
+          grep -q "GH Vita starting" start.log
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GHVita-linux
+          path: GHVita-x86_64.AppImage
+
+      - name: Publish as the "linux" pre-release
+        run: |
+          gh release view linux >/dev/null 2>&1 || gh release create linux --prerelease --title "GH Vita for Linux" --notes "The Linux build of GH Vita."
+          echo $(git rev-list --count HEAD) > version.txt
+          gh release upload linux GHVita-x86_64.AppImage version.txt --clobber
+          gh release edit linux --prerelease --notes "GH Vita for Linux, build $(git rev-list --count HEAD) ($(git rev-parse --short HEAD)). Download GHVita-x86_64.AppImage, make it executable (chmod +x, or Properties > Allow executing) and run it. Songs and saves go in ~/GHVita/songs. It updates itself after that."

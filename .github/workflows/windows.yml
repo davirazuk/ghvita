@@ -54,7 +54,8 @@ jobs:
           mkdir -p /tmp/last/x && (cd /tmp/last/x && unzip -q ../GHVita.vpk)
           cp -r /tmp/last/x/assets/. out/GHVita/assets/
           cp -r assets/. out/GHVita/assets/
-          rm -f out/GHVita/assets/update_token
+          # the owner's read-only token (as the phone's build has it): the game updates itself from the windows release
+          cp android/update_token out/GHVita/assets/update_token
           printf 'GH Vita for Windows, build %s\r\n\r\nRun GHVita.exe. Put songs (Clone Hero / YARG folders) in data\\songs, or download them in the game.\r\nMenus: arrow keys move, Z picks, X goes back, Enter opens options.\r\nPlaying: frets on A S D F G with one hand, or A S + J K L with two (pressing a fret plays the note).\r\nSpace: open notes / the kick. Shift: Star Power. Enter: pause.\r\n' "$(git rev-list --count HEAD)" > out/GHVita/README.txt
           (cd out && zip -qr ../GHVita-windows.zip GHVita)
           ls -la GHVita-windows.zip
@@ -67,5 +68,6 @@ jobs:
       - name: Publish as the "windows" pre-release
         run: |
           gh release view windows >/dev/null 2>&1 || gh release create windows --prerelease --title "GH Vita for Windows" --notes "The Windows build of GH Vita."
-          gh release upload windows GHVita-windows.zip --clobber
-          gh release edit windows --prerelease --notes "GH Vita for Windows, build $(git rev-list --count HEAD) ($(git rev-parse --short HEAD)). Download GHVita-windows.zip, unzip it anywhere and run GHVita.exe."
+          echo $(git rev-list --count HEAD) > version.txt
+          gh release upload windows GHVita-windows.zip version.txt --clobber
+          gh release edit windows --prerelease --notes "GH Vita for Windows, build $(git rev-list --count HEAD) ($(git rev-parse --short HEAD)). Download GHVita-windows.zip, unzip it anywhere and run GHVita.exe. It updates itself after that."

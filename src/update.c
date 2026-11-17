@@ -33,6 +33,17 @@ static char auth[260];
 static const char * const json_headers[] = {auth, "Accept: application/vnd.github+json", "X-GitHub-Api-Version: 2022-11-28", NULL};
 static const char * const file_headers[] = {auth, "Accept: application/octet-stream", NULL};
 
+// a PC's own release and what's in it: Windows a zip of the game, Linux the AppImage (only when run as one)
+#if defined(_WIN32)
+#define PC_TAG "windows"
+#define PC_ASSET "GHVita-windows.zip"
+#elif defined(__linux__) && !defined(__ANDROID__)
+#define PC_TAG "linux"
+#define PC_ASSET "GHVita-x86_64.AppImage"
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
+
 static const char * api_base(void)
 {
 #ifndef __vita__
@@ -88,7 +99,17 @@ static int check_thread(void * arg)
         state = UP_NONE;                // no Wi-Fi is no news, not an error
         return 0;
     }
+#ifdef PC_TAG
+#ifndef _WIN32
+    if (!getenv("APPIMAGE")) {
+        state = UP_NONE;            // a build run from its folder (development): nothing to update
+        return 0;
+    }
+#endif
+    snprintf(url, sizeof(url), "%s/releases/tags/" PC_TAG, api_base());     // the PC's own release
+#else
     snprintf(url, sizeof(url), "%s/releases/latest", api_base());
+#endif
     char * body = NULL;
     size_t len = 0;
     HttpReq r = {.url = url, .headers = json_headers, .stall_s = 15};
@@ -110,6 +131,39 @@ static int check_thread(void * arg)
     char tag[32], want[48], name[64], link[300];
     const char * t = json_str(json_get(j, "tag_name"), "", tag, sizeof(tag));
     int version = t[0] == 'v' ? atoi(t + 1) : 0;
+#ifdef PC_TAG
+    {
+        // the PC's release: its version.txt says the build, PC_ASSET is the whole game
+        char vurl[300] = "";
+        const Json * assets = json_get(j, "assets");
+        for (const Json * a = assets ? assets->child : NULL; a; a = a->next) {
+            const char * n = json_str(json_get(a, "name"), "", name, sizeof(name));
+            if (!strcmp(n, "version.txt"))
+                snprintf(vurl, sizeof(vurl), "%s", json_str(json_get(a, "url"), "", link, sizeof(link)));
+            if (!strcmp(n, PC_ASSET)) {
+                snprintf(asset_url, sizeof(asset_url), "%s", json_str(json_get(a, "url"), "", link, sizeof(link)));
+                offered_size = (int64_t)json_num(json_get(a, "size"), 0);
+            }
+        }
+        json_free(j);
+        version = 0;
+        if (vurl[0] && asset_url[0]) {
+            char * vb = NULL;
+            size_t vl = 0;
+            HttpReq vr = {.url = vurl, .headers = file_headers, .stall_s = 15};
+            if (http_fetch(&vr, &vb, &vl, err, sizeof(err)) == 200 && vb)
+                version = atoi(vb);
+            free(vb);
+        }
+        plat_log("update: this is build %d, the PC's latest is %d", GHV_BUILD, version);
+        if (version > GHV_BUILD) {
+            offered = version;
+            state = UP_AVAILABLE;
+        } else
+            state = UP_NONE;
+        return 0;
+    }
+#endif
     plat_log("update: this is build %d, the latest release is %s", GHV_BUILD, t);
     asset_url[0] = 0;
     if (version > GHV_BUILD) {
@@ -138,9 +192,9 @@ static int check_thread(void * arg)
 
 void update_check(bool now)
 {
-#if defined(__ANDROID__) || defined(_WIN32)
+#if defined(__ANDROID__)
     (void)now;
-    return;                     // a phone or a PC gets its own build from the releases page, not the Vita's updater
+    return;                     // a phone updates through its own app (GHVitaActivity)
 #endif
     // at the first menu, then again every RECHECK_S or on waking (now) while nothing's on offer: before, it asked once a
     // launch, and a Vita that only ever sleeps never asked again
@@ -243,7 +297,37 @@ static int get_thread(void * arg)
     }
     state = UP_UNPACKING;
     char why[160] = "";
+#if defined(PC_TAG) && !defined(_WIN32)
+    // the AppImage is the whole game: kept as it came, made runnable
+    struct stat lst;
+    bool kept = stat(zip, &lst) == 0 && lst.st_size > 1000000;
+    if (kept) {
+        char img[320];
+        path_of(img, sizeof(img), "GHVita.AppImage");
+        kept = rename(zip, img) == 0;
+        chmod(img, 0755);
+    } else
+        snprintf(why, sizeof(why), "the download came out too small");
+    if (!kept) {
+        remove(zip);
+        fail(why[0] ? why : "couldn't keep the download");
+        return 0;
+    }
+    state = UP_READY;
+    return 0;
+#endif
+#ifdef _WIN32
+    char exe[400];
+    snprintf(exe, sizeof(exe), "%s/GHVita/GHVita.exe", dir);
+    FILE * ef = NULL;
+    bool ok = dl_extract_archive(zip, dir, why, sizeof(why)) && (ef = fopen(exe, "rb")) != NULL;
+    if (ef)
+        fclose(ef);
+    else if (!why[0])
+        snprintf(why, sizeof(why), "the download has no GHVita.exe");
+#else
     bool ok = dl_extract_archive(zip, dir, why, sizeof(why)) && verify(dir, why, sizeof(why));
+#endif
     remove(zip);
     if (!ok) {
         wipe(dir);
@@ -279,8 +363,154 @@ static void app_dir(char * out, size_t size)
         out[n - 1] = 0;
 }
 
+#ifdef _WIN32
+#include <dirent.h>
+#include <windows.h>
+#include <sys/stat.h>
+// the new files over the game's own (it's running: Windows lets a running exe or DLL be renamed, not overwritten, so
+// each old file steps aside as name.old, cleared at the next start); data/ (songs, saves) is left alone
+static int win_move_tree(const char * from, const char * to, char * why, size_t size)
+{
+    DIR * d = opendir(from);
+    if (!d)
+        return 0;
+    int n = 0;
+    struct dirent * e;
+    while ((e = readdir(d)) != NULL) {
+        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, ".."))
+            continue;
+        char src[700], dst[700], aside[720];
+        snprintf(src, sizeof(src), "%s/%s", from, e->d_name);
+        snprintf(dst, sizeof(dst), "%s/%s", to, e->d_name);
+        struct stat st;
+        if (stat(src, &st))
+            continue;
+        if (S_ISDIR(st.st_mode)) {
+            if (!strcmp(to, ".") && !strcmp(e->d_name, "data"))
+                continue;
+            _mkdir(dst);
+            int k = win_move_tree(src, dst, why, size);
+            if (k < 0) {
+                closedir(d);
+                return k;
+            }
+            n += k;
+            continue;
+        }
+        snprintf(aside, sizeof(aside), "%s.old", dst);
+        DeleteFileA(aside);
+        MoveFileExA(dst, aside, MOVEFILE_REPLACE_EXISTING);
+        if (!MoveFileExA(src, dst, MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED)) {
+            snprintf(why, size, "couldn't put %s in place", e->d_name);
+            MoveFileExA(aside, dst, MOVEFILE_REPLACE_EXISTING);
+            closedir(d);
+            return -1;
+        }
+        n++;
+    }
+    closedir(d);
+    return n;
+}
+
+// the files a last update set aside
+static void win_clear_old(const char * dir)
+{
+    DIR * d = opendir(dir);
+    if (!d)
+        return;
+    struct dirent * e;
+    while ((e = readdir(d)) != NULL) {
+        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..") || (!strcmp(dir, ".") && !strcmp(e->d_name, "data")))
+            continue;
+        char p[700];
+        snprintf(p, sizeof(p), "%s/%s", dir, e->d_name);
+        struct stat st;
+        if (stat(p, &st))
+            continue;
+        size_t l = strlen(e->d_name);
+        if (S_ISDIR(st.st_mode))
+            win_clear_old(p);
+        else if (l > 4 && !strcmp(e->d_name + l - 4, ".old"))
+            DeleteFileA(p);
+    }
+    closedir(d);
+}
+#endif
+
 void update_install(void)
 {
+#if defined(PC_TAG) && !defined(_WIN32)
+    {
+        // the new AppImage in the old one's place (a running file can be replaced on Linux), then started instead
+        const char * me = getenv("APPIMAGE");
+        char img[320], res[320], tmp[600];
+        path_of(img, sizeof(img), "GHVita.AppImage");
+        path_of(res, sizeof(res), "result.txt");
+        bool ok = me && me[0];
+        if (ok) {
+            snprintf(tmp, sizeof(tmp), "%s.new", me);
+            if (rename(img, me) != 0) {
+                // another drive: copied beside it, then swapped
+                FILE * in = fopen(img, "rb"), * out = in ? fopen(tmp, "wb") : NULL;
+                static char buf[1 << 16];
+                size_t n;
+                ok = in && out;
+                while (ok && (n = fread(buf, 1, sizeof(buf), in)) > 0)
+                    ok = fwrite(buf, 1, n, out) == n;
+                if (in)
+                    fclose(in);
+                if (out)
+                    ok = fclose(out) == 0 && ok;
+                ok = ok && rename(tmp, me) == 0;
+                remove(img);
+            }
+            chmod(me, 0755);
+        }
+        FILE * rf = fopen(res, "w");
+        if (rf) {
+            fprintf(rf, ok ? "ok 1\n" : "failed couldn't replace the AppImage\n");
+            fclose(rf);
+        }
+        if (!ok) {
+            fail("couldn't replace the AppImage");
+            return;
+        }
+        execl(me, me, (char *)NULL);
+        exit(0);
+    }
+#endif
+#ifdef _WIN32
+    {
+        char from[320], why[200] = "", res[320];
+        path_of(from, sizeof(from), "new/GHVita");
+        int n = win_move_tree(from, ".", why, sizeof(why));
+        path_of(res, sizeof(res), "result.txt");
+        FILE * rf = fopen(res, "w");
+        if (rf) {
+            if (n > 0)
+                fprintf(rf, "ok %d\n", n);
+            else
+                fprintf(rf, "failed %s\n", why[0] ? why : "nothing to put in");
+            fclose(rf);
+        }
+        if (n <= 0) {
+            fail(why[0] ? why : "the update had nothing in it");
+            return;
+        }
+        // the new game, started in this one's place
+        STARTUPINFOA si;
+        PROCESS_INFORMATION pi;
+        memset(&si, 0, sizeof(si));
+        si.cb = sizeof(si);
+        char cmd[] = "GHVita.exe";
+        if (CreateProcessA(NULL, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
+            CloseHandle(pi.hProcess);
+            CloseHandle(pi.hThread);
+        }
+        exit(0);
+    }
+#endif
+
     char dir[300], old[300], app[300], flag[300];
     path_of(dir, sizeof(dir), "new");
     path_of(old, sizeof(old), "old");
@@ -299,8 +529,32 @@ void update_install(void)
 
 void update_boot(void)
 {
-#if defined(__ANDROID__) || defined(_WIN32)
+#if defined(__ANDROID__)
     return;
+#endif
+#ifdef PC_TAG
+    {
+#ifdef _WIN32
+        win_clear_old(".");
+#endif
+        char res[320], line[200] = "", nd[320];
+        path_of(nd, sizeof(nd), "new");
+        wipe(nd);
+        path_of(res, sizeof(res), "result.txt");
+        FILE * rf = fopen(res, "r");
+        if (rf) {
+            if (!fgets(line, sizeof(line), rf))
+                line[0] = 0;
+            fclose(rf);
+            remove(res);
+            line[strcspn(line, "\r\n")] = 0;
+            if (!strncmp(line, "ok", 2))
+                snprintf(news, sizeof(news), "Updated to build %d", GHV_BUILD);
+            else
+                snprintf(news, sizeof(news), "The update didn't go in: %s", line);
+        }
+        return;
+    }
 #endif
     char flag[300], path[300], line[200] = "";
     path_of(flag, sizeof(flag), "pending");

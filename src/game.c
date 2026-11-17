@@ -4115,6 +4115,58 @@ static void press_lane(int lane)
     }
 }
 
+// Strum (the Strum option): the frets are held, a strum plays them, as on a guitar controller. The frame's presses
+// become what the judge is given: on a strum, the frets of the note in the window if the held ones play it (a single
+// note may have lower frets held under it, a chord needs its own exactly; nothing held is the open note), else a
+// stray strum; between strums a fret pressed plays only a hammer-on (the streak alive) or a tapped note. Strums: a
+// keyboard's arrow up and down, Down or Cross (the open note's buttons, so it's a strum with nothing held), a finger
+// landing above the touch pads
+static uint32_t strum_presses(const Pad * pad, uint32_t pressed, uint32_t lanes, uint32_t * held, bool tap)
+{
+    static uint8_t strum_was;
+    bool strum = (pad->key_strum & ~strum_was) != 0 || tap || (pressed & (BTN_DOWN | BTN_CROSS));
+    strum_was = pad->key_strum;
+    uint32_t frets = *held & 0x1f, want_pressed = 0;
+    *held &= ~(1u << LANE_OPEN);            // the open lane's buttons are the strum here
+    const Part * p = G.part;
+    for (int i = G.first; i < p->note_count; i++) {
+        const Note * n = &p->notes[i];
+        double nt = n->time / 1e6;
+        if (nt > G.t + WIN_EARLY)
+            break;
+        if (G.state[i] != PENDING || nt < G.t - win_late(i))
+            continue;
+        uint32_t nf = n->frets & 0x1f;
+        bool open = n->frets & FRET_OPEN;
+        bool fret_only = (n->flags & NOTE_TAP) || ((n->flags & NOTE_HOPO) && G.streak > 0);
+        if (strum) {
+            bool plays;
+            if (open)
+                plays = frets == 0;
+            else if (__builtin_popcount(nf) > 1)
+                plays = frets == nf;
+            else
+                plays = (frets & nf) && (frets >> (__builtin_ctz(nf) + 1)) == 0;   // lower ones may be held
+            if (plays) {
+                if (open) {
+                    *held |= 1u << LANE_OPEN;
+                    return 1u << LANE_OPEN;
+                }
+                return nf;
+            }
+            break;                  // the strum doesn't play the next note: a stray one
+        }
+        if (fret_only && !open && (frets & nf) == nf && (lanes & nf))
+            want_pressed = nf;
+        break;
+    }
+    if (strum) {
+        overhit();
+        return 0;
+    }
+    return want_pressed;
+}
+
 // Letting go onto a lower fret plays a pull-off, as on a guitar: hold green, tap red, and the greens play themselves.
 // Only hammer-ons and tapped notes, and a hammer-on only while the streak's alive, as in the games
 static void pull_off(void)
@@ -4927,6 +4979,8 @@ static int game_tick(const Pad * pad, uint32_t pressed, const RFrame * rf)
             lanes_pressed &= ~bit;
         }
     }
+    if (cfg.strum && !G.drums && !G.vocal && !G.autoplay && !rf && !GF.on)
+        lanes_pressed = strum_presses(pad, pressed, lanes_pressed, &held, sp_tap);
     if (rf) {
         held = rf->held;
         lanes_pressed = rf->pressed;
@@ -4960,7 +5014,7 @@ static int game_tick(const Pad * pad, uint32_t pressed, const RFrame * rf)
         audio_stem_bend(G.my_stem, G.bend > 0.003f && !cfg.no_bend && !stem_is_the_song() ? G.bend : 0);
 
     // Star Power: Select, a quick tilt, or on drums both cymbals at once, as in World Tour
-    bool sp_req = (pressed & BTN_SELECT) || (G.drums && both_cymbals(lanes_pressed)) || (sp_tap && !G.autoplay);
+    bool sp_req = (pressed & BTN_SELECT) || (G.drums && both_cymbals(lanes_pressed)) || (sp_tap && !G.autoplay && !(cfg.strum && !G.drums));
     if (cfg.tilt && pad->has_motion && !rf)
         sp_req |= tilt(pad->accel);
     if (rf)
@@ -6369,7 +6423,8 @@ static void draw_touch_pads(void)
             float b = 0.6f + 0.4f * sinf(t * 7);
             float cx = SCREEN_W / 2;
             gfx_rect_grad(cx - 230, 96, 460, 46, RGBA(40, 150, 255, (int)(150 * b)), RGBA(40, 150, 255, (int)(60 * b)));
-            font_draw_shadow(res.ui, "TAP UP HERE: STAR POWER", cx, 106, 24, RGBA(235, 248, 255, (int)(255 * (0.7f + 0.3f * b))), ALIGN_CENTER);
+            font_draw_shadow(res.ui, cfg.strum && !G.drums ? "STAR POWER: TAP THE TOP LEFT CORNER" : "TAP UP HERE: STAR POWER", cx, 106, 24,
+                             RGBA(235, 248, 255, (int)(255 * (0.7f + 0.3f * b))), ALIGN_CENTER);
         }
     }
 }

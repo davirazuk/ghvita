@@ -1024,6 +1024,8 @@ void config_load(void)
             cfg.five_pads = n != 0;
         else if (strcmp(k, "touch_frets") == 0)
             cfg.touch_frets = 0;                                // the old layouts: one hand to start
+        else if (strcmp(k, "strum") == 0)
+            cfg.strum = n != 0;
         else if (strcmp(k, "defaults2") == 0)
             defaults2 = n;
         else if (strcmp(k, "touch_hands") == 0)
@@ -1126,7 +1128,7 @@ void config_save(void)
     fprintf(f, "no_popups = %d\ntiming_bar = %d\nlive_stats = %d\nvanish = %d\n"
                "no_miss_sound = %d\nno_rear_whammy = %d\nno_bend = %d\nno_countdown = %d\n",
             cfg.no_popups, cfg.timing_bar, cfg.live_stats, cfg.vanish, cfg.no_miss_sound, cfg.no_rear_whammy, cfg.no_bend, cfg.no_countdown);
-    fprintf(f, "touch_hands = %d\ndefaults2 = 1\n", cfg.touch_frets);
+    fprintf(f, "touch_hands = %d\ndefaults2 = 1\nstrum = %d\n", cfg.touch_frets, cfg.strum);
     fprintf(f, "double_kick = %d\nfive_pads = %d\neasy_sustains = %d\nno_count_in = %d\nstage_screens = %d\nno_progress = %d\ncup_skin = %d\n", cfg.double_kick, cfg.five_pads, cfg.easy_sustains,
             cfg.no_count_in, cfg.stage_screens, cfg.no_progress, cfg.cup_skin);
     fprintf(f, "no_ghost = %d\nnotes_look = 1\nrival = %d\nhit_window = %d\nlight_fx = %d\nmetronome = %d\nsong_speed = %d\n", cfg.no_ghost, cfg.rival, cfg.hit_window,
