@@ -4900,14 +4900,14 @@ enum { O_SPEED, O_HIGHWAY, O_VENUE, O_BAND, O_SING, O_SINGDIFF, O_OFFSET, O_LAYO
        O_CAMERA, O_HWALPHA, O_VLIGHT, O_FLASH, O_POPUPS, O_TIMING, O_LIVE, O_VANISH, O_MISSSND, O_REAR, O_BEND, O_COUNTDOWN,
        O_RESET, O_FIVEPADS, O_DOUBLEKICK, O_EASYSUS, O_COUNTIN, O_SCREENS, O_PROGRESS, O_CUPS, O_AUTOREPRESS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, O_CROWDHANDS, O_VIGNETTE, O_LYRICS, O_MENUMUSIC, O_SINGSP, O_SHRINKCHECK, O_GHOST, O_RIVAL, O_WINDOW, O_LIGHTFX, O_SONGSPEED,
        O_FRAMERATE, O_STILLCAM, O_PRESET,
-       O_BACKDROP, O_RATINGS, O_HWLEN, O_SUDDEN, O_HARDROCK, O_ENGINE, O_STEPS, O_PICK0, O_PICK1, O_PICK2, O_PICK3, O_BAND3D, O_BANDCAM, O_KEEPSING, O_VOICESTYLE, O_COUNT };
+       O_BACKDROP, O_RATINGS, O_HWLEN, O_SUDDEN, O_HARDROCK, O_ENGINE, O_STEPS, O_PICK0, O_PICK1, O_PICK2, O_PICK3, O_BAND3D, O_BANDCAM, O_KEEPSING, O_VOICESTYLE, O_TOUCHFRETS, O_COUNT };
 
 // the options by subject, L and R between them
 enum { OPT_TABS = 8, OPT_TAB_MAX = 18 };
 static const char * opt_tab_names[OPT_TABS] = {"GAME", "CONTROLS", "HIGHWAY", "STAGE", "SCREEN", "GRAPHICS", "SOUND", "LIBRARY"};
 static const int opt_tabs[OPT_TABS][OPT_TAB_MAX + 1] = {
     {O_SPEED, O_SONGSPEED, O_OFFSET, O_WINDOW, O_ENGINE, O_STEPS, O_SUDDEN, O_HARDROCK, O_NOFAIL, O_EASYSUS, O_AUTOREPRESS, O_VANISH, O_COUNTDOWN, O_SING, O_SINGDIFF, O_KEEPSING, O_RIVAL, O_RESET, -1},
-    {O_LAYOUT, O_DRUMKEYS, O_FIVEPADS, O_DOUBLEKICK, O_LEFTY, O_TILT, O_REAR, O_SINGSP, -1},
+    {O_TOUCHFRETS, O_LAYOUT, O_DRUMKEYS, O_FIVEPADS, O_DOUBLEKICK, O_LEFTY, O_TILT, O_REAR, O_SINGSP, -1},
     {O_HIGHWAY, O_HWALPHA, O_CAMERA, O_CUPS, O_FLATNOTES, O_NOTESIZE, O_WOBBLE, O_FIRE, -1},
     {O_VENUE, O_VLIGHT, O_BAND, O_BAND3D, O_BANDCAM, O_PICK1, O_PICK2, O_PICK3, O_PICK0, O_CROWDHANDS, O_VIGNETTE, O_SCREENS, O_FLASH, -1},
     {O_LYRICS, O_POPUPS, O_PROGRESS, O_TIMING, O_LIVE, O_GHOST, O_LIGHTFX, O_FPS, -1},
@@ -5117,6 +5117,10 @@ static void option_text(int i, char * name, char * value, size_t n)
     case O_REAR: strcpy(name, "Rear pad whammy"); snprintf(value, n, "%s", cfg.no_rear_whammy ? "Off" : "On"); break;
     case O_BEND: strcpy(name, "Whammy bends the sound"); snprintf(value, n, "%s", cfg.no_bend ? "Off" : "On"); break;
     case O_COUNTDOWN: strcpy(name, "Countdown on resume"); snprintf(value, n, "%s", cfg.no_countdown ? "Off" : "On"); break;
+    case O_TOUCHFRETS:
+        strcpy(name, "Touch frets");
+        snprintf(value, n, "%s", cfg.touch_frets == 1 ? "Thumbs" : "Fingers");
+        break;
     case O_FIVEPADS: strcpy(name, "Drum pads"); snprintf(value, n, "%s", cfg.five_pads ? "Five, as World Tour" : "As charted"); break;
     case O_SCREENS: strcpy(name, "Stage screens"); snprintf(value, n, "%s", cfg.stage_screens ? "On" : "Off"); break;
     case O_AUTOREPRESS: strcpy(name, "Auto re-press"); snprintf(value, n, "%s", cfg.auto_repress ? "On" : "Off"); break;
@@ -5250,6 +5254,7 @@ static void change_option(int i, int d)
     case O_REAR: cfg.no_rear_whammy = !cfg.no_rear_whammy; break;
     case O_BEND: cfg.no_bend = !cfg.no_bend; break;
     case O_COUNTDOWN: cfg.no_countdown = !cfg.no_countdown; break;
+    case O_TOUCHFRETS: cfg.touch_frets = !cfg.touch_frets; break;
     case O_FIVEPADS: cfg.five_pads = !cfg.five_pads; break;
     case O_DOUBLEKICK: cfg.double_kick = !cfg.double_kick; break;
     case O_EASYSUS: cfg.easy_sustains = !cfg.easy_sustains; break;
@@ -5511,6 +5516,9 @@ static void options_screen(void)
     const char * text = opt >= 0 && opt < O_COUNT && about[opt] ? about[opt] : "";   // a gap in the table: no help, no crash
     if (!text)                  // an option without a description must never crash the draw
         text = "";
+    if (opt == O_TOUCHFRETS)
+        text = cfg.touch_frets == 1 ? "Holding it: round buttons, green, red, yellow under the left thumb, blue and orange under the right."
+                                    : "Fingers, one hand or two: five big pads across the bottom; anywhere in a pad's column counts.";
     if (opt == O_LAYOUT) {
         snprintf(line, sizeof(line), "%s   Whammy: right stick, or rub the back", cfg.layout
                  ? "Green L, Red Left, Yellow Up, Blue Triangle, Orange R, open X"

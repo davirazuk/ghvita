@@ -4372,18 +4372,39 @@ static int pad_lane(int k)
     return order[k < 0 ? 0 : k >= G.lanes ? G.lanes - 1 : k];
 }
 
-// the k-th pad from the left: from half way to the lane on its left to half way to the one on its right, at the
-// strikeline, so each pad lies under its own lane (the outer two run on to the screen's edges)
+// the k-th pad from the left, by the Touch frets setting: where it's drawn (x0..x1, from top to the screen's bottom)
+// and how high up the screen a finger still counts for it (reach)
 #define PAD_H 52.0f            // the pads drawn: a strip under the cups (the columns over them take taps too)
 #define OPEN_H 22.0f            // the open bar: the top of the pads' strip, the pads under it
-static void pad_span(int k, float * x0, float * x1)
+static void pad_rect(int k, float * x0, float * x1, float * top, float * reach)
 {
-    float sx[6], sy;
-    int n = G.lanes > 6 ? 6 : G.lanes;
-    for (int i = 0; i < n; i++)
-        project(lane_x(pad_lane(i)), 0, 0, &sx[i], &sy);
-    *x0 = k == 0 ? 0 : (sx[k - 1] + sx[k]) / 2;
-    *x1 = k == n - 1 ? SCREEN_W : (sx[k] + sx[k + 1]) / 2;
+    int n = G.lanes > 0 ? G.lanes : 5;
+    if (cfg.touch_frets == 1) {
+        // held in both hands: round buttons, three under the left thumb, two under the right (two and two for drums),
+        // in the bottom corners with the highway left clear; the box is the button's
+        int left = (n + 1) / 2, right = n - left;
+        const float r = 50, gap = 106;
+        float cx, cy;
+        if (k < left) {
+            cx = 62 + k * gap;
+            cy = SCREEN_H - 64 - (k == 1 ? 30 : 0);         // an arc, as a thumb sweeps
+        } else {
+            int j = k - left;
+            cx = SCREEN_W - 62 - (right - 1 - j) * gap;
+            cy = SCREEN_H - 64 - (right > 1 && j == 0 ? 30 : 0);
+        }
+        *x0 = cx - r;
+        *x1 = cx + r;
+        *top = cy - r;
+        *reach = cy - r;
+        return;
+    }
+    // fingers, one hand or two: five big equal pads across the screen (a fifth of it each, about 2.5 cm on a phone);
+    // anywhere in a pad's column, up to a third of the way down the screen, counts
+    *x0 = k * (float)SCREEN_W / n;
+    *x1 = (k + 1) * (float)SCREEN_W / n;
+    *top = SCREEN_H - 104;
+    *reach = SCREEN_H * 0.34f;
 }
 
 // an open note's (the drums' kick's) bar over the pads: there when the chart has any
@@ -4405,17 +4426,22 @@ static bool open_bar(void)
 static int touch_lane_at(float x, float y)
 {
     if (game_touch_pads) {
-        // the whole lower part of the screen, in columns under the lanes: a finger needn't find a small pad
-        if (G.lanes <= 0 || y < SCREEN_H * 0.42f)
+        if (G.lanes <= 0)
             return -1;
-        if (open_bar() && y >= SCREEN_H - PAD_H && y < SCREEN_H - PAD_H + OPEN_H)
-            return LANE_OPEN;           // the open bar: the lane after the frets (lane_buttons(5), the kick)
+        float ox0, ox1, otop, oreach;
+        pad_rect(0, &ox0, &ox1, &otop, &oreach);
+        // the open bar: the top of the pads (on a table and with four fingers), right across
+        if (open_bar() && cfg.touch_frets != 1 && y >= otop && y < otop + OPEN_H)
+            return LANE_OPEN;
         for (int k = 0; k < G.lanes; k++) {
-            float x0, x1;
-            pad_span(k, &x0, &x1);
-            if (x >= x0 && x < x1)
+            float x0, x1, top, reach;
+            pad_rect(k, &x0, &x1, &top, &reach);
+            if (x >= x0 && x < x1 && y >= reach)
                 return pad_lane(k);
         }
+        // holding it: the open note or the kick is the middle strip at the bottom, between the thumbs
+        if (open_bar() && cfg.touch_frets == 1 && y >= SCREEN_H - 70 && x > 300 && x < SCREEN_W - 300)
+            return LANE_OPEN;
         return -1;
     }
     if (y < SCREEN_H * 0.55f)
@@ -6017,34 +6043,53 @@ static void draw_timing_bar(void)
     }
 }
 
-static void draw_hud(void)
+static void draw_touch_pads(void)
 {
-    gfx_2d();
-    gfx_blend(BLEND_ALPHA);
     float t = (float)G.t;
     if (game_touch_pads && !G.vocal && !G.view_mode && G.lanes > 0) {
         // the frets as pads to play on: each lane's colour along the bottom, lit while a finger's on it; the two top
         // corners pause and set Star Power off
-        const float h = PAD_H - (open_bar() ? OPEN_H : 0);
+        bool thumbs = cfg.touch_frets == 1, open = open_bar() && !thumbs;
         for (int k = 0; k < G.lanes; k++) {
             int l = pad_lane(k);
-            float x0, x1;
-            pad_span(k, &x0, &x1);
+            float x0, x1, top, reach;
+            pad_rect(k, &x0, &x1, &top, &reach);
+            if (open)
+                top += OPEN_H;
+            float h = SCREEN_H - top;
             uint32_t c = lane_colour[lane_art(l)];
             bool down = G.held & (1u << l);
-            gfx_rect_grad(x0 + 3, SCREEN_H - h, x1 - x0 - 6, h, ALPHA(c, down ? 150 : 40), ALPHA(c, down ? 235 : 120));
-            gfx_rect(x0 + 3, SCREEN_H - h, x1 - x0 - 6, 4, ALPHA(c, 255));
+            if (thumbs) {
+                // a fret cup of the game's own as the button, its glow when it's pressed
+                char nm[16];
+                snprintf(nm, sizeof(nm), "cup_%d", lane_art(l));
+                float d = x1 - x0, s = down ? 0.92f : 1;
+                if (down) {
+                    gfx_blend(BLEND_ADD);
+                    gfx_sprite(atlas_get(res.game, "cup_glow"), x0 - d * 0.25f, top - d * 0.25f, d * 1.5f, d * 1.5f, ALPHA(c, 220));
+                    gfx_blend(BLEND_ALPHA);
+                }
+                gfx_sprite(atlas_get(res.game, nm), x0 + d * (1 - s) / 2, top + d * (1 - s) / 2, d * s, d * s * 0.9f, WHITE);
+                continue;
+            }
+            gfx_rect_grad(x0 + 3, top, x1 - x0 - 6, h, ALPHA(c, down ? 150 : 40), ALPHA(c, down ? 235 : 120));
+            gfx_rect(x0 + 3, top, x1 - x0 - 6, 4, ALPHA(c, 255));
             // the column a finger can land anywhere in, faintly, up to where it starts counting
-            if (k)
-                gfx_rect_grad(x0 - 1, SCREEN_H * 0.42f, 2, SCREEN_H * 0.58f - h, RGBA(255, 255, 255, 0), RGBA(255, 255, 255, 40));
-            if (down)
-                gfx_rect_grad(x0 + 3, SCREEN_H * 0.42f, x1 - x0 - 6, SCREEN_H * 0.58f - h, ALPHA(c, 0), ALPHA(c, 60));
+            if (reach < top - 1) {
+                gfx_rect_grad(x0 + 2, reach, 1, top - reach, RGBA(255, 255, 255, 0), RGBA(255, 255, 255, 36));
+                if (down)
+                    gfx_rect_grad(x0 + 3, reach, x1 - x0 - 6, top - reach, ALPHA(c, 0), ALPHA(c, 60));
+            }
         }
         if (open_bar()) {
             bool down = G.held & (1u << LANE_OPEN);
             uint32_t c = lane_colour[6];
-            gfx_rect_grad(3, SCREEN_H - h - OPEN_H, SCREEN_W - 6, OPEN_H - 3, ALPHA(c, down ? 190 : 60), ALPHA(c, down ? 230 : 110));
-            font_draw(res.ui, G.drums ? "KICK" : "OPEN", SCREEN_W / 2, SCREEN_H - h - OPEN_H + 4, 20, RGBA(255, 255, 255, 220),
+            float ox0, ox1, otop, oreach;
+            pad_rect(0, &ox0, &ox1, &otop, &oreach);
+            float bx = thumbs ? 304 : 3, bw = thumbs ? SCREEN_W - 608 : SCREEN_W - 6, by = thumbs ? SCREEN_H - 70 : otop;
+            float bh = thumbs ? 66 : OPEN_H - 3;
+            gfx_rect_grad(bx, by, bw, bh, ALPHA(c, down ? 190 : 60), ALPHA(c, down ? 230 : 110));
+            font_draw(res.ui, G.drums ? "KICK" : "OPEN", bx + bw / 2, by + (thumbs ? 20 : 2), 20, RGBA(255, 255, 255, 220),
                       ALIGN_CENTER);
         }
         gfx_rect(SCREEN_W - 96, 8, 88, 44, RGBA(0, 0, 0, 120));
@@ -6055,6 +6100,13 @@ static void draw_hud(void)
             font_draw(res.ui, "STAR POWER", 83, 18, 20, WHITE, ALIGN_CENTER);
         }
     }
+}
+
+static void draw_hud(void)
+{
+    gfx_2d();
+    gfx_blend(BLEND_ALPHA);
+    float t = (float)G.t;
     if (cfg.hit_ratings && !G.vocal && !G.paused && G.t - G.rate_t < 0.5 && G.t - G.rate_t >= 0) {
         // the last hit's rating just below the strikeline, where it never covers a note on its way in
         static const char * const rn[4] = {"PERFECT", "GREAT", "GOOD", "MISS"};
@@ -6373,6 +6425,7 @@ static void draw_hud(void)
         snprintf(t, sizeof(t), "%d fps", G.fps);
         font_draw_shadow(res.ui, t, SCREEN_W - 10, SCREEN_H - 30, 20, WHITE, ALIGN_RIGHT);
     }
+    draw_touch_pads();          // last: over the HUD, so a thumb's buttons are never under it
 }
 
 void game_draw(void)
