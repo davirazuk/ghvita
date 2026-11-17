@@ -189,6 +189,26 @@ def main():
         im = Image.open(f)
         if im.mode != 'P':
             im.convert('RGBA').quantize(256, method=Image.Quantize.FASTOCTREE, dither=Image.Dither.NONE).save(f, optimize=True)
+    # a venue's textures in one file beside its model (<zone>.v3t: "V3T1", count, then name[32] + size each, then the
+    # PNGs): some 770 loose pictures took an update past the 1024 files the Updater app moves, and it stopped short
+    for f in sorted(glob.glob(os.path.join(OUT, '*.v3d'))):
+        d = open(f, 'rb').read()
+        n, at, names = struct.unpack_from('<i', d, 4)[0], 56, []
+        for _ in range(n):
+            name = d[at:at + 32].split(b'\0')[0].decode()
+            vc, tc, _w = struct.unpack_from('<3i', d, at + 32)
+            at += 44 + vc * 24 + tc * 6
+            if name and name not in names and os.path.exists(os.path.join(OUT, 'tex', name + '.png')):
+                names.append(name)
+        blobs = [open(os.path.join(OUT, 'tex', x + '.png'), 'rb').read() for x in names]
+        with open(f[:-4] + '.v3t', 'wb') as o:
+            o.write(b'V3T1' + struct.pack('<i', len(names)))
+            for x, b in zip(names, blobs):
+                o.write(x.encode().ljust(32, b'\0') + struct.pack('<I', len(b)))
+            for b in blobs:
+                o.write(b)
+    import shutil
+    shutil.rmtree(os.path.join(OUT, 'tex'), ignore_errors=True)
 
 
 if __name__ == '__main__':

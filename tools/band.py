@@ -520,8 +520,13 @@ def no_soft(meshes, tex_dir, bones):
         if sum(wt[i] for i, b in enumerate(bones) if any(k in b[0].lower() for k in HEAD_WORDS)) < 0.6 * max(wt.sum(), 1e-9):
             out.append((tex, V, T))
             continue
-        # soft: nowhere solid (a shadow's middle is clear, so "half clear all over" misses it)
-        soft = np.ones(len(T), bool)
+        # soft: nowhere solid (a shadow's middle is clear, so "half clear all over" misses it), and by an eye: hair is
+        # soft cards too, and it stays
+        P = np.asarray(V['p'], np.float32)[T].mean(1)
+        eyes = [np.linalg.inv(b[4])[:3, 3] for b in bones if b[0].lower() in ('bone_eye_l', 'bone_eye_r')]
+        soft = np.zeros(len(T), bool)
+        for e in eyes:
+            soft |= np.linalg.norm(P - e, axis=1) < 0.05
         for p in pts:
             s = a[np.clip((np.mod(p[:, 1], 1) * h).astype(int), 0, h - 1), np.clip((np.mod(p[:, 0], 1) * w).astype(int), 0, w - 1)]
             soft &= s < 0.92

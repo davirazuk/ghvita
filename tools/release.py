@@ -54,6 +54,10 @@ def pack(path, names):
         o.writestr('manifest.txt', ''.join(line(p) for p in sorted(names)))
         for p in sorted(names):
             o.write(os.path.join(tmp, p), p)
+# the Updater app on Vitas out there moves 1024 files and no more (update_apply.c MAX_FILES as it was): past that it
+# stopped short, the program never went in, and the update was offered again for ever
+if len(files) > 1000:
+    sys.exit(f'{len(files)} files: more than the installed Updater app can move (1024); pack some together')
 out = tempfile.mkdtemp()
 pack(out + '/update-full.zip', files)
 if not os.path.exists(updater_vpk):

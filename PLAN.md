@@ -693,3 +693,9 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   test drew them as solid slabs.
 - VitaSDK moved to a pacman-based vdpm on 2026-11-16 and its supported series (2026.08) lacks most libraries: the
   workflow falls back to `vdpm refresh nightly`. The Vita build was made and linked here with nightly (GHVita.vpk).
+- The Updater app moves 1024 files and no more (update_apply.c MAX_FILES as installed): v265/v266's full update had
+  1463 (the venues' 770 loose textures), so it stopped short, eboot.bin last in the list never went in, and the update
+  was offered again for ever. A venue's textures are now packed in one file (assets/venue3d/<zone>.v3t, band3d.c
+  venue3d_load, gfx.c tex_load_mem): 767 files in all. tools/release.py refuses more than 1000. MAX_FILES is 4096
+  for Updaters installed from now on. A Vita caught by it has loose files left in assets/venue3d/tex (harmless).
+- Hair: no_soft only cuts by an eye (5 cm), so soft hair cards stay.

@@ -222,6 +222,18 @@ Tex * tex_load(const char * path, int flags)
     return t;
 }
 
+// a picture file's bytes, already in memory (a venue's textures come packed in one file)
+Tex * tex_load_mem(const uint8_t * data, int size, int flags)
+{
+    int w, h, n;
+    uint8_t * px = stbi_load_from_memory(data, size, &w, &h, &n, 4);
+    if (!px)
+        return NULL;
+    Tex * t = tex_rgba(px, w, h, flags);
+    stbi_image_free(px);
+    return t;
+}
+
 // A 256-colour PNG (8-bit indices, PLTE + tRNS, not interlaced) as its palette (RGBA) and indices; NULL when it's
 // anything else. The band's sheets are made that way (tools/band.py), and the Vita keeps them as they are: a byte a
 // pixel instead of four

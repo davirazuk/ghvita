@@ -6,7 +6,7 @@
 #include <sys/stat.h>
 #include "update_apply.h"
 
-#define MAX_FILES 1024
+#define MAX_FILES 4096      // was 1024: an update with more stopped short, the program itself never moved in
 
 void update_mkdirs(const char * dir)
 {

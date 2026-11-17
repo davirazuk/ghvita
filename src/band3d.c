@@ -688,6 +688,15 @@ Venue3D * venue3d_load(const char * zone)
         return NULL;
     Venue3D * v = calloc(1, sizeof(Venue3D));
     bool ok = size >= 56 && memcmp(d, "V3D1", 4) == 0;
+    // its textures, packed beside it (<zone>.v3t); without the pack, loose in venue3d/tex as they first were
+    long tsize = 0;
+    snprintf(path, sizeof(path), "%svenue3d/%s.v3t", plat_asset_dir(), zone);
+    uint8_t * td = read_all(path, &tsize);
+    int32_t tn = 0;
+    if (td && tsize >= 8 && memcmp(td, "V3T1", 4) == 0)
+        memcpy(&tn, td + 4, 4);
+    if (tn < 0 || tn > 4096 || 8 + (long)tn * 36 > tsize)
+        tn = 0;
     long at = 56;
     int32_t np = 0;
     if (ok) {
@@ -740,11 +749,25 @@ Venue3D * venue3d_load(const char * zone)
                 p->idx[k] = 0;
         at += (long)(vb + ib);
         if (tex[0]) {
-            snprintf(path, sizeof(path), "%svenue3d/tex/%s.png", plat_asset_dir(), tex);
-            p->tex = tex_load(path, TEX_MIPMAP | (c[2] ? TEX_REPEAT : 0));
+            int flags = TEX_MIPMAP | (c[2] ? TEX_REPEAT : 0);
+            long blob = 8 + (long)tn * 36;
+            for (int k = 0; k < tn && !p->tex; k++) {
+                uint32_t len;
+                memcpy(&len, td + 8 + k * 36 + 32, 4);
+                if (blob + (long)len > tsize)
+                    break;
+                if (strncmp((const char *)td + 8 + k * 36, tex, 32) == 0)
+                    p->tex = tex_load_mem(td + blob, (int)len, flags);
+                blob += (long)len;
+            }
+            if (!p->tex && !tn) {
+                snprintf(path, sizeof(path), "%svenue3d/tex/%s.png", plat_asset_dir(), tex);
+                p->tex = tex_load(path, flags);
+            }
         }
     }
     free(d);
+    free(td);
     if (!ok) {
         plat_log("venue3d: %s is damaged", zone);
         venue3d_free(v);
