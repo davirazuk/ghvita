@@ -6181,52 +6181,7 @@ static void draw_hud(void)
             }
             lcd("lcd_orange", G.streak, 5, cx0 + cnt_w - 16 * fx, cnt_y + 7 * fy + 1, 17, WHITE);
         }
-        if (G.base_score > 0 && !G.vocal) {
-            // the stars as they're earned, under the counter (Guitar Hero 5's star meter): the next one fills from
-            // the bottom up, an earned one pops, all five turn gold at the sixth
-            static int had;
-            static double pop_t = -10;
-            int stars;
-            float frac = star_progress(&stars);
-            if (stars > had && G.t > 1)
-                pop_t = G.t;
-            had = stars;
-            const Sprite * on = atlas_get(res.hud, stars >= 6 ? "hud_star_gold" : "hud_star_on");
-            const Sprite * off = atlas_get(res.hud, "hud_star_off");
-            // (World Tour has none: they sit under its plates, clear of the rail, which leans in over them)
-            const float st_x = bar_x - 70, st_w = 180, size = 24, gap = (st_w - 5 * size) / 4, y0 = cnt_y + cnt_h + 5;
-            for (int i = 0; i < 5; i++) {
-                float x = st_x + i * (size + gap), grow = 0;
-                if (i == stars - 1 && G.t - pop_t < 0.35 && G.t >= pop_t)
-                    grow = (float)(1 - (G.t - pop_t) / 0.35) * 8;
-                gfx_sprite(off, x, y0, size, size, RGBA(255, 255, 255, 150));
-                if (i < stars)
-                    gfx_sprite(on, x - grow / 2, y0 - grow / 2, size + grow, size + grow, WHITE);
-                else if (i == stars && frac > 0.02f) {
-                    float v = on->v1 - (on->v1 - on->v0) * frac;
-                    gfx_sprite_uv(on, x, y0 + size * (1 - frac), size, size * frac, on->u0, v, on->u1, on->v1, RGBA(255, 255, 255, 215));
-                }
-            }
-            // Star Power as a bar under the stars: how full, the half where it can be set off marked, blue and
-            // glowing when it's ready, draining white-blue while it's on (the dome's tubes are small to read mid-song)
-            {
-                float sy = y0 + size + 4, sw = st_w, sh = 8, f = G.sp < 0 ? 0 : G.sp > 1 ? 1 : G.sp;
-                const float bar_x = st_x;      // under the stars
-                bool ready = f >= 0.5f && !G.sp_active;
-                gfx_rect(bar_x - 1, sy - 1, sw + 2, sh + 2, RGBA(0, 0, 0, 170));
-                uint32_t c0 = G.sp_active ? RGBA(170, 230, 255, 255) : ready ? RGBA(60, 170, 255, 255) : RGBA(40, 110, 200, 230);
-                uint32_t c1 = G.sp_active ? RGBA(90, 190, 255, 255) : ready ? RGBA(30, 120, 255, 255) : RGBA(25, 70, 150, 230);
-                gfx_rect_grad(bar_x, sy, sw * f, sh, c0, c1);
-                gfx_rect(bar_x + sw * 0.5f - 1, sy - 2, 2, sh + 4, RGBA(255, 255, 255, 170));
-                if (ready || G.sp_active) {
-                    float b = 0.5f + 0.5f * sinf(t * 9);
-                    gfx_blend(BLEND_ADD);
-                    gfx_sprite(atlas_get(res.game, "glow"), bar_x - 20, sy - 14, sw * f + 40, sh + 28,
-                               RGBA(60, 160, 255, (int)(70 + 70 * b)));
-                    gfx_blend(BLEND_ALPHA);
-                }
-            }
-        }
+        // (no stars and no Star Power bar under the plates: World Tour has neither, and the user didn't want them)
         // the dome: the metal first, its bright window set inside it with ROCK in black, the three sectors pale, the one
         // the needle's in lit up. The art's plinth under the rim is cropped: the dome sits on the score plate
         float h = G.rock;

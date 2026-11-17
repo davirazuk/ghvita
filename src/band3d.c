@@ -64,7 +64,7 @@ struct Band3D {
     // the pose as it last was, for the next to ease from: frames only come eight or sixteen a beat and a change of loop
     // is a jump, which showed as snapping arms and a singer skipping across the stage
     float prev[256][12], root_s[3];
-    bool have_prev;
+    bool have_prev, walking;
     double prev_t;
     int palm, nfing;
     int32_t * fing;
@@ -505,25 +505,41 @@ static void pose_model(Band3D * m, const Band3DDraw * d, int buf, Scratch * sc)
         int pb = m->anchor_bone[2];
         float pt[3] = {M[pb][3], M[pb][7], M[pb][11]};
         if (m->have_prev && gap >= 0 && gap < 0.2) {
+            // only a jump is eased: a loop changing, the mic coming up from another loop's pose. Ordinary motion is
+            // followed exactly (eased every frame it went soft and late: the singer worse than before)
+            float jump = 0;
+            for (int bn = 0; bn < m->nbones; bn++) {
+                float dx = M[bn][3] - m->prev[bn][3], dy = M[bn][7] - m->prev[bn][7], dz = M[bn][11] - m->prev[bn][11];
+                float dd = dx * dx + dy * dy + dz * dz;
+                jump = dd > jump ? dd : jump;
+            }
             float steps = (float)(gap * 60);
             steps = steps < 0.5f ? 0.5f : steps > 4 ? 4 : steps;
-            float kr = 1 - powf(0.9f, steps), k = 1 - powf(0.5f, steps), off[3];
-            for (int i = 0; i < 3; i++) {
-                m->root_s[i] += (pt[i] - m->root_s[i]) * kr;
-                off[i] = m->root_s[i] - pt[i];
+            float allow = 0.06f * steps;                // a bone moves up to 6 cm a frame on its own
+            if (jump > allow * allow) {
+                float k = 1 - powf(0.55f, steps);
+                for (int bn = 0; bn < m->nbones; bn++)
+                    for (int q = 0; q < 12; q++)
+                        M[bn][q] = m->prev[bn][q] + (M[bn][q] - m->prev[bn][q]) * k;
             }
-            off[1] = 0;                 // up and down is theirs (a hop, a crouch): only the floor is slow
-            if (off[0] * off[0] + off[2] * off[2] > 1.5f * 1.5f) {
-                off[0] = off[2] = 0;    // further than a walk: that's a cut
-                m->root_s[0] = pt[0];
-                m->root_s[2] = pt[2];
-            }
-            for (int bn = 0; bn < m->nbones; bn++) {
-                M[bn][3] += off[0];
-                M[bn][11] += off[2];
-                for (int q = 0; q < 12; q++)
-                    M[bn][q] = m->prev[bn][q] + (M[bn][q] - m->prev[bn][q]) * k;
-            }
+            // where they stand: a step across the floor (over 12 cm, under a cut's 1.5 m) is walked, not jumped
+            float fx = pt[0] - m->root_s[0], fz = pt[2] - m->root_s[2], fd = fx * fx + fz * fz;
+            if (fd > 1.5f * 1.5f)
+                m->walking = false;                     // a cut: straight there
+            else if (fd > 0.12f * 0.12f)
+                m->walking = true;
+            else if (fd < 0.01f * 0.01f)
+                m->walking = false;                     // arrived
+            if (m->walking) {
+                float kr = 1 - powf(0.82f, steps);
+                m->root_s[0] += fx * kr;
+                m->root_s[2] += fz * kr;
+                for (int bn = 0; bn < m->nbones; bn++) {
+                    M[bn][3] += m->root_s[0] - pt[0];
+                    M[bn][11] += m->root_s[2] - pt[2];
+                }
+            } else
+                memcpy(m->root_s, pt, sizeof(pt));
         } else
             memcpy(m->root_s, pt, sizeof(pt));
         memcpy(m->prev, M, sizeof(float) * 12 * (size_t)m->nbones);

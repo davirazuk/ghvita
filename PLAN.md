@@ -769,3 +769,10 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   lower 58% of the screen takes taps; the pads are a slim strip under the cups.
 - A release failed once with HTTP 403 creating the release (everything else passed): an Android run had just written
   to the releases; released again.
+- Touch frets setting is two layouts now (cfg.touch_frets, saved as touch_layout): Fingers (five equal pads, one
+  hand or two) and Thumbs (fret cups in the bottom corners, outside the highway; the open/kick button over the right
+  ones). The HUD lifts out of their way (100 / 210 px). The drawn pads are the phone's only (game_touch_pads =
+  touch_only): the Vita's screen plays its cups as before.
+- The stars and the Star Power bar under the plates are gone (not World Tour's; the user hated them).
+- band3d pose easing only on jumps (any bone over 6 cm a frame: a loop change), and a floor step over 12 cm is walked
+  until it's within 1 cm: easing every frame made the singer soft and late.
