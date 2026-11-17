@@ -54,7 +54,7 @@ public class GHVitaActivity extends SDLActivity {
                     checkUpdate();
                 } catch (Exception e) {
                     android.util.Log.w("GHVita", "update check", e);
-                    note("update check failed: " + e, false);
+                    note("Couldn't check for updates: " + e.getMessage(), true);
                 } finally {
                     checking = false;
                 }
@@ -176,7 +176,7 @@ public class GHVitaActivity extends SDLActivity {
     private void checkUpdate() throws Exception {
         String token = readToken();
         if (token == null || token.isEmpty()) {
-            note("no update token in this build", false);
+            note("This build can't check for updates (no token)", true);
             return;
         }
         org.json.JSONObject rel = new org.json.JSONObject(readAll(open(API, token, "application/vnd.github+json").getInputStream()));
@@ -196,7 +196,7 @@ public class GHVitaActivity extends SDLActivity {
         int latest = Integer.parseInt(readAll(asset(ver, token)).trim());
         int mine = getPackageManager().getPackageInfo(getPackageName(), 0).versionCode;
         if (latest <= mine) {
-            note("up to date (build " + mine + ", newest " + latest + ")", false);
+            note("GH Vita is up to date (build " + mine + ")", true);
             return;
         }
         note("downloading GH Vita build " + latest + " (this is " + mine + ")", true);
