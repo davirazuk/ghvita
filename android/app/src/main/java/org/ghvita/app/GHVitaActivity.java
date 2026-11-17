@@ -183,7 +183,27 @@ public class GHVitaActivity extends SDLActivity {
             note("This build can't check for updates (no token)", true);
             return;
         }
-        org.json.JSONObject rel = new org.json.JSONObject(readAll(open(API, token, "application/vnd.github+json").getInputStream()));
+        java.net.HttpURLConnection rc = open(API, token, "application/vnd.github+json");
+        int code = rc.getResponseCode();
+        if (code == 401 || code == 403 || code == 404) {
+            // an old token in update.txt: the one built into the app instead
+            String baked = null;
+            try {
+                baked = readAll(getAssets().open("ghv/update_token")).trim();
+            } catch (java.io.IOException e) {
+                baked = null;
+            }
+            if (baked != null && !baked.isEmpty() && !baked.equals(token)) {
+                token = baked;
+                rc = open(API, token, "application/vnd.github+json");
+                code = rc.getResponseCode();
+            }
+        }
+        if (code != 200) {
+            note("GitHub answered " + code + " to the update check", true);
+            return;
+        }
+        org.json.JSONObject rel = new org.json.JSONObject(readAll(rc.getInputStream()));
         org.json.JSONArray assets = rel.getJSONArray("assets");
         String apk = null, ver = null;
         for (int i = 0; i < assets.length(); i++) {

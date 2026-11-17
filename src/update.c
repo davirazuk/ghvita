@@ -65,11 +65,14 @@ static void fail(const char * why)
     state = UP_FAILED;
 }
 
+static bool skip_file_token;     // update.txt's token was refused: the built-in one instead
+
 static bool read_token(void)
 {
     char path[300];
     snprintf(path, sizeof(path), "%supdate.txt", plat_data_dir());
-    FILE * f = fopen(path, "r");
+    FILE * f = skip_file_token ? NULL : fopen(path, "r");
+    token[0] = 0;
     if (!f) {
         // none on the card: the one the release build put in the app (the owner's read-only token)
         snprintf(path, sizeof(path), "%supdate_token", plat_asset_dir());
@@ -116,6 +119,25 @@ static int check_thread(void * arg)
     int status = http_fetch(&r, &body, &len, err, sizeof(err));
     Json * j = status == 200 && body ? json_parse(body, len) : NULL;
     free(body);
+    if (!j && (status == 401 || status == 403 || status == 404) && !skip_file_token) {
+        // an old token in update.txt (a card or a phone keeps it for ever): try again with the game's own
+        char path[300];
+        snprintf(path, sizeof(path), "%supdate.txt", plat_data_dir());
+        FILE * uf = fopen(path, "r");
+        if (uf) {
+            fclose(uf);
+            skip_file_token = true;
+            plat_log("update: update.txt's token got %d, trying the built-in one", status);
+            if (read_token()) {
+                body = NULL;
+                len = 0;
+                HttpReq r2 = {.url = url, .headers = json_headers, .stall_s = 15};
+                status = http_fetch(&r2, &body, &len, err, sizeof(err));
+                j = status == 200 && body ? json_parse(body, len) : NULL;
+                free(body);
+            }
+        }
+    }
     if (!j) {
         plat_log("update: the check got %d", status);
         // a fine-grained token expires, and one without this repository reads it as missing (404): say so, or the game just
