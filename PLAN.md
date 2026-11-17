@@ -713,3 +713,14 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   __ANDROID__ (GLES 1.1, any window shape via plat_view, fingers, back = Circle), .github/workflows/android.yml
   ([apk] in the commit, or by hand): vcpkg builds the libraries for arm64-v8a and x86_64, the APK goes to the
   "android" pre-release. Mesa here has no GLES 1 context, so that path is only tested by the Android build itself.
+- Star Power's frame rate: the rails' comets were 36 large see-through quads (six a rail, the glow twice) over the neck,
+  plus side washes and 16 embers: now four comets with one glow, shorter washes, 10 embers. The venue's vertex recolour
+  runs when the show's colour moves 0.05 (was 0.012: every frame in Star Power). Not measured on a Vita.
+- band3d.c pose_model eases the pose: every bone half way a frame, the floor place (pelvis x, z) 10% a frame, a jump
+  over 1.5 m is a cut. Frames come 8 or 16 a beat and a loop change jumped: the drummer snapped, the singer skipped
+  across the stage. Band3DDraw.stamp is set by band3d_draw.
+- Close shots draw the rest of the band behind (their far bodies, at the venue's marks from the one filmed): game.c
+  `behind`. The stage behind a close-up was empty.
+- Main menu: menu_rocker (the live model, shared with ROCKERS), the list with no box, a slanted wedge for the choice.
+- Mornye (github.com/mornyeapp/Mornye, asked for as a Vita port): a Flutter + Rust music player and downloader for
+  phones. Not portable to the Vita (no Flutter there) and not started.

@@ -61,6 +61,11 @@ struct Band3D {
     float anchor_at[3][3];
     // the fret hand's fingers: the palm's bone, the fingers' bones, and 16 poses of them (a bit a finger: index, middle,
     // ring, little) as matrices that follow the palm's
+    // the pose as it last was, for the next to ease from: frames only come eight or sixteen a beat and a change of loop
+    // is a jump, which showed as snapping arms and a singer skipping across the stage
+    float prev[256][12], root_s[3];
+    bool have_prev;
+    double prev_t;
     int palm, nfing;
     int32_t * fing;
     float * fing_pose;          // 16 x nfing x 12
@@ -443,6 +448,38 @@ static void pose_model(Band3D * m, const Band3DDraw * d, int buf, Scratch * sc)
             }
         }
     }
+    {
+        // eased: every bone half way to its new place each frame (about 30 ms behind: a strike still lands), and where
+        // they stand on the floor much more slowly, so a loop that starts somewhere else is walked to, not jumped to
+        double gap = d->stamp - m->prev_t;
+        int pb = m->anchor_bone[2];
+        float pt[3] = {M[pb][3], M[pb][7], M[pb][11]};
+        if (m->have_prev && gap >= 0 && gap < 0.2) {
+            float steps = (float)(gap * 60);
+            steps = steps < 0.5f ? 0.5f : steps > 4 ? 4 : steps;
+            float kr = 1 - powf(0.9f, steps), k = 1 - powf(0.5f, steps), off[3];
+            for (int i = 0; i < 3; i++) {
+                m->root_s[i] += (pt[i] - m->root_s[i]) * kr;
+                off[i] = m->root_s[i] - pt[i];
+            }
+            off[1] = 0;                 // up and down is theirs (a hop, a crouch): only the floor is slow
+            if (off[0] * off[0] + off[2] * off[2] > 1.5f * 1.5f) {
+                off[0] = off[2] = 0;    // further than a walk: that's a cut
+                m->root_s[0] = pt[0];
+                m->root_s[2] = pt[2];
+            }
+            for (int bn = 0; bn < m->nbones; bn++) {
+                M[bn][3] += off[0];
+                M[bn][11] += off[2];
+                for (int q = 0; q < 12; q++)
+                    M[bn][q] = m->prev[bn][q] + (M[bn][q] - m->prev[bn][q]) * k;
+            }
+        } else
+            memcpy(m->root_s, pt, sizeof(pt));
+        memcpy(m->prev, M, sizeof(float) * 12 * (size_t)m->nbones);
+        m->prev_t = d->stamp;
+        m->have_prev = true;
+    }
     // the light and the camera's line of sight, brought into the model's space (the light's a frame late with the
     // rest of the pose: nothing anyone sees)
     float mv[16], CW[3][3];
@@ -595,6 +632,7 @@ void band3d_draw(Band3D * m, const Band3DDraw * d)
         m->posed = true;
         __atomic_store_n(&jobs[m->job].state, 0, __ATOMIC_RELEASE);
     }
+    ((Band3DDraw *)d)->stamp = plat_now_us() / 1e6;
     if (!m->posed) {
         pose_model(m, d, m->front, &scratch_main);      // the first time: now, here
         m->posed = true;
@@ -788,7 +826,7 @@ void venue3d_draw(Venue3D * v, const Band3DDraw * cam, const float tint[3])
 {
     if (!v)
         return;
-    if (fabsf(tint[0] - v->tint[0]) + fabsf(tint[1] - v->tint[1]) + fabsf(tint[2] - v->tint[2]) > 0.012f) {
+    if (fabsf(tint[0] - v->tint[0]) + fabsf(tint[1] - v->tint[1]) + fabsf(tint[2] - v->tint[2]) > 0.05f) {
         // the show's colour moved: every vertex's colour again (its own light times it)
         memcpy(v->tint, tint, sizeof(v->tint));
         int t[3];

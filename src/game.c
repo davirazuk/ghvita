@@ -2216,8 +2216,10 @@ static void draw_band(double beat)
             bp->mic += (step > 0.17f ? 0.17f : step < -0.17f ? -0.17f : step) * fminf(G.fstep, 2);
         }
         Band3D * m3 = G.band3d[r];
-        if (cine && (!m3 || (G.cine_shot != CS_LINE && r != G.cine_who)))
-            continue;                   // a cut to somebody else: not in the picture
+        // a close shot is of one of them, and the rest are still on the stage behind (their far bodies): it was empty
+        bool behind = cine && G.cine_shot != CS_LINE && r != G.cine_who;
+        if (cine && !m3)
+            continue;
         if (m3) {
             // World Tour's model, posed by the same frames the sheet has, two of them blended so it moves smoothly
             Band3DDraw d3 = {0};
@@ -2326,8 +2328,16 @@ static void draw_band(double beat)
                 d3.cam_yaw = cc.yaw;
                 d3.cam_pitch = cc.pitch;
                 d3.cam_dist = cc.dist;
-                d3.far = G.cine_shot == CS_LINE;
-                if (G.cine_shot == CS_LINE) {
+                d3.far = G.cine_shot == CS_LINE || behind;
+                if (behind) {
+                    // where they stand from the one the camera's on (whose aim is the camera's target)
+                    float mk[3], mw[3];
+                    cine_mark(r, mk);
+                    cine_mark(G.cine_who, mw);
+                    d3.pos[0] = mk[0] - mw[0] - G.cine_aim[0];
+                    d3.pos[1] = mk[1] - mw[1] + up - G.cine_aim[1];
+                    d3.pos[2] = mk[2] - mw[2] - G.cine_aim[2];
+                } else if (G.cine_shot == CS_LINE) {
                     float mk[3], at[3];
                     cine_mark(r, mk);
                     cine_target(at);
@@ -5333,22 +5343,26 @@ static void draw_flames(void)
         int wa = (int)(28 + 40 * beat);
         flat(-HALF_W, HALF_W, Z_NEAR, Z_FAR * 0.85f, 0.017f, NULL, 0, 1, RGBA(60, 140, 255, wa), RGBA(60, 140, 255, 0));
         for (int side = -1; side <= 1; side += 2)
-            flat(side * HALF_W - side * 0.25f, side * HALF_W + side * 0.9f, Z_NEAR, Z_FAR * 0.75f, 0.018f, dot, 0, 1,
-                 RGBA(90, 170, 255, 55), RGBA(90, 170, 255, 0));
+            flat(side * HALF_W - side * 0.2f, side * HALF_W + side * 0.6f, Z_NEAR, Z_FAR * 0.5f, 0.018f, dot, 0, 1,
+                 RGBA(90, 170, 255, 70), RGBA(90, 170, 255, 0));
         // energy running up both rails: bright pulses travelling away from the player, and blue embers lifting off
         for (int side = -1; side <= 1; side += 2) {
             float x = side * HALF_W;
-            for (int k = 0; k < 6; k++) {
-                float z = fmodf((float)G.t * 9 + k * 2.2f, Z_FAR * 0.8f);
+            // four comets a rail, one glow each (six with the glow drawn twice were 36 big see-through quads over the
+            // neck every frame: the Vita's frame rate fell while Star Power was on)
+            for (int k = 0; k < 4; k++) {
+                float z = fmodf((float)G.t * 9 + k * 3.3f, Z_FAR * 0.8f);
                 float a = fade(z) * (0.55f + 0.45f * beat);
-                // a comet: a wide soft glow, a bright core, a tail fading behind it
-                for (int g = 0; g < 2; g++)
-                    flat(x - 0.6f, x + 0.6f, z - 1.2f, z + 1.2f, 0.03f, dot, 0, 1, with_alpha(RGBA(70, 160, 255, 255), a),
-                         with_alpha(RGBA(70, 160, 255, 255), a));
+                // a comet: a soft glow, a bright core, a tail fading behind it
+                {
+                    float a2 = fminf(1, a * 1.6f);
+                    flat(x - 0.5f, x + 0.5f, z - 1.0f, z + 1.0f, 0.03f, dot, 0, 1, with_alpha(RGBA(70, 160, 255, 255), a2),
+                         with_alpha(RGBA(70, 160, 255, 255), a2));
+                }
                 flat(x - 0.09f, x + 0.09f, z - 1.6f, z + 0.25f, 0.034f, NULL, 0, 1, with_alpha(RGBA(150, 220, 255, 255), 0),
                      with_alpha(WHITE, a));
             }
-            for (int k = 0; k < 8; k++) {
+            for (int k = 0; k < 5; k++) {
                 uint32_t h = (uint32_t)(k * 2654435761u + (side + 2) * 97u);
                 float life = fmodf((float)G.t * 0.9f + (h >> 8 & 255) / 255.0f, 1.0f);
                 float z = 0.5f + (h >> 16 & 255) / 255.0f * Z_FAR * 0.6f;

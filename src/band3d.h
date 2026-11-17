@@ -39,6 +39,7 @@ typedef struct {
     float rim[3], rim_k;        // the backlight's colour and how strong
     bool far;                   // small on the screen: the far body will do
     Band3DHands hands;          // the guitar's fret hand, driven by the chart (ga < 0: as the frames have it)
+    double stamp;               // band3d_draw's own: when this was asked for (seconds)
 } Band3DDraw;
 
 void band3d_anchor(const Band3D * m, const Band3DDraw * d, int which, float out[3]);    // 0 head, 1 chest, 2 pelvis
