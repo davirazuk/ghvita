@@ -9,7 +9,12 @@ def ghvBuild = (System.getenv('GHV_BUILD') ?: '1') as int
 android {
     namespace 'org.ghvita.app'
     compileSdk 34
-    ndkPath System.getenv('ANDROID_NDK_HOME')
+    // the runner's newest NDK, the one the libraries were built with: the path and its version have to agree
+    def ndkHome = System.getenv('ANDROID_NDK_HOME')
+    if (ndkHome) {
+        ndkPath ndkHome
+        ndkVersion new File(ndkHome).name
+    }
     defaultConfig {
         applicationId 'org.ghvita.app'
         minSdk 24
