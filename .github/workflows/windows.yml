@@ -30,12 +30,13 @@ jobs:
         with:
           msystem: MINGW64
           update: true
+          path-type: inherit
           install: >-
             git zip unzip
             mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja mingw-w64-x86_64-pkgconf
             mingw-w64-x86_64-SDL2 mingw-w64-x86_64-curl mingw-w64-x86_64-libarchive mingw-w64-x86_64-opusfile
             mingw-w64-x86_64-opus mingw-w64-x86_64-libvorbis mingw-w64-x86_64-libogg mingw-w64-x86_64-mpg123
-            mingw-w64-x86_64-zlib mingw-w64-x86_64-ntldd mingw-w64-x86_64-github-cli
+            mingw-w64-x86_64-zlib mingw-w64-x86_64-ntldd
 
       - name: Build
         run: |
