@@ -4191,6 +4191,8 @@ static void pull_off(void)
             continue;
         if (n->frets & FRET_OPEN)
             return;
+        if (cfg.strum && !((n->flags & NOTE_TAP) || ((n->flags & NOTE_HOPO) && i > 0 && G.state[i - 1] == HIT)))
+            return;                     // strumming: a pull-off only onto a hammer-on (after a hit) or a tap
         // Pressing a fret is the strum here, so a note on a fret already down has nothing to press: holding green and
         // tapping red, lifting red plays the next green, hammer-on or not. Frets below the note's may stay down, none
         // above it
@@ -4277,6 +4279,8 @@ static void anchored_note(void)
     double nt = n->time / 1e6;
     if (G.t < nt || G.t > nt + fmin(HOPO_WIN, win_late(i)) || (n->frets & FRET_OPEN) || G.state[i - 1] != HIT)
         return;
+    if (cfg.strum && !(n->flags & (NOTE_HOPO | NOTE_TAP)))
+        return;                         // strumming: only a hammer-on or a tap plays on the frets held
     // a finger must have moved since the note before (pressed for it, or lifted after it): frets held through
     // the song never chain a run on their own, however early the hand let go of the last chord
     if (G.act_t < prev->time / 1e6 - WINDOW)
