@@ -20,7 +20,9 @@
 
 // seconds early or late a note can still be hit: Normal is Warriors of Rock-ish lenient; Options can widen or narrow it
 // the hit window either way: Normal 85 ms, Strict 70, Lenient 110, Pro 55
-#define WINDOW (cfg.hit_window == 1 ? 0.070 : cfg.hit_window == 2 ? 0.110 : cfg.hit_window == 3 ? 0.055 : cfg.hit_window == 4 ? 0.100 : 0.085)
+// a finger on glass is less exact than a button, and the screen reports it a little late: a third wider for touch
+#define WINDOW ((cfg.hit_window == 1 ? 0.070 : cfg.hit_window == 2 ? 0.110 : cfg.hit_window == 3 ? 0.055 : cfg.hit_window == 4 ? 0.100 : 0.085) * (game_touch_pads ? 1.35 : 1.0))
+extern bool game_touch_pads;
 // Guitar Hero 3's own (read from GH3.exe): 116 ms early, 100 late, hammer-ons and pull-offs 83 either way. Every window
 // ends late at half the way to the next note, as in GH: a late press on a fast run is that run's next note, not this one
 #define WIN_EARLY (cfg.hit_window == 4 ? 0.116 : WINDOW)
@@ -3790,6 +3792,8 @@ static void hit_note(int i)
 
 static void overhit(void)
 {
+    if (game_touch_pads)
+        return;                 // on a touch screen a stray tap costs nothing: fingers rest on glass, slide, brush
     // presses in a long gap don't count against the player
     const Part * p = G.part;
     bool near = false;
@@ -4370,8 +4374,8 @@ static int pad_lane(int k)
 
 // the k-th pad from the left: from half way to the lane on its left to half way to the one on its right, at the
 // strikeline, so each pad lies under its own lane (the outer two run on to the screen's edges)
-#define PAD_H 92.0f
-#define OPEN_H 30.0f            // the open bar: the top of the pads' area, the pads under it
+#define PAD_H 52.0f            // the pads drawn: a strip under the cups (the columns over them take taps too)
+#define OPEN_H 22.0f            // the open bar: the top of the pads' strip, the pads under it
 static void pad_span(int k, float * x0, float * x1)
 {
     float sx[6], sy;
@@ -4401,9 +4405,10 @@ static bool open_bar(void)
 static int touch_lane_at(float x, float y)
 {
     if (game_touch_pads) {
-        if (G.lanes <= 0 || y < SCREEN_H - PAD_H - 30)
+        // the whole lower part of the screen, in columns under the lanes: a finger needn't find a small pad
+        if (G.lanes <= 0 || y < SCREEN_H * 0.42f)
             return -1;
-        if (open_bar() && y < SCREEN_H - PAD_H + OPEN_H)
+        if (open_bar() && y >= SCREEN_H - PAD_H && y < SCREEN_H - PAD_H + OPEN_H)
             return LANE_OPEN;           // the open bar: the lane after the frets (lane_buttons(5), the kick)
         for (int k = 0; k < G.lanes; k++) {
             float x0, x1;
@@ -6029,6 +6034,11 @@ static void draw_hud(void)
             bool down = G.held & (1u << l);
             gfx_rect_grad(x0 + 3, SCREEN_H - h, x1 - x0 - 6, h, ALPHA(c, down ? 150 : 40), ALPHA(c, down ? 235 : 120));
             gfx_rect(x0 + 3, SCREEN_H - h, x1 - x0 - 6, 4, ALPHA(c, 255));
+            // the column a finger can land anywhere in, faintly, up to where it starts counting
+            if (k)
+                gfx_rect_grad(x0 - 1, SCREEN_H * 0.42f, 2, SCREEN_H * 0.58f - h, RGBA(255, 255, 255, 0), RGBA(255, 255, 255, 40));
+            if (down)
+                gfx_rect_grad(x0 + 3, SCREEN_H * 0.42f, x1 - x0 - 6, SCREEN_H * 0.58f - h, ALPHA(c, 0), ALPHA(c, 60));
         }
         if (open_bar()) {
             bool down = G.held & (1u << LANE_OPEN);
@@ -6067,7 +6077,7 @@ static void draw_hud(void)
         // laid out as World Tour's solo HUD (footage in ~/.cache/ghv-work/lampref): the score bar, the streak counter
         // under it, both a little wider than the dome, which sits on the bar
         // (placed as World Tour's footage has it: against the highway's left rail, the plates tucked just under it)
-        const float bar_x = 100, bar_w = 188, bar_y = 413, bar_h = 36;      // the score bar's leather, on the screen
+        const float bar_x = 72, bar_w = 188, bar_y = 413, bar_h = 36;       // the score bar's leather, on the screen
         const float cnt_w = 174, cnt_h = 32, cnt_y = bar_y + bar_h + 2;
         const float k = 0.73f, ks = k / 0.6f;                                // the dome's 256x256 texture
         const float dx = bar_x + bar_w / 2 - 128 * k, dy = bar_y + 6 - 172 * k;

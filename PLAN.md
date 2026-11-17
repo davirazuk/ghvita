@@ -761,3 +761,11 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   has Back (not on the main menu, its clock is there). Options: the chosen row's value, left quarter down, right up.
   Song select: the part's arrows. The search keyboard: every key types on a tap, and SPACE, DELETE, SEARCH, CANCEL
   keys; while it's up only its keys can be tapped.
+- World Tour's HUD from the user's footage (2026-11-17, their 7 shots; WT solo = the IGN HD one): camera 0 fitted to it
+  (eye 0,5.4,-9.5, at z 8.75, fov 34: strikeline 88% down, outer lanes 35% apart, far end 45% down); rock meter and
+  plates against the left rail, not over it (bar_x 72, plates 188/174 wide); lamps z 0.6..3.3 and the multiplier
+  over them on the right rail; stars and the Star Power bar (not World Tour's) under the plates, clear of the rail.
+- Touch in a song: the window a third wider, stray taps cost nothing (overhit returns), a lane's whole column in the
+  lower 58% of the screen takes taps; the pads are a slim strip under the cups.
+- A release failed once with HTTP 403 creating the release (everything else passed): an Android run had just written
+  to the releases; released again.
