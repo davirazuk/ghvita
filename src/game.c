@@ -4366,13 +4366,50 @@ static int pad_lane(int k)
     return order[k < 0 ? 0 : k >= G.lanes ? G.lanes - 1 : k];
 }
 
+// the k-th pad from the left: from half way to the lane on its left to half way to the one on its right, at the
+// strikeline, so each pad lies under its own lane (the outer two run on to the screen's edges)
+#define PAD_H 92.0f
+#define OPEN_H 30.0f            // the open bar: the top of the pads' area, the pads under it
+static void pad_span(int k, float * x0, float * x1)
+{
+    float sx[6], sy;
+    int n = G.lanes > 6 ? 6 : G.lanes;
+    for (int i = 0; i < n; i++)
+        project(lane_x(pad_lane(i)), 0, 0, &sx[i], &sy);
+    *x0 = k == 0 ? 0 : (sx[k - 1] + sx[k]) / 2;
+    *x1 = k == n - 1 ? SCREEN_W : (sx[k] + sx[k + 1]) / 2;
+}
+
+// an open note's (the drums' kick's) bar over the pads: there when the chart has any
+static bool open_bar(void)
+{
+    static const Part * seen;
+    static bool has;
+    if (G.drums)
+        return true;            // the kick
+    if (G.part != seen) {
+        seen = G.part;
+        has = false;
+        for (int i = 0; G.part && i < G.part->note_count && !has; i++)
+            has = G.part->notes[i].frets & FRET_OPEN;
+    }
+    return has;
+}
+
 static int touch_lane_at(float x, float y)
 {
     if (game_touch_pads) {
-        // the pads: the whole width of the screen in as many parts as there are lanes, its lower half
-        if (y < SCREEN_H * 0.5f || G.lanes <= 0)
+        if (G.lanes <= 0 || y < SCREEN_H - PAD_H - 30)
             return -1;
-        return pad_lane((int)(x / (SCREEN_W / (float)G.lanes)));
+        if (open_bar() && y < SCREEN_H - PAD_H + OPEN_H)
+            return LANE_OPEN;           // the open bar: the lane after the frets (lane_buttons(5), the kick)
+        for (int k = 0; k < G.lanes; k++) {
+            float x0, x1;
+            pad_span(k, &x0, &x1);
+            if (x >= x0 && x < x1)
+                return pad_lane(k);
+        }
+        return -1;
     }
     if (y < SCREEN_H * 0.55f)
         return -1;
@@ -5980,13 +6017,22 @@ static void draw_hud(void)
     if (game_touch_pads && !G.vocal && !G.view_mode && G.lanes > 0) {
         // the frets as pads to play on: each lane's colour along the bottom, lit while a finger's on it; the two top
         // corners pause and set Star Power off
-        float w = SCREEN_W / (float)G.lanes, h = 86;
+        const float h = PAD_H - (open_bar() ? OPEN_H : 0);
         for (int k = 0; k < G.lanes; k++) {
             int l = pad_lane(k);
+            float x0, x1;
+            pad_span(k, &x0, &x1);
             uint32_t c = lane_colour[lane_art(l)];
             bool down = G.held & (1u << l);
-            gfx_rect_grad(k * w + 3, SCREEN_H - h, w - 6, h, ALPHA(c, down ? 150 : 40), ALPHA(c, down ? 235 : 120));
-            gfx_rect(k * w + 3, SCREEN_H - h, w - 6, 4, ALPHA(c, 255));
+            gfx_rect_grad(x0 + 3, SCREEN_H - h, x1 - x0 - 6, h, ALPHA(c, down ? 150 : 40), ALPHA(c, down ? 235 : 120));
+            gfx_rect(x0 + 3, SCREEN_H - h, x1 - x0 - 6, 4, ALPHA(c, 255));
+        }
+        if (open_bar()) {
+            bool down = G.held & (1u << LANE_OPEN);
+            uint32_t c = lane_colour[6];
+            gfx_rect_grad(3, SCREEN_H - h - OPEN_H, SCREEN_W - 6, OPEN_H - 3, ALPHA(c, down ? 190 : 60), ALPHA(c, down ? 230 : 110));
+            font_draw(res.ui, G.drums ? "KICK" : "OPEN", SCREEN_W / 2, SCREEN_H - h - OPEN_H + 4, 20, RGBA(255, 255, 255, 220),
+                      ALIGN_CENTER);
         }
         gfx_rect(SCREEN_W - 96, 8, 88, 44, RGBA(0, 0, 0, 120));
         font_draw(res.ui, "PAUSE", SCREEN_W - 52, 18, 20, RGBA(240, 240, 240, 230), ALIGN_CENTER);
@@ -6097,6 +6143,24 @@ static void draw_hud(void)
                     gfx_sprite_uv(on, x, y0 + size * (1 - frac), size, size * frac, on->u0, v, on->u1, on->v1, RGBA(255, 255, 255, 215));
                 }
             }
+            // Star Power as a bar under the stars: how full, the half where it can be set off marked, blue and
+            // glowing when it's ready, draining white-blue while it's on (the dome's tubes are small to read mid-song)
+            {
+                float sy = y0 + size + 4, sw = bar_w, sh = 8, f = G.sp < 0 ? 0 : G.sp > 1 ? 1 : G.sp;
+                bool ready = f >= 0.5f && !G.sp_active;
+                gfx_rect(bar_x - 1, sy - 1, sw + 2, sh + 2, RGBA(0, 0, 0, 170));
+                uint32_t c0 = G.sp_active ? RGBA(170, 230, 255, 255) : ready ? RGBA(60, 170, 255, 255) : RGBA(40, 110, 200, 230);
+                uint32_t c1 = G.sp_active ? RGBA(90, 190, 255, 255) : ready ? RGBA(30, 120, 255, 255) : RGBA(25, 70, 150, 230);
+                gfx_rect_grad(bar_x, sy, sw * f, sh, c0, c1);
+                gfx_rect(bar_x + sw * 0.5f - 1, sy - 2, 2, sh + 4, RGBA(255, 255, 255, 170));
+                if (ready || G.sp_active) {
+                    float b = 0.5f + 0.5f * sinf(t * 9);
+                    gfx_blend(BLEND_ADD);
+                    gfx_sprite(atlas_get(res.game, "glow"), bar_x - 20, sy - 14, sw * f + 40, sh + 28,
+                               RGBA(60, 160, 255, (int)(70 + 70 * b)));
+                    gfx_blend(BLEND_ALPHA);
+                }
+            }
         }
         // the dome: the metal first, its bright window set inside it with ROCK in black, the three sectors pale, the one
         // the needle's in lit up. The art's plinth under the rim is cropped: the dome sits on the score plate
@@ -6171,8 +6235,19 @@ static void draw_hud(void)
         float f = (float)(G.t / len);
         f = f < 0 ? 0 : f > 1 ? 1 : f;
         if (!cfg.no_progress && !G.sing) {
-            gfx_rect(0, 0, SCREEN_W, 2, RGBA(0, 0, 0, 90));
-            gfx_rect(0, 0, SCREEN_W * f, 2, RGBA(235, 235, 245, 150));
+            // across the top: how far in, the chart's sections as ticks, a bright head; the section you're in named
+            // under its start for a moment as it begins
+            gfx_rect(0, 0, SCREEN_W, 5, RGBA(0, 0, 0, 120));
+            gfx_rect_grad(0, 0, SCREEN_W * f, 5, RGBA(255, 200, 80, 210), RGBA(220, 120, 30, 210));
+            const Chart * ch = G.chart;
+            int ns = ch ? (ch->own_sections ? ch->section_count : ch->section_count) : 0;
+            const Section * secs = ch ? (ch->own_sections ? ch->own_sections : ch->sections) : NULL;
+            for (int i = 0; secs && i < ns; i++) {
+                float sx = (float)(secs[i].time / 1e6 / len) * SCREEN_W;
+                if (sx > 2 && sx < SCREEN_W - 2)
+                    gfx_rect(sx, 0, 1, 7, RGBA(255, 255, 255, 110));
+            }
+            gfx_rect(SCREEN_W * f - 2, 0, 4, 7, RGBA(255, 250, 230, 240));
         }
     }
     // the song's card at the start

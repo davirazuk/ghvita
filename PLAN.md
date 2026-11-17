@@ -751,3 +751,7 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 - select_bar is the main menu's slanted orange wedge everywhere.
 - Mornye: its extension runtime gives extensions Blowfish and segmented CTR decryption to unlock streaming services'
   protected tracks; not ported (declined). A plain Vita downloader for the user's own files was offered instead.
+- HUD: a Star Power bar under the stars (fill, the half mark, glowing when ready, white-blue while on); the progress
+  line across the top is a 5 px gold bar with the chart's sections as ticks.
+- Touch pads lie under their lanes (pad_span: half way between projected lanes at the strikeline, outer ones to the
+  edges); an OPEN / KICK strip across the top of the pads' area when the chart has open notes or it's drums.
