@@ -843,3 +843,6 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   buttons, the normal highway, the HUD up top, and plays a chord as each thumb's side of it (any fret of the chord on
   that side) with sustains held by any of their frets; no Vita button hints on a phone; the portrait strip is drawn
   before the score so the rock meter shows under the picture.
+- Android updates never installed: each CI runner signed with its own fresh debug key, and Android refuses an update
+  signed by a different key. Every build is now signed with android/ghvita.keystore (sideload key, kept in the repo).
+  Phones with an older APK must uninstall once (back up Android/data/org.ghvita.app/files first) and install this one.

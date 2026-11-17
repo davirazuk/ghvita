@@ -37,10 +37,24 @@ android {
             version '3.22.1'
         }
     }
+    // one key for every build: each CI machine made its own debug key, and Android won't put an APK signed by another
+    // key over the installed one, so no update could ever install (a sideloaded game, not a store build: the key's
+    // in the repository)
+    signingConfigs {
+        ghv {
+            storeFile file('../ghvita.keystore')
+            storePassword 'ghvita'
+            keyAlias 'ghvita'
+            keyPassword 'ghvita'
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
-            signingConfig signingConfigs.debug      // sideloaded, not a store build
+            signingConfig signingConfigs.ghv
+        }
+        debug {
+            signingConfig signingConfigs.ghv
         }
     }
     compileOptions {
