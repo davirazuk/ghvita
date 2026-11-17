@@ -699,3 +699,17 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   venue3d_load, gfx.c tex_load_mem): 767 files in all. tools/release.py refuses more than 1000. MAX_FILES is 4096
   for Updaters installed from now on. A Vita caught by it has loose files left in assets/venue3d/tex (harmless).
 - Hair: no_soft only cuts by an eye (5 cm), so soft hair cards stay.
+
+## Touch menus, the menus' own look, vocals as recorded, Android (2026-11-17)
+- main.c menu_touch: a drag moves the choice (46 px a step), a tap is Cross, a tap on a help bar button presses it
+  (help_bar records each button's stretch), two fingers are Circle; in a song only the top corners (right Start, left
+  Select). Tested with the script's touch lines on the desktop build.
+- The menus are drawn (menu_bg, panel, select_bar, row_bar, dialog_box, banner in main.c), no longer World Tour's
+  menu pictures: night blue, cyan and magenta. The title screen and the logos are as they were.
+- Replays: voice style 4 "As recorded" is the default (config key voice_mix; the old voice_style is not read): high
+  pass, one gain, soft peaks, no gate/tuning/reverb/shift. aec.c's post-filter floor 0.08 -> 0.35. The user's report
+  (Still Alive): the processed voice stuttered; the gate and the deep post-filter are the suspects, not proven.
+- Android: android/ (gradle, SDL2 from source, GHVitaActivity unpacks assets/ghv into files/assets), plat_sdl.c under
+  __ANDROID__ (GLES 1.1, any window shape via plat_view, fingers, back = Circle), .github/workflows/android.yml
+  ([apk] in the commit, or by hand): vcpkg builds the libraries for arm64-v8a and x86_64, the APK goes to the
+  "android" pre-release. Mesa here has no GLES 1 context, so that path is only tested by the Android build itself.
