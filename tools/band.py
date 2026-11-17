@@ -195,6 +195,58 @@ def finger_pose(anims, male, mask):
     return over
 
 
+# where each finger's tip goes on the neck (the guitar body's space: the neck along +z, the fretboard's face +y, the
+# strings across x, the fingers coming round the +x edge): GH's colours are fingers, and a finger down is a finger on a
+# string at its fret, not curled in the air beside the neck. Index to little finger on the strings from the low side up,
+# as a power chord or a run across the strings looks
+PRESS_STRING = [2, 3, 3, 4]         # bone_guitar_string_<n + 1>
+LIFT = 0.018                        # a finger that's up hovers this far over the strings, ready
+
+
+def press_fingers(rig, mask):
+    gi = rig.ix('bone_guitar_body')
+    G = rig.W[gi]
+    Gi = np.linalg.inv(G)
+    loc = lambda p: (Gi @ np.r_[p, 1])[:3]
+    world = lambda q: (G @ np.r_[q, 1])[:3]
+    sx = [loc(rig.p('bone_guitar_string_%d' % (k + 1))) for k in range(6)]
+    top_y = max(v[1] for v in sx)
+    for k, fg in enumerate(FINGERS):
+        nm = lambda part: 'Bone_Hand_%s_%s_L' % ({'pinkey': 'Pinkey'}.get(fg, fg.capitalize()), part)
+        base, mid, top = rig.ix(nm('Base')), rig.ix(nm('Mid')), rig.ix(nm('Top'))
+        B, Mj, T = rig.W[base][:3, 3], rig.W[mid][:3, 3], rig.W[top][:3, 3]
+        lt = 0.8 * np.linalg.norm(T - Mj)                   # the last joint to the tip
+        tip_now = loc(T + (T - Mj) / max(np.linalg.norm(T - Mj), 1e-6) * lt)
+        st = sx[PRESS_STRING[k]]
+        down = mask & (1 << k)
+        # the tip: on its string just behind where it is now along the neck (the hand's own spread of the fingers)
+        tip = np.array([st[0], top_y + (0.004 if down else LIFT), tip_now[2]])
+        if not down:
+            tip[0] = st[0] + 0.006                          # an idle finger hovers over its string, ready
+        # each joint in turn turned to bring the tip toward its place (from the hand's own curl, so the finger keeps a
+        # finger's shape), a few times round
+        target = world(tip)
+        chain = [top, mid, base]
+        for _ in range(12):
+            for j in chain:
+                T, Mj = rig.W[top][:3, 3], rig.W[mid][:3, 3]
+                end = T + (T - Mj) / max(np.linalg.norm(T - Mj), 1e-6) * lt
+                J = rig.W[j][:3, 3]
+                u, v = end - J, target - J
+                if np.linalg.norm(u) < 1e-5 or np.linalg.norm(v) < 1e-5:
+                    continue
+                R = rotation_between(u, v)
+                # a joint turns at most 25 degrees a pass: no snapping backwards through the knuckle
+                ang = np.arccos(np.clip((np.trace(R) - 1) / 2, -1, 1))
+                if ang > np.radians(25):
+                    axis = np.cross(u, v)
+                    axis /= max(np.linalg.norm(axis), 1e-9)
+                    t = np.radians(25)
+                    K = np.array([[0, -axis[2], axis[1]], [axis[2], 0, -axis[0]], [-axis[1], axis[0], 0]])
+                    R = np.eye(3) + np.sin(t) * K + (1 - np.cos(t)) * K @ K
+                rig.rotate_world(j, R)
+
+
 def rotation_between(a, b):
     a, b = a / np.linalg.norm(a), b / np.linalg.norm(b)
     v, c = np.cross(a, b), float(a @ b)
@@ -262,8 +314,44 @@ FIX_L = np.array([[0, 0, -1.0], [-1, 0, 0], [0, 1, 0]])
 FIX_R = np.array([[0, 0, 1.0], [1, 0, 0], [0, 1, 0]])
 
 
+# the fret hand as a player holds a neck (the guitar body's space: the neck along +z, the board's face +y, the floor
+# side +x). GHWT's target put the palm through the neck with the fingers bunched in the air over it. Here the hand is
+# placed outright: its knuckles along the floor-side edge just over the board, the fingers pointing up and across it
+# (leaning over the strings), index toward the head; the arm reaches to it and the fingers then go to their strings
+KNUCKLE_AT = np.array([0.05, 0.022, -0.012])
+FINGER_DIR = np.array([-0.8, 1.0, 0.0])
+
+
+def place_fret_hand(rig):
+    gi = rig.ix('bone_guitar_body')
+    G = rig.W[gi]
+    pm = rig.ix('bone_palm_l')
+    P = rig.W[pm]
+    loc = lambda n: P[:3, :3].T @ (rig.W[rig.ix(n)][:3, 3] - P[:3, 3])
+    a_l = loc('Bone_Hand_Middle_Base_L')
+    k_l = loc('Bone_Hand_Pinkey_Base_L') - loc('Bone_Hand_Index_Base_L')
+
+    def frame(a, k):
+        e1 = a / np.linalg.norm(a)
+        e2 = k - (k @ e1) * e1
+        e2 /= np.linalg.norm(e2)
+        return np.c_[e1, e2, np.cross(e1, e2)]
+    D = frame(G[:3, :3] @ FINGER_DIR, G[:3, :3] @ np.array([0, 0, -1.0]))
+    R = D @ frame(a_l, k_l).T
+    fret = rig.W[rig.ix('BONE_GUITAR_FRET_POS')][:3, 3]
+    knuckle = fret + G[:3, :3] @ KNUCKLE_AT
+    at = knuckle - R @ a_l
+    el = rig.p('bone_forearm_l')
+    rig.two_bone('bone_bicep_l', 'bone_forearm_l', 'bone_palm_l', at, el + np.array([0, -0.12, 0]))
+    M = rig.W[pm].copy()
+    M[:3, :3] = R
+    M[:3, 3] = at
+    rig.set_world(pm, M)
+
+
 def guitar_hands(rig):
-    # BandAnimator.Solve: elbows a little down, each palm exactly on its target, rotation included
+    # BandAnimator.Solve: elbows a little down, each palm exactly on its target, rotation included (the fret hand then
+    # placed on the neck)
     for side, fix in (('r', FIX_R), ('l', FIX_L)):
         tgt = rig.ix('bone_ik_hand_guitar_' + side)
         el = rig.p('bone_forearm_' + side)
@@ -273,6 +361,7 @@ def guitar_hands(rig):
         M = rig.W[pm].copy()
         M[:3, :3] = rig.W[tgt][:3, :3] @ fix
         rig.set_world(pm, M)
+    place_fret_hand(rig)
 
 
 def skinned(meshes, skin):
@@ -863,6 +952,7 @@ def bake(path, work, tex_dir, alt=False):
                 rig = wc.Rig(bones, pose_over(bones, pose, over))
                 wc.solve(rig, rest, role, 0, g0)
                 guitar_hands(rig)
+                press_fingers(rig, mask)
                 S = [m @ b[4] for m, b in zip(rig.W, bones)]
                 ip = np.linalg.inv(S[palm])
                 for k, i in enumerate(fb):

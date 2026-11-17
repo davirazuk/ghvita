@@ -2384,6 +2384,8 @@ static void draw_band(double beat)
                     bp->chord_w = bp->chord_w >= 1 ? 0 : bp->chord_w;
                 }
                 bp->chord_w = fminf(1, bp->chord_w + 0.3f * G.fstep);       // a finger's down in about 50 ms
+                if (getenv("GHV_HANDLOG"))     // tests: what the fret hand's doing
+                    fprintf(stderr, "hand r%d t%.3f frets%02x shape%x/%x w%.2f fret%.2f strum%.2f\n", r, G.t, frets, bp->chord_a, bp->chord_b, bp->chord_w, bp->hand_fret, bp->strum_pos);
                 d3.hands.ga = d3.fa / 3;
                 d3.hands.gb = d3.fb / 3;
                 d3.hands.fret = bp->hand_fret;

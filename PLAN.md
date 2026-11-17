@@ -803,3 +803,10 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   (World Tour's t100 swings some guitars up to vertical, which made the fretting hand look fake). Wild chorus/solo
   loops that turn the guitar more than 12 degrees are left out of the bake, so the steady loop plays those too and the
   chart-driven fret fingers and strum stay readable all song.
+
+- Fret hand realism: GHWT's IK target left the fret hand's palm through the neck with the fingers curled in the air
+  beside it (a "pressed" finger moved 6 mm). The bake now places the hand outright (tools/band.py place_fret_hand):
+  knuckles along the floor-side edge just over the board, fingers pointing up and across, index toward the head; then
+  each finger is curled joint by joint (press_fingers) onto its string at its fret when its colour is down, or hovers
+  just over it when up. The chart already drives which fingers and where along the neck; now it shows.
+  Test hooks: GHV_HANDLOG=1 logs the fret hand's inputs each frame and each shot's name.

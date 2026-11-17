@@ -420,6 +420,8 @@ void plat_skip_frame(void)
 void plat_swap(void)
 {
     if (pending_shot[0]) {
+        if (getenv("GHV_HANDLOG"))
+            fprintf(stderr, "shot %s\n", pending_shot);
         plat_screenshot(pending_shot);
         pending_shot[0] = 0;
     }
