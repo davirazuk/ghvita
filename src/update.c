@@ -120,10 +120,10 @@ static int check_thread(void * arg)
         plat_log("update: the check got %d", status);
         // a fine-grained token expires, and one without this repository reads it as missing (404): say so, or the game just
         // quietly stops updating
-        if ((status == 401 || status == 403 || status == 404) && !told_token) {
+        if ((status == 401 || status == 403) && !told_token) {
             told_token = true;
-            snprintf(news, sizeof(news), status == 401 ? "Updates: GitHub refused update.txt's token (expired?)"
-                                                       : "Updates: update.txt's token can't read the repository");
+            snprintf(news, sizeof(news), status == 401 ? "Updates: GitHub refused the update token (expired?)"
+                                                       : "Updates: the update token can't read the repository");
         }
         state = UP_NONE;
         return 0;
@@ -199,7 +199,7 @@ void update_check(bool now)
     // at the first menu, then again every RECHECK_S or on waking (now) while nothing's on offer: before, it asked once a
     // launch, and a Vita that only ever sleeps never asked again
     double t = plat_now_us() / 1e6;
-    bool again = state == UP_NONE && (now || t - checked_at >= RECHECK_S);
+    bool again = (state == UP_NONE || state == UP_FAILED) && (now || t - checked_at >= RECHECK_S);
     if ((state != UP_OFF && !again) || (state == UP_OFF && t - checked_at < 5))
         return;
     checked_at = t;                     // also spaces out looking for update.txt when there isn't one
@@ -289,8 +289,10 @@ static int get_thread(void * arg)
     }
     if (status != 200) {
         remove(zip);
-        if (status == 401 || status == 403 || status == 404)
-            fail("GitHub refused: check the token in update.txt");
+        if (status == 404)
+            fail("the new build was still being uploaded: try again in a few minutes");
+        else if (status == 401 || status == 403)
+            fail("GitHub refused the update token (expired?)");
         else
             fail(err[0] ? err : "the download stopped");
         return 0;
