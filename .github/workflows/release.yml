@@ -129,3 +129,13 @@ jobs:
             notes="$(git log $range --no-merges --format='- %s' | sed 's/ *\[release\]//')"
           fi
           python3 tools/release.py --notes "$notes"
+
+      - name: The other devices' builds on this release too (the phone's APK, Windows' zip, Linux's AppImage)
+        run: |
+          tag=$(gh release view --json tagName -q .tagName)
+          mkdir -p /tmp/others
+          for r in android:GHVita-android.apk windows:GHVita-windows.zip linux:GHVita-x86_64.AppImage; do
+            gh release download "${r%%:*}" --pattern "${r#*:}" --dir /tmp/others --clobber 2>/dev/null || echo "no ${r#*:} yet"
+          done
+          ls /tmp/others
+          [ -n "$(ls /tmp/others)" ] && gh release upload "$tag" /tmp/others/* --clobber || true

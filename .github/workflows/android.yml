@@ -114,3 +114,5 @@ jobs:
           echo $(git rev-list --count HEAD) > version.txt
           gh release upload android GHVita-android.apk version.txt --clobber
           gh release edit android --prerelease --notes "The Android build of GH Vita, build $(git rev-list --count HEAD) ($(git rev-parse --short HEAD)). Sideload GHVita-android.apk. Songs and saves live in Android/data/org.ghvita.app/files."
+          # and on the newest release, beside the Vita's (whichever of the two builds finishes last, both end up there)
+          gh release upload "$(gh release view --json tagName -q .tagName)" GHVita-android.apk --clobber || true

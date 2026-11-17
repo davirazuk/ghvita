@@ -87,3 +87,5 @@ jobs:
           echo $(git rev-list --count HEAD) > version.txt
           gh release upload linux GHVita-x86_64.AppImage version.txt --clobber
           gh release edit linux --prerelease --notes "GH Vita for Linux, build $(git rev-list --count HEAD) ($(git rev-parse --short HEAD)). Download GHVita-x86_64.AppImage, make it executable (chmod +x, or Properties > Allow executing) and run it. Songs and saves go in ~/GHVita/songs. It updates itself after that."
+          # and on the newest release, beside the Vita's (whichever of the two builds finishes last, both end up there)
+          gh release upload "$(gh release view --json tagName -q .tagName)" GHVita-x86_64.AppImage --clobber || true
