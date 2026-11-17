@@ -788,3 +788,8 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   plat_below() is the rest in game units; gfx_below_begin/end draw there; in a song it's five tall fret columns
   (the top 18% the open note / kick), touch_lane_at takes y past SCREEN_H there. Menus keep the picture at the top.
   GHV_WINDOW=540x1100 GHV_SHOTWIN=1 tests it on the desktop.
+- Touch layouts (cfg.touch_frets, saved touch_hands): 0 one hand (A S D F G: five 150-wide columns together),
+  1 two hands (A S | J K L: two and three, a 150 gap), 2 thumbs (the screen's edges beyond the highway: three 100-wide
+  columns left, two 150-wide right). A column takes taps from the bottom up to 40% of the screen. Drawn see-through.
+  Released for the user to try all three on the phone (they couldn't judge from screenshots).
+- Held upright, the rock meter and plates are drawn in the strip under the picture (gfx_2d_tall).
