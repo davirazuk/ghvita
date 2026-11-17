@@ -39,6 +39,9 @@ enum { GAME_PLAYING, GAME_DONE, GAME_FAILED, GAME_PAUSE };
 bool game_start(Song * song, int part, int diff);
 // the venue the next songs play in (the tour's), NULL to leave it to the options
 void game_force_venue(const char * zone);
+// the frets are played on the screen: five wide pads along its bottom, drawn and taken as lanes (main.c sets it once
+// the screen's been touched, or always on a phone)
+extern bool game_touch_pads;
 // the next game_start is practice: from..to seconds over and over at speed (0.5..1), and nothing counts
 void game_practice(double from, double to, float speed);
 float game_song_speed(void);    // the music's speed this run: 1 normal

@@ -46,7 +46,29 @@ static uint32_t pressed, repeat;    // repeat: pressed, plus held directions rep
 // what the help bar drew last frame, for a finger: each button's stretch of the bar; and whether the screen's been touched
 static struct { float x0, x1; uint32_t btn; } tap_spots[12];
 static int tap_count;
+// touch_used: the screen's been touched (a Vita with its buttons still shows them); touch_only: a phone, nothing but
+// the screen, so nothing on it speaks of buttons
 static bool touch_used;
+#ifdef __ANDROID__
+static const bool touch_only = true;
+#else
+static bool touch_only;         // GHV_TOUCH=1 on the desktop, to look at a phone's screens
+#endif
+// the rows of the list on the screen, as drawn: a tap on one goes to it (so many steps up or down from the choice) and
+// picks it, as a touch screen should
+static struct { float x, y, w, h; int delta; } tap_items[64];
+static int tap_item_count;
+
+static void tap_item(float x, float y, float w, float h, int delta)
+{
+    if (tap_item_count < 64) {
+        tap_items[tap_item_count].x = x;
+        tap_items[tap_item_count].y = y;
+        tap_items[tap_item_count].w = w;
+        tap_items[tap_item_count].h = h;
+        tap_items[tap_item_count++].delta = delta;
+    }
+}
 static bool autoplay;
 
 // the song list: sel is the song in the library; the view is what's shown of it, searched and filtered
@@ -139,8 +161,18 @@ static void help_bar(const char * const * items, int n)
     for (int i = 0; i + 1 < n; i += 2) {
         const Sprite * b = atlas_get(res.hud, items[i]);
         float w = b->w * 28.0f * k / b->h, x0 = x;
-        gfx_sprite(b, x, SCREEN_H - 21 - 14 * k, w, 28 * k, WHITE);
-        x += w + 6 * k;
+        if (touch_only) {
+            // no buttons on a phone: the words alone, each on a chip to tap (one with no words is left out)
+            if (!items[i + 1][0])
+                continue;
+            float tw = font_width(res.ui, items[i + 1], 26 * k);
+            gfx_rect(x - 6, SCREEN_H - 38, tw + 22, 34, RGBA(255, 255, 255, 34));
+            gfx_rect(x - 6, SCREEN_H - 38, tw + 22, 2, RGBA(255, 200, 90, 200));
+            x += 5;
+        } else {
+            gfx_sprite(b, x, SCREEN_H - 21 - 14 * k, w, 28 * k, WHITE);
+            x += w + 6 * k;
+        }
         x += font_draw(res.ui, items[i + 1], x, SCREEN_H - 21 - 13 * k, 26 * k, RGBA(230, 230, 230, 255), ALIGN_LEFT) +
              22 * k;
         // each is a thing to tap: the button it shows (menu_touch)
@@ -170,7 +202,28 @@ static void menu_touch(void)
     static bool moved, two;
     static struct { float x0, x1; uint32_t btn; } spots[12];
     static int nspots;
+    static struct { float x, y, w, h; int delta; } rows[64];
+    static int nrows, q_moves;
+    static bool q_cross;
     bool playing = screen == S_PLAY;
+    // a tap on a row: the steps to it, one a frame, then the pick
+    if (q_moves && !playing) {
+        uint32_t b = q_moves > 0 ? BTN_DOWN : BTN_UP;
+        pressed |= b;
+        repeat |= b;
+        q_moves += q_moves > 0 ? -1 : 1;
+        tap_count = tap_item_count = 0;
+        return;
+    }
+    if (q_cross && !playing) {
+        pressed |= BTN_CROSS;
+        repeat |= BTN_CROSS;
+        q_cross = false;
+        tap_count = tap_item_count = 0;
+        return;
+    }
+    q_moves = 0;
+    q_cross = false;
     int at = -1;
     for (int i = 0; i < pad.ntouch; i++)
         if (pad.touch_id[i] == id)
@@ -189,9 +242,17 @@ static void menu_touch(void)
             spots[i].x1 = tap_spots[i].x1;
             spots[i].btn = tap_spots[i].btn;
         }
+        nrows = tap_item_count < 64 ? tap_item_count : 64;
+        for (int i = 0; i < nrows; i++) {
+            rows[i].x = tap_items[i].x;
+            rows[i].y = tap_items[i].y;
+            rows[i].w = tap_items[i].w;
+            rows[i].h = tap_items[i].h;
+            rows[i].delta = tap_items[i].delta;
+        }
         touch_used = true;
     }
-    tap_count = 0;              // the bar's drawn again this frame
+    tap_count = tap_item_count = 0;     // the bar and the rows are drawn again this frame
     if (id < 0)
         return;
     if (pad.ntouch >= 2)
@@ -239,10 +300,23 @@ static void menu_touch(void)
         b = BTN_CIRCLE;
     else {
         b = BTN_CROSS;
-        if (sy > SCREEN_H - 50)
+        bool hit = false;
+        if (sy > SCREEN_H - 62)
             for (int i = 0; i < nspots; i++)
-                if (sx >= spots[i].x0 && sx <= spots[i].x1)
+                if (sx >= spots[i].x0 && sx <= spots[i].x1) {
                     b = spots[i].btn;
+                    hit = true;
+                }
+        // a row of the list: go to it, then pick it (the one already chosen is picked at once)
+        for (int i = 0; i < nrows && !hit; i++)
+            if (sx >= rows[i].x && sx <= rows[i].x + rows[i].w && sy >= rows[i].y && sy <= rows[i].y + rows[i].h) {
+                hit = true;
+                if (rows[i].delta) {
+                    q_moves = rows[i].delta;
+                    q_cross = true;
+                    b = 0;
+                }
+            }
     }
     pressed |= b;
     repeat |= b;
@@ -457,7 +531,7 @@ static void title_screen(void)
     res_title_art();
     float a = 0.8f + 0.2f * sinf((float)now_s * 4);   // breathes, never fades out
     gfx_rect_grad(0, 420, SCREEN_W, 90, RGBA(0, 0, 0, 0), RGBA(0, 0, 0, 210));
-    font_draw_shadow(res.title, "PRESS X TO ROCK", SCREEN_W * 0.74f, 452, 46, fade_alpha(RGBA(255, 220, 120, 255), a),
+    font_draw_shadow(res.title, touch_only ? "TAP TO ROCK" : "PRESS X TO ROCK", SCREEN_W * 0.74f, 452, 46, fade_alpha(RGBA(255, 220, 120, 255), a),
                      ALIGN_CENTER);
     gfx_end();
 }
@@ -904,6 +978,7 @@ static void main_menu(void)
     for (int i = 0; i < n; i++) {
         float y = 156 + i * 37.0f;
         bool on = i == menu_index;
+        tap_item(0, y - 4, 470, 37, i - menu_index);
         if (on) {
             float w = font_width(res.title, items[i], 44) + 120, b = 0.85f + 0.15f * sinf((float)now_s * 5);
             const float uvq[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
@@ -1703,6 +1778,7 @@ static void dl_queue_screen(void)
         const DlJob * q = &jobs[top + r];
         float y = 130 + r * 56;
         bool on = top + r == dl_jobs_sel;
+        tap_item(14, y, 580, 54, top + r - dl_jobs_sel);
         if (on)
             select_bar(14, y, 580, 54, WHITE);
         else
@@ -1938,6 +2014,7 @@ static void download_screen(void)
         const DlHit * h = &rows[r];
         float y = 130 + r * 56;
         bool on = dl_top + r == dl_sel, dim = h->unplayable[0] != 0;
+        tap_item(14, y, 580, 54, dl_top + r - dl_sel);
         if (on)
             select_bar(14, y, 580, 54, WHITE);
         else
@@ -2658,6 +2735,7 @@ static void list_menu_draw(const Song * s)
     snprintf(rows[11], sizeof(rows[11]), "Replays of this song");
     for (int i = 0; i < 12; i++) {
         float y = 72 + i * 35.6f;
+        tap_item(224, y - 4, 512, 36, i - list_row);
         if (i == list_row)
             select_bar(224, y - 4, 512, 37, WHITE);
         font_draw_fit(res.ui, rows[i], SCREEN_W / 2, y + 2, 28, 460, i == list_row ? RGBA(255, 230, 150, 255)
@@ -2819,6 +2897,7 @@ static void song_list(void)
         Song * x = songs_get(i);
         float y = 104 + r * 56;
         bool on = top + r == pos;
+        tap_item(14, y, 580, 54, top + r - pos);
         if (on)
             select_bar(14, y, 580, 54, WHITE);
         else
@@ -2950,6 +3029,7 @@ static void draw_select(const Song * s, bool loading)
     for (int d = 0; d < DIFF_COUNT; d++) {
         float y = 254 + d * 46;
         bool on = d == sel_diff, has = sel_diffs[sel_part] & (1 << d);
+        tap_item(60, y - 4, 500, 44, d - sel_diff);
         if (on)
             select_bar(60, y - 4, 500, 44, WHITE);
         font_draw_shadow(res.ui, diff_name(d), 90, y, 30,
@@ -3716,6 +3796,7 @@ static void replay_pause_screen(void)
     float step = n > 6 ? 29 : n > 5 ? 38 : 44, size = n > 6 ? 25 : n > 5 ? 30 : 34;
     for (int i = 0; i < n; i++) {
         float y = (n > 6 ? 174 : 186) + i * step;
+        tap_item(SCREEN_W / 2 - 180, y - 4, 360, step, i - menu_index);
         if (i == menu_index)
             select_bar(SCREEN_W / 2 - 180, y - 4, 360, step - 4, WHITE);
         font_draw_fit(res.title, rows[i], SCREEN_W / 2, y, size, 340,
@@ -3795,6 +3876,7 @@ static void replays_screen(void)
     for (int i = top; i < rl_n && i < top + 7; i++) {
         const ReplayInfo * in = &rl_info[i];
         float y = 148 + (i - top) * 44;
+        tap_item(84, y - 4, 792, 40, i - rl_row);
         if (i == rl_row)
             select_bar(84, y - 4, 792, 40, WHITE);
         const char * file = strrchr(rl_paths[i], '_');
@@ -4071,6 +4153,7 @@ static void pause_screen(void)
     float step = n > 4 ? 44 : 54, size = n > 4 ? 34 : 40;
     for (int i = 0; i < n; i++) {
         float y = 192 + i * step;
+        tap_item(SCREEN_W / 2 - 170, y - 4, 340, step, i - menu_index);
         if (i == menu_index)
             select_bar(SCREEN_W / 2 - 170, y - 4, 340, step - 4, WHITE);
         uint32_t col = i == menu_index ? RGBA(255, 230, 150, 255) : RGBA(210, 200, 190, 255);
@@ -4638,6 +4721,8 @@ static void tour_screen(void)
     for (int g = 0; g < TOUR_GIGS; g++) {
         float y = 158 + g * 54;
         bool on = g == tour_gig;
+        if (!tour_in_set)
+            tap_item(30, y - 6, 376, 50, g - tour_gig);
         if (on)
             select_bar(30, y - 6, 376, 50, tour_in_set ? RGBA(150, 150, 150, 255) : WHITE);
         const char * title = res_venue_title(tour_zone(tour_leg, g));
@@ -4660,6 +4745,8 @@ static void tour_screen(void)
         for (int i = 0; i < TOUR_SET; i++) {
             float y = 162 + i * 78;
             bool on = tour_in_set && i == tour_slot, locked = i == TOUR_ENCORE && !encore_open;
+            if (tour_in_set)
+                tap_item(444, y - 8, 484, 74, i - tour_slot);
             if (on)
                 select_bar(444, y - 8, 484, 74, WHITE);
             const Song * s = tour_ids[i] >= 0 ? songs_get(tour_ids[i]) : NULL;
@@ -5162,6 +5249,7 @@ static void options_screen(void)
         option_text(i, name, value, sizeof(value));
         float y = 140 + r * 32;
         bool on = opt_top + r == menu_index;
+        tap_item(130, y - 3, 700, 32, opt_top + r - menu_index);
         if (on)
             select_bar(130, y - 3, 700, 34, WHITE);
         uint32_t c = on ? RGBA(255, 230, 150, 255) : RGBA(220, 215, 205, 255);
@@ -5959,6 +6047,7 @@ static void player_edit_screen(void)
     for (int i = 0; i < PE_ROWS; i++) {
         float y = 96 + i * 43;
         bool cur = i == pe_row;
+        tap_item(44, y - 4, 532, 42, i - pe_row);
         if (cur)
             select_bar(44, y - 4, 532, 40, WHITE);
         uint32_t col = i == PE_DELETE ? RGBA(255, 140, 120, 255) : cur ? RGBA(255, 230, 150, 255) : RGBA(215, 205, 195, 255);
@@ -6297,6 +6386,7 @@ static void rockers_screen(void)
     for (int i = 0; i < 4; i++) {
         int rr = rows[i];
         float y = 118 + i * 84;
+        tap_item(50, y - 6, 450, 82, i - row);
         if (i == row)
             select_bar(50, y - 6, 450, 78, WHITE);
         font_draw_shadow(res.title, titles[rr], 76, y, 34, i == row ? RGBA(255, 230, 150, 255) : RGBA(200, 190, 180, 255), ALIGN_LEFT);
@@ -6596,6 +6686,11 @@ int main(void)
 {
 #endif
     plat_init();
+#ifndef __ANDROID__
+#ifndef __vita__
+    touch_only = getenv("GHV_TOUCH") != NULL;
+#endif
+#endif
     update_boot();
     plat_log("GH Vita starting");
     // QUICKPLAY's song and a random venue differ from boot to boot (test runs on the fixed clock stay repeatable)
@@ -6675,6 +6770,7 @@ int main(void)
         last_buttons = pad.buttons;
         update_repeat();
         menu_touch();
+        game_touch_pads = touch_only || touch_used;
         int drawn = screen;
         switch (screen) {
         case S_TITLE: title_screen(); break;

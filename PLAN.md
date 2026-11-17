@@ -724,3 +724,9 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 - Main menu: menu_rocker (the live model, shared with ROCKERS), the list with no box, a slanted wedge for the choice.
 - Mornye (github.com/mornyeapp/Mornye, asked for as a Vita port): a Flutter + Rust music player and downloader for
   phones. Not portable to the Vita (no Flutter there) and not started.
+- Touch as a touch screen (the user: the Android build "still thinks it's a Vita"; the Vita's screen "like a
+  touchscreen"): tap_item() beside every list's select_bar records the rows, a tap on one steps to it and picks it
+  (menu_touch's queue); on Android (touch_only; GHV_TOUCH=1 on the desktop) the help bar is chips of words with no
+  button pictures and the title says TAP. In a song, game_touch_pads (set once the screen's touched, always on a
+  phone): five pads the screen's width along the bottom, lane colours, PAUSE and STAR POWER boxes in the top corners.
+  Open notes and drum kicks have no pad yet.

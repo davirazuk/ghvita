@@ -44,6 +44,8 @@ static float z_far = 11.0f;
 
 enum { PENDING, HIT, MISSED };
 
+bool game_touch_pads;
+
 static const uint32_t lane_colour[7] = {
     RGBA(40, 230, 50, 255), RGBA(250, 40, 30, 255), RGBA(255, 228, 20, 255), RGBA(40, 110, 255, 255),
     RGBA(255, 140, 20, 255), RGBA(120, 220, 255, 255), RGBA(190, 80, 255, 255),
@@ -4270,8 +4272,33 @@ static void update_sustains(void)
 }
 
 // the lanes the touch screen holds: the bottom of the screen, under each lane's cup
+// which lane a pad is (left to right on the screen, as the lanes lie: lefty turns them)
+static int pad_lane(int k)
+{
+    int order[6];
+    float sx[6], sy;
+    for (int l = 0; l < G.lanes; l++) {
+        order[l] = l;
+        project(lane_x(l), 0, 0, &sx[l], &sy);
+    }
+    for (int a = 0; a < G.lanes; a++)
+        for (int b = a + 1; b < G.lanes; b++)
+            if (sx[order[b]] < sx[order[a]]) {
+                int t = order[a];
+                order[a] = order[b];
+                order[b] = t;
+            }
+    return order[k < 0 ? 0 : k >= G.lanes ? G.lanes - 1 : k];
+}
+
 static int touch_lane_at(float x, float y)
 {
+    if (game_touch_pads) {
+        // the pads: the whole width of the screen in as many parts as there are lanes, its lower half
+        if (y < SCREEN_H * 0.5f || G.lanes <= 0)
+            return -1;
+        return pad_lane((int)(x / (SCREEN_W / (float)G.lanes)));
+    }
     if (y < SCREEN_H * 0.55f)
         return -1;
     float best = 1e9f;
@@ -5875,6 +5902,25 @@ static void draw_hud(void)
     gfx_2d();
     gfx_blend(BLEND_ALPHA);
     float t = (float)G.t;
+    if (game_touch_pads && !G.vocal && !G.view_mode && G.lanes > 0) {
+        // the frets as pads to play on: each lane's colour along the bottom, lit while a finger's on it; the two top
+        // corners pause and set Star Power off
+        float w = SCREEN_W / (float)G.lanes, h = 86;
+        for (int k = 0; k < G.lanes; k++) {
+            int l = pad_lane(k);
+            uint32_t c = lane_colour[lane_art(l)];
+            bool down = G.held & (1u << l);
+            gfx_rect_grad(k * w + 3, SCREEN_H - h, w - 6, h, ALPHA(c, down ? 150 : 40), ALPHA(c, down ? 235 : 120));
+            gfx_rect(k * w + 3, SCREEN_H - h, w - 6, 4, ALPHA(c, 255));
+        }
+        gfx_rect(SCREEN_W - 96, 8, 88, 44, RGBA(0, 0, 0, 120));
+        font_draw(res.ui, "PAUSE", SCREEN_W - 52, 18, 20, RGBA(240, 240, 240, 230), ALIGN_CENTER);
+        if (G.sp >= 0.5f && !G.sp_active) {
+            float b = 0.7f + 0.3f * sinf(t * 8);
+            gfx_rect(8, 8, 150, 44, RGBA(40, 150, 255, (int)(190 * b)));
+            font_draw(res.ui, "STAR POWER", 83, 18, 20, WHITE, ALIGN_CENTER);
+        }
+    }
     if (cfg.hit_ratings && !G.vocal && !G.paused && G.t - G.rate_t < 0.5 && G.t - G.rate_t >= 0) {
         // the last hit's rating just below the strikeline, where it never covers a note on its way in
         static const char * const rn[4] = {"PERFECT", "GREAT", "GOOD", "MISS"};
