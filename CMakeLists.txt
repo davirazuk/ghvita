@@ -116,8 +116,18 @@ else()
     else()
         set(GHV_GL_LIB GL)
     endif()
-    target_link_libraries(ghvita ${SDL2_LIBRARIES} ${GHV_GL_LIB} z
-        ${L}/libcurl.so.4 ${L}/libarchive.so.13
-        ${L}/libopusfile.so.0 ${L}/libopus.so.0 ${L}/libmpg123.so.0
-        ${L}/libvorbisfile.so.3 ${L}/libvorbis.so.0 ${L}/libogg.so.0 pthread m)
+    # with the -dev packages installed (the Linux workflow), pkg-config finds them; else the libraries by their names
+    find_package(PkgConfig)
+    if(PKG_CONFIG_FOUND)
+        pkg_check_modules(DEPS libcurl libarchive opusfile opus vorbisfile vorbis ogg libmpg123)
+    endif()
+    if(DEPS_FOUND)
+        target_include_directories(ghvita PRIVATE ${DEPS_INCLUDE_DIRS})
+        target_link_libraries(ghvita ${SDL2_LIBRARIES} ${GHV_GL_LIB} z ${DEPS_LIBRARIES} pthread m)
+    else()
+        target_link_libraries(ghvita ${SDL2_LIBRARIES} ${GHV_GL_LIB} z
+            ${L}/libcurl.so.4 ${L}/libarchive.so.13
+            ${L}/libopusfile.so.0 ${L}/libopus.so.0 ${L}/libmpg123.so.0
+            ${L}/libvorbisfile.so.3 ${L}/libvorbis.so.0 ${L}/libogg.so.0 pthread m)
+    endif()
 endif()
