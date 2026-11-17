@@ -1045,11 +1045,11 @@ static bool fetch_page(int site, const char * query, int page, DlHit ** out, int
         const char * headers[] = {"Content-Type: application/json", NULL};
         if (deep && query[0]) {
             // the filtered search has no words of its own ("search" is ignored there: every chart came back): the
-            // words asked for as the song's name, then as its artist, the two lists one, each chart once
-            static const char * fields[2] = {"name", "artist"};
-            for (int f = 0; f < 2; f++) {
-                if (f == 1 && flat.artist[0])
-                    break;              // the artist filter has that field already
+            // words asked for as the song's name, its artist and its charter, the lists one, each chart once
+            static const char * fields[3] = {"name", "artist", "charter"};
+            for (int f = 0; f < 3; f++) {
+                if ((f == 1 && flat.artist[0]) || (f == 2 && flat.charter[0]))
+                    continue;           // that filter has the field already
                 char words[500];
                 snprintf(words, sizeof(words), ",\"%s\":{\"value\":\"%s\",\"exact\":false,\"exclude\":false}", fields[f], q);
                 char post2[1900];
