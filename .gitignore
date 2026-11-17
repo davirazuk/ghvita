@@ -22,6 +22,7 @@ vita/sce_sys/**/*.png
 
 # the Android build: what its workflow copies in and what gradle leaves
 android/app/src/main/assets/
+android/app/src/main/res/mipmap-*/
 android/app/src/main/java/org/libsdl/
 android/.gradle/
 android/app/.cxx/

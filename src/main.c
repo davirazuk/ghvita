@@ -3025,7 +3025,7 @@ static void song_list(void)
     if (!n) {
         font_draw_shadow(res.ui, find_text[0] ? "No song matches that" : "No songs here", 304, 240, 30,
                          RGBA(240, 235, 225, 255), ALIGN_CENTER);
-        font_draw(res.ui, find_text[0] ? "Circle clears the search" : "Select changes what's shown", 304, 282, 22,
+        font_draw(res.ui, find_text[0] ? (touch_only ? "BACK clears the search" : "Circle clears the search") : "Select changes what's shown", 304, 282, 22,
                   RGBA(190, 190, 190, 255), ALIGN_CENTER);
     }
     // the heading a jump landed on
@@ -3083,7 +3083,7 @@ static void song_list(void)
         gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(0, 0, 0, 200));
         font_draw(res.ui, "Delete this song from the card?", SCREEN_W / 2, 200, 34, WHITE, ALIGN_CENTER);
         font_draw_fit(res.ui, s->name, SCREEN_W / 2, 250, 30, 800, RGBA(255, 220, 140, 255), ALIGN_CENTER);
-        font_draw(res.ui, "Cross delete   Circle keep", SCREEN_W / 2, 310, 26, RGBA(220, 220, 230, 255), ALIGN_CENTER);
+        font_draw(res.ui, touch_only ? "Tap Delete or Keep below" : "Cross delete   Circle keep", SCREEN_W / 2, 310, 26, RGBA(220, 220, 230, 255), ALIGN_CENTER);
     }
     if (dl_typing)
         kb_draw();
@@ -3997,7 +3997,7 @@ static void replays_screen(void)
         font_draw_fit(res.ui, right, 856, y + 2, 24, 480, c, ALIGN_RIGHT);
     }
     if (rl_del)
-        font_draw_shadow(res.ui, "Delete this replay?  X yes   O no", SCREEN_W / 2, 446, 24, RGBA(255, 140, 120, 255),
+        font_draw_shadow(res.ui, touch_only ? "Delete this replay? Tap yes or no below" : "Delete this replay?  X yes   O no", SCREEN_W / 2, 446, 24, RGBA(255, 140, 120, 255),
                          ALIGN_CENTER);
     static const char * const help[] = {"btn_cross", "Watch", "btn_square", "Delete", "btn_circle", "Back"};
     help_bar(help, rl_n ? 6 : 0);
@@ -5147,7 +5147,7 @@ static void option_text(int i, char * name, char * value, size_t n)
         else
             snprintf(value, n, "All %d", shrink_seen);
         break;
-    case O_RESET: strcpy(name, "Reset settings"); snprintf(value, n, "%s", opt_reset_armed ? "Press X again" : ""); break;
+    case O_RESET: strcpy(name, "Reset settings"); snprintf(value, n, "%s", opt_reset_armed ? (touch_only ? "Tap again" : "Press X again") : ""); break;
     }
 }
 

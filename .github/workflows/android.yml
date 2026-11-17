@@ -34,6 +34,21 @@ jobs:
           cp -r "$GITHUB_WORKSPACE/assets/." "$GITHUB_WORKSPACE/android/app/src/main/assets/ghv/"
           find "$GITHUB_WORKSPACE/android/app/src/main/assets/ghv" -type f | wc -l
 
+      - name: The app's icon, from the Vita's LiveArea icon, at every screen density
+        run: |
+          pip install -q --break-system-packages pillow
+          python3 - <<'PY'
+          import os
+          from PIL import Image
+          src = '/tmp/last/x/sce_sys/icon0.png'
+          im = Image.open(src).convert('RGBA')
+          for d, px in (('mdpi', 48), ('hdpi', 72), ('xhdpi', 96), ('xxhdpi', 144), ('xxxhdpi', 192)):
+              out = 'android/app/src/main/res/mipmap-%s' % d
+              os.makedirs(out, exist_ok=True)
+              im.resize((px, px), Image.LANCZOS).save(out + '/ic_launcher.png')
+          print('icons made from', src, im.size)
+          PY
+
       - name: SDL2's source and its Java side
         run: |
           curl -sSL -o /tmp/sdl.tar.gz https://github.com/libsdl-org/SDL/releases/download/release-$SDL_VERSION/SDL2-$SDL_VERSION.tar.gz
