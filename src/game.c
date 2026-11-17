@@ -4138,7 +4138,9 @@ static uint32_t strum_presses(const Pad * pad, uint32_t pressed, uint32_t lanes,
             continue;
         uint32_t nf = n->frets & 0x1f;
         bool open = n->frets & FRET_OPEN;
-        bool fret_only = (n->flags & NOTE_TAP) != 0;    // a tapped note; everything else wants its strum
+        // a tapped note plays on the fret; a hammer-on too, as long as the note before it was hit (missed, it wants
+        // its strum like any other)
+        bool fret_only = (n->flags & NOTE_TAP) != 0 || ((n->flags & NOTE_HOPO) && i > 0 && G.state[i - 1] == HIT && G.streak > 0);
         if (strum) {
             bool plays;
             if (open)
