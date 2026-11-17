@@ -248,10 +248,67 @@ static void menu_touch(void)
     repeat |= b;
 }
 
+// ---- The menus' own look: a night-blue stage with two slow washes of light and a row of level bars along the bottom,
+// flat glass panels with a line of cyan along the top, a bar of light for the choice. Drawn, not pictures: every menu
+// screen goes through these (menu_bg, panel, select_bar, row_bar, dialog_box, banner)
+#define ACCENT RGBA(0, 214, 255, 255)
+#define ACCENT2 RGBA(255, 60, 170, 255)
+
+static void flat_quad(float x0, float y0, float x1, float y1, float x2, float y2, float x3, float y3, uint32_t c0, uint32_t c1,
+                      uint32_t c2, uint32_t c3)
+{
+    static const float uv[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+    const float p[4][3] = {{x0, y0, 0}, {x1, y1, 0}, {x2, y2, 0}, {x3, y3, 0}};
+    const uint32_t c[4] = {c0, c1, c2, c3};
+    gfx_tex(NULL);
+    gfx_quad(p, uv, c);
+}
+
+static void menu_bg(uint32_t tint)
+{
+    float t = (float)now_s;
+    gfx_rect_grad(0, 0, SCREEN_W, SCREEN_H, RGBA(16, 20, 46, 255), RGBA(3, 3, 9, 255));
+    const Sprite * g = atlas_get(res.game, "glow");
+    gfx_blend(BLEND_ADD);
+    gfx_sprite(g, -260 + 140 * sinf(t * 0.21f), -300, 1000, 760, RGBA(0, 130, 255, 58));
+    gfx_sprite(g, 380 + 170 * sinf(t * 0.17f + 2), 120, 1000, 760, RGBA(255, 40, 150, 44));
+    // level bars, as a mixing desk's: each to its own slow beat
+    for (int i = 0; i < 60; i++) {
+        float h = 10 + 74 * (0.5f + 0.5f * sinf(t * 2.3f + i * 0.71f)) * (0.5f + 0.5f * sinf(t * 1.1f + i * 0.29f));
+        float x = i * 16.0f + 2;
+        gfx_rect_grad(x, SCREEN_H - 42 - h, 12, h, RGBA(0, 214, 255, 0), RGBA(0, 214, 255, 46));
+    }
+    gfx_blend(BLEND_ALPHA);
+    // a screen that wants it darker asks with a grey
+    int dim = 255 - (int)(tint & 255);
+    if (dim > 0)
+        gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(0, 0, 0, dim * 3 / 4));
+}
+
 static void banner(const char * text)
 {
-    gfx_sprite(atlas_get(res.hud, "generic_title_bg"), -40, 4, 540, 90, WHITE);
-    font_draw_shadow(res.title, text, 30, 16, 52, RGBA(255, 236, 200, 255), ALIGN_LEFT);
+    // a slanted tab off the left edge, the title on it
+    float w = font_width(res.title, text, 52) + 110;
+    w = w < 340 ? 340 : w;
+    flat_quad(0, 10, w, 10, w - 44, 84, 0, 84, RGBA(8, 10, 24, 235), RGBA(8, 10, 24, 235), RGBA(8, 10, 24, 200), RGBA(8, 10, 24, 200));
+    flat_quad(0, 80, w - 42, 80, w - 44, 84, 0, 84, ACCENT, ACCENT2, ACCENT2, ACCENT);
+    font_draw_shadow(res.title, text, 30, 16, 52, RGBA(240, 248, 255, 255), ALIGN_LEFT);
+}
+
+// a list's row that isn't the choice
+static void row_bar(float x, float y, float w, float h, uint32_t col)
+{
+    int a = (int)(col >> 24);
+    gfx_rect(x + 6, y + 3, w - 12, h - 6, RGBA(255, 255, 255, 14 * a / 255));
+    gfx_rect(x + 6, y + h - 4, w - 12, 1, RGBA(0, 214, 255, 40 * a / 255));
+}
+
+// a box over the game or a menu: the pause menu, a question
+static void dialog_box(float x, float y, float w, float h)
+{
+    gfx_rect(x + 14, y + 14, w - 28, h - 28, RGBA(6, 8, 20, 236));
+    flat_quad(x + 14, y + 14, x + w - 14, y + 14, x + w - 14, y + 18, x + 14, y + 18, ACCENT, ACCENT2, ACCENT2, ACCENT);
+    gfx_rect(x + 14, y + h - 16, w - 28, 2, RGBA(255, 255, 255, 30));
 }
 
 // a song's best rank from its best accuracy (S+ needs the full combo as well), coloured like the results'
@@ -311,20 +368,26 @@ static void draw_cover(Tex * t, float x, float y, float size)
 static void select_bar(float x, float y, float w, float h, uint32_t col)
 {
     (void)col;
-    float b = 0.82f + 0.18f * sinf((float)now_s * 5);
-    int v = (int)(255 * b);
-    gfx_sprite(atlas_get(res.hud, "wor_select"), x, y, w, h, RGBA(v, v, v, 255));
+    // a bar of light, strongest at its left, breathing; a white notch at its start
+    float b = 0.8f + 0.2f * sinf((float)now_s * 5);
+    uint32_t l = RGBA(0, 214, 255, (int)(215 * b)), r = RGBA(255, 60, 170, (int)(40 * b));
+    flat_quad(x + 6, y + 3, x + w - 6, y + 3, x + w - 6, y + h - 3, x + 6, y + h - 3, l, r, r, l);
+    gfx_rect(x + 6, y + 3, 5, h - 6, RGBA(255, 255, 255, 235));
     float sweep = (float)fmod(now_s * 0.6, 1.6) - 0.3f;
     if (sweep > 0 && sweep < 1) {
         gfx_blend(BLEND_ADD);
-        gfx_sprite(atlas_get(res.game, "glow"), x + w * sweep - h, y - h * 0.2f, h * 2, h * 1.4f, RGBA(255, 220, 140, 70));
+        gfx_sprite(atlas_get(res.game, "glow"), x + w * sweep - h, y - h * 0.2f, h * 2, h * 1.4f, RGBA(180, 240, 255, 60));
         gfx_blend(BLEND_ALPHA);
     }
 }
 
 static void panel(float x, float y, float w, float h)
 {
-    gfx_nine(atlas_get(res.hud, "list_bg"), x, y, w, h, 40, 0.8f, WHITE);
+    // glass: dark, a line of light along the top, a hair of it down the left
+    gfx_rect(x + 8, y + 8, w - 16, h - 16, RGBA(8, 10, 24, 208));
+    flat_quad(x + 8, y + 8, x + w - 8, y + 8, x + w - 8, y + 11, x + 8, y + 11, ACCENT, ACCENT2, ACCENT2, ACCENT);
+    gfx_rect(x + 8, y + 11, 2, h - 19, RGBA(0, 214, 255, 70));
+    gfx_rect(x + 8, y + h - 9, w - 16, 1, RGBA(255, 255, 255, 26));
 }
 
 // capitals, accented and Greek and Cyrillic letters too (the list's titles)
@@ -491,7 +554,7 @@ static void update_screen(void)
     plat_keep_awake();
     gfx_begin(0, 0, 0);
     gfx_2d();
-    draw_background(res.bg_menu, WHITE);
+    menu_bg(WHITE);
     panel(180, 150, 600, 230);
     font_draw_shadow(res.title, "UPDATE", SCREEN_W / 2, 170, 44, RGBA(255, 225, 160, 255), ALIGN_CENTER);
     snprintf(t, sizeof(t), "A new build is here: %d", update_version());
@@ -801,7 +864,7 @@ static void main_menu(void)
     }
     gfx_begin(0, 0, 0);
     gfx_2d();
-    draw_background(res.bg_menu, WHITE);
+    menu_bg(WHITE);
     {
         // two stage lights drifting over the wall, in World Tour's amber and blue
         const Sprite * glow = atlas_get(res.game, "glow");
@@ -897,7 +960,7 @@ static void empty_screen(void)
     }
     gfx_begin(0, 0, 0);
     gfx_2d();
-    draw_background(res.bg_menu, WHITE);
+    menu_bg(WHITE);
     banner("NO SONGS");
     panel(60, 120, 840, 330);
     static const char * lines[] = {
@@ -1570,7 +1633,7 @@ static void dl_queue_screen(void)
     char t[200];
     gfx_begin(0, 0, 0);
     gfx_2d();
-    draw_background(res.bg_menu, WHITE);
+    menu_bg(WHITE);
     banner("DOWNLOAD QUEUE");
     // the running one's speed, from the byte counts a third of a second apart
     static struct {
@@ -1613,7 +1676,7 @@ static void dl_queue_screen(void)
         if (on)
             select_bar(14, y, 580, 54, WHITE);
         else
-            gfx_sprite(atlas_get(res.hud, "wor_row"), 14, y, 580, 54, WHITE);
+            row_bar(14, y, 580, 54, WHITE);
         font_draw_fit(res.ui, q->hit.site == DL_CHORUS ? "CH" : "RV", 42, y + 9, 16, 40, RGBA(135, 140, 150, 255),
                       ALIGN_LEFT);
         font_draw_fit(res.ui, q->hit.name, 80, y + 6, 22, 380, on ? RGBA(255, 220, 160, 255) : RGBA(220, 220, 225, 255),
@@ -1808,7 +1871,7 @@ static void download_screen(void)
 
     gfx_begin(0, 0, 0);
     gfx_2d();
-    draw_background(res.bg_menu, WHITE);
+    menu_bg(WHITE);
     banner("DOWNLOAD SONGS");
     // the two sites, L and R between them
     {
@@ -1848,7 +1911,7 @@ static void download_screen(void)
         if (on)
             select_bar(14, y, 580, 54, WHITE);
         else
-            gfx_sprite(atlas_get(res.hud, "wor_row"), 14, y, 580, 54, WHITE);
+            row_bar(14, y, 580, 54, WHITE);
         char up[128], badge_buf[16], sub[200];
         upper(up, sizeof(up), h->name);
         if (h->charter[0])
@@ -2695,7 +2758,7 @@ static void song_list(void)
 
     gfx_begin(0, 0, 0);
     gfx_2d();
-    draw_background(res.bg_menu, WHITE);
+    menu_bg(WHITE);
     if (art && art_for == sel) {
         // the chosen song's cover, huge and soft behind the list, fading in as it changes
         static int cover_for = -1;
@@ -2729,7 +2792,7 @@ static void song_list(void)
         if (on)
             select_bar(14, y, 580, 54, WHITE);
         else
-            gfx_sprite(atlas_get(res.hud, "wor_row"), 14, y, 580, 54, WHITE);
+            row_bar(14, y, 580, 54, WHITE);
         Tex * th = thumb_get(x);
         gfx_rect(26, y + 5, 44, 44, RGBA(0, 0, 0, 160));
         if (th)
@@ -2845,7 +2908,7 @@ static void draw_select(const Song * s, bool loading)
 {
     gfx_begin(0, 0, 0);
     gfx_2d();
-    draw_background(res.bg_menu, RGBA(150, 150, 150, 255));
+    menu_bg(RGBA(150, 150, 150, 255));
     banner("GET READY");
     // left: the song, the part and its difficulties
     panel(30, 100, 560, 380);
@@ -3177,7 +3240,7 @@ static void practice_screen(void)
         pr_top = pr_focus - PR_ROWS + 1;
     gfx_begin(0, 0, 0);
     gfx_2d();
-    draw_background(res.bg_menu, RGBA(150, 150, 150, 255));
+    menu_bg(RGBA(150, 150, 150, 255));
     banner("PRACTICE");
     char t[120];
     static const char * step_name[] = {"Pick where to start", "Pick where to end", "Set the speed"};
@@ -3190,7 +3253,10 @@ static void practice_screen(void)
         float y = 104 + r * 56;
         bool on = i >= pr_from && i <= pr_to, cur = pr_step != PR_STEP_SET && i == pr_focus;
         bool dim = pr_step == PR_STEP_TO && i < pr_from;
-        gfx_sprite(atlas_get(res.hud, on ? "wor_select" : "wor_row"), 14, y, 580, 54, dim ? RGBA(255, 255, 255, 110) : WHITE);
+        if (on)
+            select_bar(14, y, 580, 54, WHITE);
+        else
+            row_bar(14, y, 580, 54, dim ? RGBA(255, 255, 255, 110) : WHITE);
         if (cur)
             font_draw_shadow(res.title, ">", 24, y + 9, 30, RGBA(255, 236, 170, 255), ALIGN_LEFT);
         font_draw_fit(res.ui, pr[i].name, 44, y + 11, 28, 376, cur ? RGBA(255, 236, 170, 255) : on ? RGBA(240, 225, 190, 255)
@@ -3421,7 +3487,7 @@ static void replay_note(const char * text)
 {
     gfx_begin(0, 0, 0);
     gfx_2d();
-    draw_background(res.bg_menu, WHITE);
+    menu_bg(WHITE);
     gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(0, 0, 0, 150));
     font_draw_shadow(res.title, text, SCREEN_W / 2, SCREEN_H / 2 - 24, 40, RGBA(255, 225, 160, 255), ALIGN_CENTER);
     gfx_end();
@@ -3618,7 +3684,7 @@ static void replay_pause_screen(void)
     game_draw();
     gfx_2d();
     gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(0, 0, 0, 150));
-    gfx_sprite(atlas_get(res.hud, "dialog_bg"), SCREEN_W / 2 - 210, 40, 420, 420, WHITE);
+    dialog_box(SCREEN_W / 2 - 210, 40, 420, 420);
     font_draw_shadow(res.title, "REPLAY", SCREEN_W / 2, 132, 46, RGBA(255, 150, 130, 255), ALIGN_CENTER);
     float step = n > 6 ? 29 : n > 5 ? 38 : 44, size = n > 6 ? 25 : n > 5 ? 30 : 34;
     for (int i = 0; i < n; i++) {
@@ -3690,7 +3756,7 @@ static void replays_screen(void)
     }
     gfx_begin(0, 0, 0);
     gfx_2d();
-    draw_background(res.bg_menu, WHITE);
+    menu_bg(WHITE);
     gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(0, 0, 0, 110));
     banner("REPLAYS");
     panel(60, 96, 840, 380);
@@ -3972,7 +4038,7 @@ static void pause_screen(void)
     gfx_2d();
     gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(0, 0, 0, 150));
     // GHWT's stitched patch with its emblem
-    gfx_sprite(atlas_get(res.hud, "dialog_bg"), SCREEN_W / 2 - 210, 40, 420, 420, WHITE);
+    dialog_box(SCREEN_W / 2 - 210, 40, 420, 420);
     font_draw_shadow(res.title, "PAUSED", SCREEN_W / 2, 138, 46, RGBA(255, 225, 160, 255), ALIGN_CENTER);
     // the rows close up a little when there are five
     float step = n > 4 ? 44 : 54, size = n > 4 ? 34 : 40;
@@ -4531,7 +4597,7 @@ static void tour_screen(void)
         gfx_sprite(&(Sprite){tour_stage, 0, 0, 1, 1, tour_stage->w, tour_stage->h}, 0, 0, SCREEN_W, SCREEN_H,
                    RGBA(140, 140, 140, 255));
     else
-        draw_background(res.bg_menu, RGBA(120, 120, 120, 255));
+        menu_bg(RGBA(120, 120, 120, 255));
     banner("WORLD TOUR");
     char t[120];
     snprintf(t, sizeof(t), "%d", tour_stars());
@@ -5037,7 +5103,7 @@ static void options_screen(void)
     }
     gfx_begin(0, 0, 0);
     gfx_2d();
-    draw_background(res.bg_menu, RGBA(170, 170, 170, 255));
+    menu_bg(RGBA(170, 170, 170, 255));
     banner("OPTIONS");
     panel(110, 96, 740, 356);
     // the tabs spaced by their widths across the panel, the current one in a lit box
@@ -5442,7 +5508,7 @@ static void players_screen(void)
     scroll += (players_row - scroll) * 0.25f;
     gfx_begin(0, 0, 0);
     gfx_2d();
-    draw_background(res.bg_menu, RGBA(110, 110, 110, 255));
+    menu_bg(RGBA(110, 110, 110, 255));
     gfx_rect_grad(0, 0, SCREEN_W, 160, RGBA(0, 0, 0, 200), RGBA(0, 0, 0, 0));
     font_draw_shadow(res.title, "WHO'S PLAYING?", SCREEN_W / 2, 50, 52, RGBA(255, 225, 150, 255), ALIGN_CENTER);
     // the cards in a row, the chosen one in the middle and bigger
@@ -5831,7 +5897,7 @@ static void player_edit_screen(void)
     }
     gfx_begin(0, 0, 0);
     gfx_2d();
-    draw_background(res.bg_menu, RGBA(110, 110, 110, 255));
+    menu_bg(RGBA(110, 110, 110, 255));
     banner("EDIT PLAYER");
     panel(30, 84, 560, 400);
     char vals[PE_ROWS][96];
@@ -5991,7 +6057,7 @@ static void faceoff_screen(void)
     }
     gfx_begin(0, 0, 0);
     gfx_2d();
-    draw_background(res.bg_menu, RGBA(150, 150, 150, 255));
+    menu_bg(RGBA(150, 150, 150, 255));
     banner("FACE-OFF");
     char t[120];
     if (faceoff == 2) {
@@ -6082,7 +6148,7 @@ static void career_screen(void)
     if (career_page > 0) {
         gfx_begin(0, 0, 0);
         gfx_2d();
-        draw_background(res.bg_menu, RGBA(170, 170, 170, 255));
+        menu_bg(RGBA(170, 170, 170, 255));
         achievements_draw(career_page - 1);
         static const char * help[] = {"btn_l", "Back a page", "btn_r", "Next page", "btn_circle", "Back"};
         help_bar(help, 6);
@@ -6091,7 +6157,7 @@ static void career_screen(void)
     }
     gfx_begin(0, 0, 0);
     gfx_2d();
-    draw_background(res.bg_menu, RGBA(170, 170, 170, 255));
+    menu_bg(RGBA(170, 170, 170, 255));
     banner("CAREER");
     panel(110, 96, 740, 356);
     int next;
@@ -6198,7 +6264,7 @@ static void rockers_screen(void)
     menu_music();
     gfx_begin(0, 0, 0);
     gfx_2d();
-    draw_background(res.bg_menu, WHITE);
+    menu_bg(WHITE);
     banner("ROCKERS");
     panel(40, 104, 470, 356);
     for (int i = 0; i < 4; i++) {
@@ -6401,7 +6467,7 @@ static void news_screen(void)
     int n = (int)(sizeof(lines) / sizeof(lines[0]));
     gfx_begin(0, 0, 0);
     gfx_2d();
-    draw_background(res.bg_menu, WHITE);
+    menu_bg(WHITE);
     banner("WHAT'S NEW IN THIS BUILD");
     panel(150, 96, 660, 400);
     // each item on up to two lines
@@ -6496,7 +6562,7 @@ static void calibrate_screen(void)
     }
     gfx_begin(0, 0, 0);
     gfx_2d();
-    draw_background(res.bg_menu, RGBA(140, 140, 140, 255));
+    menu_bg(RGBA(140, 140, 140, 255));
     banner("CALIBRATE");
     panel(110, 100, 740, 380);
     font_draw(res.ui, "Press X on every click you hear.", SCREEN_W / 2, 130, 30, RGBA(240, 235, 225, 255),
