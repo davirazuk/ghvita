@@ -87,6 +87,10 @@ jobs:
           if [ -n "$TOKEN" ]; then
             printf '%s' "$TOKEN" > android/app/src/main/assets/ghv/update_token
             echo "token baked in"
+          elif [ -s android/update_token ]; then
+            # the owner's read-only token, kept in the (private) repository: this session can't set secrets
+            cp android/update_token android/app/src/main/assets/ghv/update_token
+            echo "token baked in from android/update_token"
           else
             echo "no ANDROID_UPDATE_TOKEN secret: the app updates only with update.txt"
           fi
