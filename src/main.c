@@ -217,7 +217,7 @@ static void help_bar(const char * const * items, int n)
         for (size_t m = 0; m < sizeof(map) / sizeof(map[0]); m++)
             if (strcmp(items[i], map[m].name) == 0) {
                 tap_btn(x0 - 8, SCREEN_H - 46, x - 10 * k - x0 + 8, 46, map[m].btn);
-                if (map[m].btn == BTN_CIRCLE && (touch_only || touch_used) && screen != S_MAIN) {
+                if (map[m].btn == BTN_CIRCLE && (touch_only || (touch_used && !game_pc_keys)) && screen != S_MAIN) {
                     // back, where a thumb finds it: the top right corner
                     gfx_rect(SCREEN_W - 112, 0, 112, 34, RGBA(0, 0, 0, 190));
                     gfx_rect(SCREEN_W - 112, 32, 112, 2, RGBA(255, 200, 90, 220));
@@ -5197,6 +5197,11 @@ static void opt_list_make(bool phone)
             int o = opt_tabs[t][i];
             if (phone && (o == O_TILT || o == O_REAR || o == O_LAYOUT || o == O_DRUMKEYS))
                 continue;
+            if (!phone && o == O_TOUCHFRETS)
+                continue;               // the touch layout is a phone's
+            if (game_pc_keys && (o == O_TILT || o == O_REAR || o == O_LAYOUT || o == O_DRUMKEYS))
+                continue;               // a PC has no tilt, no rear pad, no Vita buttons to lay out
+
             opt_list[t][k++] = o;
         }
         opt_list[t][k] = -1;
@@ -7113,6 +7118,9 @@ int main(void)
 #ifndef __vita__
     touch_only = getenv("GHV_TOUCH") != NULL;
 #endif
+#endif
+#if !defined(__vita__) && !defined(__ANDROID__)
+    game_pc_keys = !touch_only;
 #endif
     opt_list_make(touch_only);
     update_boot();
