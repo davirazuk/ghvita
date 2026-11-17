@@ -866,3 +866,7 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   re-run; only when run as an AppImage). update.c PC_TAG / PC_ASSET; version.txt beside each.
 - Linux: .github/workflows/linux.yml ([linux]) builds an AppImage on Ubuntu 22.04 with linuxdeploy; art inside,
   songs and saves in ~/GHVita (AppRun sets GHV_ASSETS / GHV_DATA).
+- PC typing: the search (and every keyboard prompt) takes the PC keyboard's typing (SDL text input), Enter searches,
+  Esc cancels; the on-screen keys stay for the mouse.
+- Mic stand: the bake puts it a step in front of the singer's middle (the place band3d.c centres them on) in every
+  frame; band3d.c leaves bones that never move out of its re-centring and gives the wilder loop the same stand.

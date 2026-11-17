@@ -77,6 +77,7 @@ def blended(clip, f, end):
 # the hips until the head is within SING_LEAN of over them; the hair, the hats and what hangs on the chest are bones of
 # the pelvis's in these models (Bone_ACC_*), so they're turned with it or they'd stay behind in the air
 SING_LEAN = 12.0
+STAND_AHEAD = 0.42       # the mic stand this far in front of the singer (toward the audience, -z)
 
 
 def straighten(rig, N):
@@ -1013,6 +1014,25 @@ def bake(path, work, tex_dir, alt=False):
         if i < JUMP:
             centre.append(rig.W[N['bone_pelvis']][:3, 3])
 
+    if role == 'vocalist' and 'Bone_Mic_Stand' in N and skins:
+        # the mic stand where the singer stands: the loops each leave it somewhere of their own (up to a metre off), and
+        # the game brings every frame's singer back over the frames' middle (band3d.c, by bone 1's place) while the stand
+        # stays in the loop's spot. So it's put a step in front of that middle in every frame, the same each time
+        # (band3d.c then leaves bones that never move out of its re-centring, and gives the wilder loop this stand)
+        mid = np.mean([sk[1][:3, 3] for sk in skins], axis=0)
+        sb = [N[b] for b in ('Bone_Mic_Stand', 'Bone_Mic_Adjust_Height', 'Bone_Mic_Adjust_Angle') if b in N]
+        joint = np.r_[rest[N['Bone_Mic_Stand']][:3, 3], 1.0]
+        for f, sk in enumerate(skins):
+            if alt is False and f >= JUMP:
+                continue                    # the jump hides it
+            at = (sk[N['Bone_Mic_Stand']] @ joint)[:3]
+            if np.abs(sk[N['Bone_Mic_Stand']][:3, :3]).sum() < 1e-6:
+                continue
+            T = np.eye(4)
+            T[0, 3] = mid[0] - at[0]
+            T[2, 3] = (mid[2] - STAND_AHEAD) - at[2]
+            for b in sb:
+                sk[b] = T @ sk[b]
     c = np.mean(centre, axis=0) if centre else np.zeros(3)
     if THREED:
         layers = None

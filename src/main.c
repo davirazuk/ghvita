@@ -1890,7 +1890,7 @@ static char sys_last[128];          // what it last had
 // after the game's keys: the phone's keyboard told what they typed, and put away when the typing's over
 static void kb_sync(void)
 {
-    if (!touch_only || !sys_on)
+    if (!(touch_only || game_pc_keys) || !sys_on)
         return;
     if (!dl_typing) {
         plat_text_end();
@@ -1903,8 +1903,9 @@ static void kb_sync(void)
 
 static void kb_update(void)
 {
-    // a phone: its own keyboard comes up too, and either one types (what one types the other is told)
-    if (touch_only) {
+    // a phone: its own keyboard comes up too, and either one types (what one types the other is told); a PC: its
+    // keyboard types straight in (Enter searches, Esc cancels), the on-screen keys still there for the mouse
+    if (touch_only || game_pc_keys) {
         if (!sys_on) {
             plat_text_begin("Search", dl_typed);
             snprintf(sys_last, sizeof(sys_last), "%s", dl_typed);
@@ -1918,6 +1919,8 @@ static void kb_update(void)
         }
         if (r == 1)
             pressed |= BTN_START;
+        else if (r < 0 && game_pc_keys)
+            pressed |= BTN_CIRCLE;      // Esc
         else if (r < 0)
             sys_on = false;             // put away (Enter, or the phone's own way): the game's keys go on
     }
@@ -2021,7 +2024,8 @@ static void kb_draw(void)
         tap_key(bx[i] - 3, py - 4, bw[i] + 6, 62, KEY_SPACE + i);
     }
     if (!touch_only)
-        font_draw(res.ui, "Cross type   Square delete   Triangle space   Start search   Circle cancel", SCREEN_W / 2, 486, 18,
+        font_draw(res.ui, game_pc_keys ? "Type on your keyboard   Enter searches   Esc cancels"
+                                       : "Cross type   Square delete   Triangle space   Start search   Circle cancel", SCREEN_W / 2, 486, 18,
                   RGBA(220, 220, 230, 255), ALIGN_CENTER);
 }
 

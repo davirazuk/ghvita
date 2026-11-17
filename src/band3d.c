@@ -67,6 +67,7 @@ struct Band3D {
     bool have_prev, walking;
     float centre[2];            // where the loops' hips stand on average (x, z), each frame brought back over it
     bool centred;
+    bool still[256];            // bones that never move in the main loop's frames (the mic stand): kept out of that
     double prev_t;
     int palm, nfing;
     int32_t * fing;
@@ -321,10 +322,21 @@ Band3D * band3d_load(const char * name, int hue)
         }
         mx /= m->nframes;
         mz /= m->nframes;
+        // what never moves through the loops (the mic stand, put on the singer's mark by the bake) stays where it is
+        int still_n = m->nframes > 48 ? 48 : m->nframes;
+        for (int bn = 0; bn < m->nbones && bn < 256; bn++) {
+            bool still = bn != hb && still_n > 4;
+            for (int f = 1; f < still_n && still; f++)
+                for (int k = 0; k < 12 && still; k++)
+                    still = fabsf(m->mats[((size_t)f * m->nbones + bn) * 12 + k] - m->mats[(size_t)bn * 12 + k]) < 1e-4f;
+            m->still[bn] = still;
+        }
         for (int f = 0; f < m->nframes; f++) {
             float * F = m->mats + (size_t)f * m->nbones * 12;
             float ox = (float)(F[hb * 12 + 3] - mx) * 0.8f, oz = (float)(F[hb * 12 + 11] - mz) * 0.8f;
             for (int bn = 0; bn < m->nbones; bn++) {
+                if (m->still[bn] && f < still_n)
+                    continue;
                 F[bn * 12 + 3] -= ox;
                 F[bn * 12 + 11] -= oz;
             }
@@ -361,6 +373,10 @@ Band3D * band3d_load(const char * name, int hue)
                     float * F = m->alt + (size_t)f * m->nbones * 12;
                     float ox = (F[hb * 12 + 3] - m->centre[0]) * 0.8f, oz = (F[hb * 12 + 11] - m->centre[1]) * 0.8f;
                     for (int bn = 0; bn < m->nbones; bn++) {
+                        if (m->still[bn]) {
+                            memcpy(F + bn * 12, m->mats + (size_t)bn * 12, 12 * sizeof(float));    // the main loop's stand
+                            continue;
+                        }
                         F[bn * 12 + 3] -= ox;
                         F[bn * 12 + 11] -= oz;
                     }
