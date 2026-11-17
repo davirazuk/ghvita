@@ -780,3 +780,11 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   from -0.51 to +0.34 m (26 cm in one frame) and their mic-down loop stands at +0.6 m. band3d_load brings every frame
   of a model without fret-hand layers (singers, drummers) back over the loops' mean hip place, keeping 20% of the sway;
   the wilder loop the same.
+- Android auto-update: GHVitaActivity checks the "android" release in the background each start with the token in
+  Android/data/org.ghvita.app/files/update.txt (the repository is private), compares its version.txt (the commit
+  count, uploaded by the workflow) with the app's versionCode, downloads the APK and hands it to Android's installer
+  (FileProvider org.ghvita.app.files, REQUEST_INSTALL_PACKAGES, androidx.core).
+- Portrait (a phone held upright, the manifest's fullUser): plat_view puts the 960x544 picture across the top,
+  plat_below() is the rest in game units; gfx_below_begin/end draw there; in a song it's five tall fret columns
+  (the top 18% the open note / kick), touch_lane_at takes y past SCREEN_H there. Menus keep the picture at the top.
+  GHV_WINDOW=540x1100 GHV_SHOTWIN=1 tests it on the desktop.

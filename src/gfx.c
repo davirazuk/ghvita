@@ -600,6 +600,34 @@ int gfx_draw_calls(void)
     return draw_calls;
 }
 
+// drawing under the picture (a phone held upright): 960 across, `below` down, y from the picture's bottom edge
+void gfx_below_begin(float below)
+{
+#ifndef __vita__
+    gfx_flush();
+    int vx, vy, vw, vh, fw, fh;
+    plat_view(&vx, &vy, &vw, &vh, &fw, &fh);
+    glViewport(0, 0, fw, vy);
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glOrtho(0, SCREEN_W, below, 0, -1, 1);
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+#else
+    (void)below;
+#endif
+}
+
+void gfx_below_end(void)
+{
+#ifndef __vita__
+    gfx_flush();
+    int vx, vy, vw, vh, fw, fh;
+    plat_view(&vx, &vy, &vw, &vh, &fw, &fh);
+    glViewport(vx, vy, vw, vh);
+#endif
+}
+
 void gfx_2d(void)
 {
     gfx_flush();

@@ -75,3 +75,6 @@ void gfx_nine(const Sprite * s, float x, float y, float w, float h, float c, flo
 void mat_identity(float * m);
 void mat_perspective(float * m, float fovy_deg, float aspect, float znear, float zfar);
 void mat_lookat(float * m, const float eye[3], const float at[3], const float up[3]);
+
+void gfx_below_begin(float below);      // draw under the picture (a phone held upright), in its own 960 x below
+void gfx_below_end(void);

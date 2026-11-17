@@ -4422,6 +4422,16 @@ static int touch_lane_at(float x, float y)
     if (game_touch_pads) {
         if (G.lanes <= 0)
             return -1;
+        float below = plat_below();
+        if (below > 0) {
+            // held upright: the frets are the screen under the picture, five columns, its top fifth the open note / kick
+            if (y < SCREEN_H)
+                return -1;
+            if (open_bar() && y < SCREEN_H + below * 0.18f)
+                return LANE_OPEN;
+            int k = (int)(x / ((float)SCREEN_W / G.lanes));
+            return pad_lane(k < 0 ? 0 : k >= G.lanes ? G.lanes - 1 : k);
+        }
         float ox0, ox1, otop, oreach;
         pad_rect(0, &ox0, &ox1, &otop, &oreach);
         // the open bar: the top of the pads (on a table and with four fingers), right across
@@ -6037,9 +6047,42 @@ static void draw_timing_bar(void)
     }
 }
 
+// held upright: the frets under the picture, tall columns in the lanes' colours, a cup at the top of each, lit while
+// a finger's on it; the open note or the kick a bar across the top
+static void draw_portrait_pads(float below)
+{
+    gfx_below_begin(below);
+    gfx_rect_grad(0, 0, SCREEN_W, below, RGBA(14, 12, 20, 255), RGBA(4, 4, 8, 255));
+    float w = (float)SCREEN_W / G.lanes, top = open_bar() ? below * 0.18f : 0;
+    for (int k = 0; k < G.lanes; k++) {
+        int l = pad_lane(k);
+        uint32_t c = lane_colour[lane_art(l)];
+        bool down = G.held & (1u << l);
+        gfx_rect_grad(k * w + 6, top + 8, w - 12, below - top - 16, ALPHA(c, down ? 200 : 55), ALPHA(c, down ? 120 : 20));
+        gfx_rect(k * w + 6, top + 8, w - 12, 6, ALPHA(c, 255));
+        char nm[16];
+        snprintf(nm, sizeof(nm), "cup_%d", lane_art(l));
+        float d = w * 0.7f;
+        gfx_sprite(atlas_get(res.game, nm), k * w + (w - d) / 2, top + 30, d, d * 0.9f, down ? WHITE : RGBA(200, 200, 200, 230));
+    }
+    if (open_bar()) {
+        bool down = G.held & (1u << LANE_OPEN);
+        uint32_t c = lane_colour[6];
+        gfx_rect_grad(6, 6, SCREEN_W - 12, top - 10, ALPHA(c, down ? 220 : 70), ALPHA(c, down ? 160 : 40));
+        font_draw(res.ui, G.drums ? "KICK" : "OPEN", SCREEN_W / 2, top / 2 - 14, 28, WHITE, ALIGN_CENTER);
+    }
+    gfx_below_end();
+    gfx_2d();
+}
+
 static void draw_touch_pads(void)
 {
     float t = (float)G.t;
+    float below = plat_below();
+    if (below > 0 && game_touch_pads && !G.vocal && !G.view_mode && G.lanes > 0) {
+        draw_portrait_pads(below);
+        return;
+    }
     if (game_touch_pads && !G.vocal && !G.view_mode && G.lanes > 0) {
         // the frets as pads to play on: each lane's colour along the bottom, lit while a finger's on it; the two top
         // corners pause and set Star Power off
@@ -6125,7 +6168,7 @@ static void draw_hud(void)
         // (placed as World Tour's footage has it: against the highway's left rail, the plates tucked just under it)
         // touch pads along the bottom (Fingers) or the left thumb's buttons in its corner (Thumbs): the group goes up out of
         // their way
-        const float lift = !game_touch_pads || G.vocal ? 0 : cfg.touch_frets == 1 ? 210 : 100;   // (Fingers: over its pads)
+        const float lift = !game_touch_pads || G.vocal || plat_below() > 0 ? 0 : cfg.touch_frets == 1 ? 210 : 100;   // (Fingers: over its pads)
         const float bar_x = 72, bar_w = 188, bar_y = 413 - lift, bar_h = 36;  // the score bar's leather, on the screen
         const float cnt_w = 174, cnt_h = 32, cnt_y = bar_y + bar_h + 2;
         const float k = 0.73f, ks = k / 0.6f;                                // the dome's 256x256 texture

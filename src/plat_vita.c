@@ -557,3 +557,8 @@ int plat_battery(bool * charging)
         *charging = scePowerIsBatteryCharging();
     return pct >= 0 && pct <= 100 ? pct : -1;
 }
+
+float plat_below(void)
+{
+    return 0;
+}

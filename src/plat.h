@@ -36,6 +36,9 @@ bool plat_poll(Pad * pad);
 void plat_swap(void);
 // where the 960x544 picture sits in the window (pixels, from the bottom left), and the window's size (not the Vita's)
 void plat_view(int * x, int * y, int * w, int * h, int * full_w, int * full_h);
+// a phone held upright: the screen under the picture, in the game's units (960 across); 0 otherwise. A finger there
+// comes in with y past SCREEN_H
+float plat_below(void);
 // a frame not drawn (30 fps): its time passes as if it were shown, nothing new goes on the screen
 void plat_skip_frame(void);
 // 30 fps in songs: a drawn frame every second refresh, a frame only read (plat_skip_frame) between. The swap doesn't

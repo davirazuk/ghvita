@@ -59,11 +59,22 @@ void plat_view(int * x, int * y, int * w, int * h, int * full_w, int * full_h)
         vw = win_h * SCREEN_W / SCREEN_H;
     }
     *x = (win_w - vw) / 2;
-    *y = (win_h - vh) / 2;
+    // held upright (a phone in portrait): the picture across the top, the rest of the screen under it for the frets
+    // (plat_below); on its side, in the middle
+    *y = win_h > win_w ? win_h - vh : (win_h - vh) / 2;
     *w = vw;
     *h = vh;
     *full_w = win_w;
     *full_h = win_h;
+}
+
+// the screen under the picture in the game's units (its 960 across): 0 on its side
+float plat_below(void)
+{
+    if (win_h <= win_w || win_w <= 0)
+        return 0;
+    int vh = win_w * SCREEN_H / SCREEN_W;
+    return (float)(win_h - vh) * SCREEN_W / win_w;
 }
 
 // a place in the window (0..1 across and down) as the game's pixels
@@ -174,7 +185,7 @@ void plat_init(void)
         load_script(e);
     SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");          // fingers are fingers, not a mouse as well
     SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
-    SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
+    SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight Portrait");
     SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER);
 #ifdef __ANDROID__
     // the art is unpacked into the app's own storage by GHVitaActivity before this runs; songs and saves go where a
@@ -714,6 +725,24 @@ void plat_screenshot(const char * name)
 {
     static unsigned char px[SCREEN_W * SCREEN_H * 3];
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    if (getenv("GHV_SHOTWIN")) {
+        // tests: the whole window, whatever its shape
+        int ww = win_w, wh = win_h;
+        unsigned char * all = malloc((size_t)ww * wh * 4);
+        glReadPixels(0, 0, ww, wh, GL_RGBA, GL_UNSIGNED_BYTE, all);
+        char p2[700];
+        snprintf(p2, sizeof(p2), "%s/%s.ppm", shot_dir, name);
+        FILE * o = fopen(p2, "wb");
+        if (o) {
+            fprintf(o, "P6\n%d %d\n255\n", ww, wh);
+            for (int y = wh - 1; y >= 0; y--)
+                for (int x = 0; x < ww; x++)
+                    fwrite(all + ((size_t)y * ww + x) * 4, 1, 3, o);
+            fclose(o);
+        }
+        free(all);
+        return;
+    }
     if (win_w != SCREEN_W || win_h != SCREEN_H)
         return;                 // shots are of the picture at its own size
 #ifdef GHV_ES

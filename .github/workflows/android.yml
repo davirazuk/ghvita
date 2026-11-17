@@ -96,5 +96,6 @@ jobs:
       - name: Publish as the "android" pre-release
         run: |
           gh release view android >/dev/null 2>&1 || gh release create android --prerelease --title "GH Vita for Android" --notes "The Android build of GH Vita (sideload the APK). Rebuilt by the Android workflow; not the Vita's update."
-          gh release upload android GHVita-android.apk --clobber
+          echo $(git rev-list --count HEAD) > version.txt
+          gh release upload android GHVita-android.apk version.txt --clobber
           gh release edit android --prerelease --notes "The Android build of GH Vita, build $(git rev-list --count HEAD) ($(git rev-parse --short HEAD)). Sideload GHVita-android.apk. Songs and saves live in Android/data/org.ghvita.app/files."
