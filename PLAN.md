@@ -776,3 +776,7 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 - The stars and the Star Power bar under the plates are gone (not World Tour's; the user hated them).
 - band3d pose easing only on jumps (any bone over 6 cm a frame: a loop change), and a floor step over 12 cm is walked
   until it's within 1 cm: easing every frame made the singer soft and late.
+- The singer flicking left and right (the user, 2026-11-17): vocalist and vocalist_3's singing loop wanders the hips
+  from -0.51 to +0.34 m (26 cm in one frame) and their mic-down loop stands at +0.6 m. band3d_load brings every frame
+  of a model without fret-hand layers (singers, drummers) back over the loops' mean hip place, keeping 20% of the sway;
+  the wilder loop the same.

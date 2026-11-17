@@ -65,6 +65,8 @@ struct Band3D {
     // is a jump, which showed as snapping arms and a singer skipping across the stage
     float prev[256][12], root_s[3];
     bool have_prev, walking;
+    float centre[2];            // where the loops' hips stand on average (x, z), each frame brought back over it
+    bool centred;
     double prev_t;
     int palm, nfing;
     int32_t * fing;
@@ -306,6 +308,31 @@ Band3D * band3d_load(const char * name, int hue)
         gfx_load_hue(0);
         return NULL;
     }
+    // On their mark: some of World Tour's singing loops wander 85 cm across the stage and back, 26 cm in a single frame,
+    // and the mic-down loop stands somewhere else again: the singer flicked left and right. Every frame is brought back
+    // over the loops' middle, keeping a fifth of the sway (the guitars' fret-hand layers are made from their frames, so
+    // a model with them is left as it is)
+    if (!m->lbones && m->nframes > 1) {
+        int hb = 1 < m->nbones ? 1 : 0;
+        double mx = 0, mz = 0;
+        for (int f = 0; f < m->nframes; f++) {
+            mx += m->mats[((size_t)f * m->nbones + hb) * 12 + 3];
+            mz += m->mats[((size_t)f * m->nbones + hb) * 12 + 11];
+        }
+        mx /= m->nframes;
+        mz /= m->nframes;
+        for (int f = 0; f < m->nframes; f++) {
+            float * F = m->mats + (size_t)f * m->nbones * 12;
+            float ox = (float)(F[hb * 12 + 3] - mx) * 0.8f, oz = (float)(F[hb * 12 + 11] - mz) * 0.8f;
+            for (int bn = 0; bn < m->nbones; bn++) {
+                F[bn * 12 + 3] -= ox;
+                F[bn * 12 + 11] -= oz;
+            }
+        }
+        m->centre[0] = (float)mx;
+        m->centre[1] = (float)mz;
+        m->centred = true;
+    }
     // the far body, when there is one
     snprintf(path, sizeof(path), "%sband3d/far/%s.b3d", plat_asset_dir(), name);
     d = read_all(path, &size);
@@ -327,6 +354,18 @@ Band3D * band3d_load(const char * name, int hue)
             m->alt = malloc(ab);
             memcpy(m->alt, d + 28, ab);
             m->alt_frames = head[1];
+            if (m->centred) {
+                // the wilder loop on the same mark
+                int hb = 1 < m->nbones ? 1 : 0;
+                for (int f = 0; f < m->alt_frames; f++) {
+                    float * F = m->alt + (size_t)f * m->nbones * 12;
+                    float ox = (F[hb * 12 + 3] - m->centre[0]) * 0.8f, oz = (F[hb * 12 + 11] - m->centre[1]) * 0.8f;
+                    for (int bn = 0; bn < m->nbones; bn++) {
+                        F[bn * 12 + 3] -= ox;
+                        F[bn * 12 + 11] -= oz;
+                    }
+                }
+            }
             if (m->lbones)
                 read_layers(m, d, size, 28 + (long)ab, head + 2, 1);
         }
