@@ -1479,6 +1479,27 @@ static void draw_cine_back(double beat, float pulse)
                 float a = 0.07f + 0.10f * tw + 0.12f * pulse * G.band_loud;
                 gfx_sprite(dot, bx - size / 2, by - size / 2, size, size, col3(i % 3 ? G.key_col : G.light_col, a));
             }
+            // the rig's beams through the haze, sweeping on the beat (a fan of them in Star Power and when it's loud),
+            // and a low wash of haze lit by them: the stage behind a close shot was standing still
+            const float uvq[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+            int beams = G.sp_active ? 7 : 3 + (int)(3 * G.band_loud);
+            float sweep = (float)beat * 3.14159265f / 2;
+            for (int i = 0; i < beams; i++) {
+                float ox = (i + 0.5f) / beams * (SCREEN_W + 240) - 120 - c.yaw * 520, oy = -30 - c.pitch * 260;
+                float ang = sinf(sweep + i * 1.7f) * 0.38f + (i & 1 ? 0.12f : -0.12f), len = 640;
+                float tx = ox + sinf(ang) * len, ty = oy + cosf(ang) * len, half0 = 7, half1 = 70 + 40 * G.band_loud;
+                float nx = cosf(ang), ny = -sinf(ang);
+                float a = (0.18f + 0.14f * pulse * G.band_loud) * (G.sp_active ? 1.4f : 1);
+                const float * bc = i % 3 == 1 ? G.light_col : G.key_col;
+                uint32_t top = col3(bc, fminf(a, 0.5f)), bottom = col3(bc, 0);
+                const float pq[4][3] = {{ox - nx * half0, oy - ny * half0, 0}, {ox + nx * half0, oy + ny * half0, 0},
+                                        {tx + nx * half1, ty + ny * half1, 0}, {tx - nx * half1, ty - ny * half1, 0}};
+                const uint32_t cq[4] = {top, top, bottom, bottom};
+                gfx_tex(NULL);
+                gfx_quad(pq, uvq, cq);
+            }
+            gfx_rect_grad(0, SCREEN_H * 0.55f, SCREEN_W, SCREEN_H * 0.45f, col3(G.key_col, 0),
+                          col3(G.key_col, 0.05f + 0.07f * G.band_loud));
             gfx_blend(BLEND_ALPHA);
         }
         return;
