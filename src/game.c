@@ -1219,11 +1219,20 @@ static bool cine_clear(int shot, int who, float side)
         cine_mark(who, at);
         at[1] += (cs->anchor == 0 ? (who ? 1.62f : 1.25f) : cs->anchor == 1 ? (who ? 1.32f : 1.0f) : (who ? 1.0f : 0.7f)) + cs->up;
     }
-    for (int end = 0; end < 2; end++) {
-        float yaw = -side * (end ? cs->yaw1 : cs->yaw0) * rad, pitch = (end ? cs->pitch1 : cs->pitch0) * rad;
+    // the move's start, middle and end; at each, a line to them and lines across the picture's middle (a lamp or an
+    // amp right by the lens fills half the screen though the line to their chest is clear)
+    for (int step = 0; step < 3; step++) {
+        float u = step * 0.5f;
+        float yaw = -side * (cs->yaw0 + (cs->yaw1 - cs->yaw0) * u) * rad, pitch = (cs->pitch0 + (cs->pitch1 - cs->pitch0) * u) * rad;
+        float vis = cs->vis0 + (cs->vis1 - cs->vis0) * u, wide = vis * SCREEN_W / SCREEN_H;
         float eye[3] = {at[0] + cs->dist * sinf(yaw) * cosf(pitch), at[1] + cs->dist * sinf(pitch), at[2] + cs->dist * cosf(yaw) * cosf(pitch)};
-        if (venue3d_blocked(G.venue3d, eye, at))
-            return false;
+        float rx = cosf(yaw), rz = -sinf(yaw);        // the picture's across, on the floor
+        static const float spots[5][2] = {{0, 0}, {-0.28f, 0}, {0.28f, 0}, {0, -0.3f}, {0, 0.25f}};
+        for (int k = 0; k < 5; k++) {
+            float to[3] = {at[0] + rx * spots[k][0] * wide, at[1] + spots[k][1] * vis, at[2] + rz * spots[k][0] * wide};
+            if (venue3d_blocked(G.venue3d, eye, to))
+                return false;
+        }
     }
     return true;
 }
@@ -1331,6 +1340,9 @@ static void cine_direct(double beat, bool solo)
     was_star = cine_star();
     if (!cut)
         return;
+#ifndef __vita__
+    int64_t chose0 = plat_now_us();
+#endif
     if (shot >= 0 && shot != CS_LINE) {
         // nobody there to cut to: you, or the stage
         if (!G.band[who] || !G.band3d[who])
@@ -1377,7 +1389,7 @@ static void cine_direct(double beat, bool solo)
         G.cine_side = side;
         G.cine_fade = 1;
 #ifndef __vita__
-        plat_log("cine: shot %d on %d at %.2f", shot, who, G.t);
+        plat_log("cine: shot %d on %d at %.2f (%.1f ms choosing)", shot, who, G.t, (plat_now_us() - chose0) / 1000.0);
 #endif
     }
 }

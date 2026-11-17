@@ -51,10 +51,31 @@ static char shot_dir[512] = ".";
 // brought back into those 960x544
 static int win_w = SCREEN_W, win_h = SCREEN_H;
 static bool portrait_song;      // plat_portrait_song
+static float menu_x0, menu_w = SCREEN_W;    // plat_menu_focus
+#define MENU_PAD 0.66f          // a menu held upright: the thumb pad under the picture, this much of the width tall
 
 void plat_view(int * x, int * y, int * w, int * h, int * full_w, int * full_h)
 {
     int vw = win_w, vh = win_w * SCREEN_H / SCREEN_W;
+    if (win_h > win_w && !portrait_song) {
+        // a menu held upright: the part of it that matters (its list) across the screen, bigger than the whole picture
+        // would be, over the thumb pad
+        float pad_h = win_w * MENU_PAD;
+        vw = (int)(win_w * SCREEN_W / menu_w);
+        vh = vw * SCREEN_H / SCREEN_W;
+        if (vh > win_h - pad_h) {
+            vh = (int)(win_h - pad_h);
+            vw = vh * SCREEN_W / SCREEN_H;
+        }
+        float shown = menu_w * vw / SCREEN_W;           // the focus's width on the screen
+        *x = (int)((win_w - shown) / 2 - menu_x0 * vw / SCREEN_W);
+        *y = (int)(pad_h + (win_h - pad_h - vh) / 2);
+        *w = vw;
+        *h = vh;
+        *full_w = win_w;
+        *full_h = win_h;
+        return;
+    }
     if (win_h > win_w && portrait_song) {
         // held upright in a song: the picture's middle (PORTRAIT_CROP off each side) as wide as the screen, bigger
         vw = win_w * SCREEN_W / (SCREEN_W - 2 * PORTRAIT_CROP);
@@ -85,6 +106,25 @@ void plat_view(int * x, int * y, int * w, int * h, int * full_w, int * full_h)
 void plat_portrait_song(bool on)
 {
     portrait_song = on;
+}
+
+void plat_menu_focus(float x0, float w)
+{
+    menu_w = w < 300 ? 300 : w > SCREEN_W ? SCREEN_W : w;
+    menu_x0 = x0 < 0 ? 0 : x0 > SCREEN_W - menu_w ? SCREEN_W - menu_w : x0;
+}
+
+float plat_menu_band(float * x0, float * w)
+{
+    *x0 = 0;
+    *w = SCREEN_W;
+    if (win_h <= win_w || win_w <= 0 || portrait_song)
+        return 0;
+    int x, y, vw, vh, fw, fh;
+    plat_view(&x, &y, &vw, &vh, &fw, &fh);
+    *x0 = -(float)x * SCREEN_W / vw;
+    *w = (float)win_w * SCREEN_W / vw;
+    return (float)y * SCREEN_W / vw;
 }
 
 // the screen under the picture in the game's units (its 960 across): 0 on its side, or in a menu

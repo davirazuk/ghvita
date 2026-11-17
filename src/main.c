@@ -217,6 +217,109 @@ static void help_bar(const char * const * items, int n)
 // nothing does nothing. A finger dragged up or down a list scrolls it (the choice follows, a row every 46 pixels) and a
 // flick carries on, slowing; dragged across, left and right. Two fingers at once are Back. In a song the notes have the
 // screen: only the top corners are taken, the right one pause, the left one Star Power
+// A menu on a phone held upright: the picture's list across the screen, bigger, and under it a thumb pad (a cross of
+// arrows on the left, OK and Back on the right) that presses as a finger lands and repeats while it's held: the rows
+// themselves are small to hit on a phone however big the picture gets
+static struct { float x, y, w, h; uint32_t btn; } nav[6];
+static int nav_n;
+
+static void nav_arrow(float cx, float cy, float r, int dir, uint32_t c)
+{
+    // a triangle pointing dir (0 up, 1 down, 2 left, 3 right), as a quad with two corners together
+    float p[4][3];
+    float ax = dir == 2 ? -1 : dir == 3 ? 1 : 0, ay = dir == 0 ? -1 : dir == 1 ? 1 : 0;
+    float px = -ay, py = ax;
+    p[0][0] = cx + ax * r;           p[0][1] = cy + ay * r;
+    p[1][0] = p[0][0];               p[1][1] = p[0][1];
+    p[2][0] = cx - ax * r * 0.6f + px * r * 0.85f; p[2][1] = cy - ay * r * 0.6f + py * r * 0.85f;
+    p[3][0] = cx - ax * r * 0.6f - px * r * 0.85f; p[3][1] = cy - ay * r * 0.6f - py * r * 0.85f;
+    for (int i = 0; i < 4; i++)
+        p[i][2] = 0;
+    const float uv[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+    const uint32_t cs[4] = {c, c, c, c};
+    gfx_tex(NULL);
+    gfx_quad(p, uv, cs);
+}
+
+static uint32_t nav_held;
+
+static void draw_menu_pad(bool show)
+{
+    nav_n = 0;
+    float bx, bw, below = plat_menu_band(&bx, &bw);
+    if (!show || below < 60)
+        return;
+    gfx_below_begin(below);
+    float ph = bw * 0.62f, top = below - ph - bw * 0.02f;
+    if (top < 0) {
+        ph += top;
+        top = 0;
+    }
+    gfx_rect_grad(bx, top - 10, bw, below - top + 10, RGBA(0, 0, 0, 0), RGBA(20, 14, 10, 255));
+    // the cross: three cells across and down
+    float c = fminf(ph / 3.2f, bw * 0.52f / 3), cx = bx + bw * 0.05f + c * 1.5f, cy = top + ph / 2;
+    static const int dirs[4] = {0, 1, 2, 3};
+    static const uint32_t btns[4] = {BTN_UP, BTN_DOWN, BTN_LEFT, BTN_RIGHT};
+    for (int k = 0; k < 4; k++) {
+        float ox = dirs[k] == 2 ? -c : dirs[k] == 3 ? c : 0, oy = dirs[k] == 0 ? -c : dirs[k] == 1 ? c : 0;
+        float x = cx + ox - c / 2, y = cy + oy - c / 2;
+        bool on = nav_held == btns[k];
+        gfx_rect(x + 3, y + 3, c - 6, c - 6, on ? RGBA(255, 150, 40, 235) : RGBA(52, 44, 38, 235));
+        gfx_rect(x + 3, y + 3, c - 6, 4, RGBA(255, 255, 255, on ? 120 : 40));
+        nav_arrow(cx + ox, cy + oy, c * 0.24f, dirs[k], on ? RGBA(30, 20, 10, 255) : RGBA(240, 225, 200, 255));
+        nav[nav_n].x = x;
+        nav[nav_n].y = y;
+        nav[nav_n].w = c;
+        nav[nav_n].h = c;
+        nav[nav_n++].btn = btns[k];
+    }
+    gfx_rect(cx - c / 2 + 3, cy - c / 2 + 3, c - 6, c - 6, RGBA(40, 34, 30, 235));
+    // OK, big, lower right under the thumb; Back above it
+    float rw = bw * 0.34f, rx = bx + bw * 0.95f - rw;
+    float okh = ph * 0.52f, oky = top + ph - okh, bkh = ph * 0.34f, bky = top;
+    bool ok_on = nav_held == BTN_CROSS, bk_on = nav_held == BTN_CIRCLE;
+    gfx_rect_grad(rx, oky, rw, okh, ok_on ? RGBA(255, 190, 80, 255) : RGBA(236, 120, 30, 245),
+                  ok_on ? RGBA(230, 140, 40, 255) : RGBA(170, 70, 15, 245));
+    gfx_rect(rx, oky, rw, 4, RGBA(255, 255, 255, 90));
+    font_draw_shadow(res.title, "OK", rx + rw / 2, oky + okh / 2 - okh * 0.22f, okh * 0.42f, RGBA(255, 246, 225, 255), ALIGN_CENTER);
+    gfx_rect(rx, bky, rw, bkh, bk_on ? RGBA(120, 100, 90, 255) : RGBA(52, 44, 38, 235));
+    gfx_rect(rx, bky, rw, 4, RGBA(255, 255, 255, 40));
+    font_draw_shadow(res.title, "BACK", rx + rw / 2, bky + bkh / 2 - bkh * 0.24f, bkh * 0.46f, RGBA(235, 220, 200, 255), ALIGN_CENTER);
+    nav[nav_n].x = rx; nav[nav_n].y = oky; nav[nav_n].w = rw; nav[nav_n].h = okh; nav[nav_n++].btn = BTN_CROSS;
+    nav[nav_n].x = rx; nav[nav_n].y = bky; nav[nav_n].w = rw; nav[nav_n].h = bkh; nav[nav_n++].btn = BTN_CIRCLE;
+    gfx_below_end();
+}
+
+// what of the picture a menu held upright shows: its list's rows and a little round them, at least most of the
+// picture's height worth across (the whole picture when there's no list, or it has a keyboard up)
+static void menu_focus(bool snap)
+{
+    float x0 = 1e9f, x1 = -1e9f;
+    bool keys = false;
+    for (int i = 0; i < tap_item_count; i++) {
+        if (tap_items[i].kind == TAP_KEY)
+            keys = true;
+        if (tap_items[i].kind != TAP_ROW)
+            continue;
+        x0 = fminf(x0, tap_items[i].x);
+        x1 = fmaxf(x1, tap_items[i].x + tap_items[i].w);
+    }
+    float want_x = 0, want_w = SCREEN_W;
+    if (!keys && x1 > x0) {
+        want_w = fmaxf(x1 - x0 + 60, 640);
+        want_x = (x0 + x1) / 2 - want_w / 2;
+        if (want_w > SCREEN_W * 0.9f) {
+            want_w = SCREEN_W;
+            want_x = 0;
+        }
+    }
+    static float fx = 0, fw = SCREEN_W;
+    float k = snap ? 1 : 0.18f;
+    fx += (want_x - fx) * k;
+    fw += (want_w - fw) * k;
+    plat_menu_focus(fx, fw);
+}
+
 static void menu_touch(void)
 {
     static int id = -1;
@@ -246,6 +349,36 @@ static void menu_touch(void)
     }
     q_moves = 0;
     q_cross = false;
+    // the thumb pad under a menu held upright: pressed as the finger lands, the arrows repeating while it stays
+    static int nav_id = -1;
+    static double nav_next;
+    if (!playing && nav_id < 0 && id < 0 && pad.ntouch > 0 && pad.touch_y[0] > SCREEN_H)
+        for (int i = 0; i < nav_n; i++)
+            if (pad.touch_x[0] >= nav[i].x && pad.touch_x[0] <= nav[i].x + nav[i].w &&
+                pad.touch_y[0] - SCREEN_H >= nav[i].y && pad.touch_y[0] - SCREEN_H <= nav[i].y + nav[i].h) {
+                nav_id = pad.touch_id[0];
+                nav_held = nav[i].btn;
+                pressed |= nav_held;
+                repeat |= nav_held;
+                nav_next = now_s + 0.38;
+                touch_used = true;
+                break;
+            }
+    if (nav_id >= 0) {
+        bool still = false;
+        for (int i = 0; i < pad.ntouch; i++)
+            still |= pad.touch_id[i] == nav_id;
+        if (!still || playing) {
+            nav_id = -1;
+            nav_held = 0;
+        } else if ((nav_held & (BTN_UP | BTN_DOWN | BTN_LEFT | BTN_RIGHT)) && now_s >= nav_next) {
+            pressed |= nav_held;
+            repeat |= nav_held;
+            nav_next = now_s + 0.085;
+        }
+        tap_count = tap_item_count = 0;
+        return;
+    }
     int at = -1;
     for (int i = 0; i < pad.ntouch; i++)
         if (pad.touch_id[i] == id)
@@ -6951,6 +7084,12 @@ int main(void)
         case S_EMPTY: empty_screen(); break;
         case S_DOWNLOAD: download_screen(); break;
         case S_UPDATE: update_screen(); break;
+        }
+        {
+            // a phone held upright: the menu's list brought in close, the thumb pad under it
+            bool song = screen == S_PLAY || screen == S_PAUSE || screen == S_RESUME;
+            menu_focus(drawn != screen || screen_frames < 2);
+            draw_menu_pad(touch_only && !song && drawn == screen);
         }
         // a menu comes in out of black, quickly, rather than cutting (not the song and its pause: those stay instant)
         {

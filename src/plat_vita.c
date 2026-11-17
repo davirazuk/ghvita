@@ -567,3 +567,16 @@ void plat_portrait_song(bool on)
 {
     (void)on;
 }
+
+void plat_menu_focus(float x0, float w)
+{
+    (void)x0;
+    (void)w;
+}
+
+float plat_menu_band(float * x0, float * w)
+{
+    *x0 = 0;
+    *w = SCREEN_W;
+    return 0;
+}

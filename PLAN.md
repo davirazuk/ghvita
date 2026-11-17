@@ -810,3 +810,11 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   each finger is curled joint by joint (press_fingers) onto its string at its fret when its colour is down, or hovers
   just over it when up. The chart already drives which fingers and where along the neck; now it shows.
   Test hooks: GHV_HANDLOG=1 logs the fret hand's inputs each frame and each shot's name.
+
+- Camera: a shot is only taken if the venue leaves the picture clear: lines from the camera at the move's start,
+  middle and end to the subject and across the frame (left, right, up, down of them), so a lamp or an amp by the lens
+  no longer fills half the screen while the line to their chest was clear.
+- Phone held upright, menus: the picture zooms on the screen's list (its rows' stretch, at least 640 of the 960
+  across, panned smoothly) instead of a small strip with two thirds of the screen black, and under it a thumb pad: a
+  cross of arrows (pressed as the finger lands, repeating while held) and big OK / BACK (main.c draw_menu_pad,
+  menu_focus; plat_menu_focus / plat_menu_band). Songs keep their own portrait layout; landscape and the Vita as before.
