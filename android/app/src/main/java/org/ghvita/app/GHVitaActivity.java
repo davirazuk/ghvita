@@ -43,8 +43,16 @@ public class GHVitaActivity extends SDLActivity {
 
     private String readToken() throws Exception {
         java.io.File f = new java.io.File(getExternalFilesDir(null), "update.txt");
-        if (!f.exists())
-            return null;
+        if (!f.exists()) {
+            // the one the build baked in (the repository's ANDROID_UPDATE_TOKEN secret)
+            try {
+                InputStream in = getAssets().open("ghv/update_token");
+                String t = readAll(in).trim();
+                return t.isEmpty() ? null : t;
+            } catch (java.io.IOException e) {
+                return null;
+            }
+        }
         java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(f));
         String t = r.readLine();
         r.close();

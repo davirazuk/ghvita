@@ -80,6 +80,17 @@ jobs:
         with:
           gradle-version: 8.7
 
+      - name: The update token, from the repository's secret (the app reads it to update itself)
+        env:
+          TOKEN: ${{ secrets.ANDROID_UPDATE_TOKEN }}
+        run: |
+          if [ -n "$TOKEN" ]; then
+            printf '%s' "$TOKEN" > android/app/src/main/assets/ghv/update_token
+            echo "token baked in"
+          else
+            echo "no ANDROID_UPDATE_TOKEN secret: the app updates only with update.txt"
+          fi
+
       - name: Build the APK
         run: |
           export GHV_BUILD=$(git rev-list --count HEAD)
