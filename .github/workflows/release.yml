@@ -111,6 +111,10 @@ jobs:
             fi
           fi
 
+      - name: The update token for a fresh install (the owner's read-only one: a Vita without update.txt still updates)
+        run: |
+          [ -s android/update_token ] && cp android/update_token assets/update_token && echo "token in" || true
+
       - name: Build, smoke test and publish
         run: |
           git config user.name "github-actions"

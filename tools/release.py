@@ -80,5 +80,22 @@ for p in up:
 if a.dry:
     sys.exit(print('dry run: nothing uploaded', tag))
 notes = a.notes or run('git', 'log', '-1', '--format=%s')
-subprocess.run(['gh', 'release', 'create', tag, '--target', run('git', 'rev-parse', 'HEAD'), '--title', f'GH Vita build {n}', '--notes', notes, '--latest', *up], check=True)
+# GitHub has refused this now and then (HTTP 403 "Resource not accessible by integration", everything else done): the
+# release made empty first, the files then, with a retry each; a half-made release is cleared before the next try
+import time
+head = run('git', 'rev-parse', 'HEAD')
+for attempt in range(4):
+    made = subprocess.run(['gh', 'release', 'create', tag, '--target', head, '--title', f'GH Vita build {n}', '--notes', notes, '--latest'],
+                          capture_output=True, text=True)
+    if made.returncode == 0:
+        up_ok = subprocess.run(['gh', 'release', 'upload', tag, '--clobber', *up], capture_output=True, text=True)
+        if up_ok.returncode == 0:
+            break
+        print('upload failed:', up_ok.stderr.strip())
+    else:
+        print('create failed:', made.stderr.strip())
+    subprocess.run(['gh', 'release', 'delete', tag, '--yes', '--cleanup-tag'], capture_output=True)
+    time.sleep(30 * (attempt + 1))
+else:
+    sys.exit('the release could not be made')
 print('released', tag)

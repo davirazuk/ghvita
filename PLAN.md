@@ -793,3 +793,8 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   columns left, two 150-wide right). A column takes taps from the bottom up to 40% of the screen. Drawn see-through.
   Released for the user to try all three on the phone (they couldn't judge from screenshots).
 - Held upright, the rock meter and plates are drawn in the strip under the picture (gfx_2d_tall).
+- The owner's read-only update token is in android/update_token (they asked; this session can't set Actions
+  secrets): the Android build bakes it into the APK, the Vita release copies it to assets/update_token, which
+  update.c reads when the card has no update.txt.
+- release.py makes the release empty then uploads, with retries and the error printed: several releases died on
+  HTTP 403 "Resource not accessible by integration" at `gh release create` after everything else passed.

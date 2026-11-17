@@ -59,6 +59,11 @@ static bool read_token(void)
     char path[300];
     snprintf(path, sizeof(path), "%supdate.txt", plat_data_dir());
     FILE * f = fopen(path, "r");
+    if (!f) {
+        // none on the card: the one the release build put in the app (the owner's read-only token)
+        snprintf(path, sizeof(path), "%supdate_token", plat_asset_dir());
+        f = fopen(path, "r");
+    }
     if (f) {
         if (!fgets(token, sizeof(token), f))
             token[0] = 0;
