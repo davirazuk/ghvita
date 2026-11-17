@@ -39,6 +39,8 @@ void plat_view(int * x, int * y, int * w, int * h, int * full_w, int * full_h);
 // a phone held upright: the screen under the picture, in the game's units (960 across); 0 otherwise. A finger there
 // comes in with y past SCREEN_H
 float plat_below(void);
+#define PORTRAIT_CROP 190       // held upright, this much of each side of the picture is off the screen
+#define PORTRAIT_UNDER 560      // and this much under it (in its units) for the song's name and the pads
 // a frame not drawn (30 fps): its time passes as if it were shown, nothing new goes on the screen
 void plat_skip_frame(void);
 // 30 fps in songs: a drawn frame every second refresh, a frame only read (plat_skip_frame) between. The swap doesn't

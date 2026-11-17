@@ -1022,9 +1022,9 @@ void config_load(void)
         else if (strcmp(k, "five_pads") == 0)
             cfg.five_pads = n != 0;
         else if (strcmp(k, "touch_frets") == 0)
-            cfg.touch_frets = n == 2 ? 1 : 0;                   // its three layouts before: four fingers, on a table, thumbs
-        else if (strcmp(k, "touch_layout") == 0)
-            cfg.touch_frets = n == 1 ? 1 : 0;
+            cfg.touch_frets = 0;                                // the old layouts: one hand to start
+        else if (strcmp(k, "touch_hands") == 0)
+            cfg.touch_frets = n < 0 || n > 2 ? 0 : n;
         else if (strcmp(k, "no_band") == 0)
             cfg.no_band = atoi(v) != 0;
         else if (strcmp(k, "band_pictures") == 0)
@@ -1118,7 +1118,7 @@ void config_save(void)
     fprintf(f, "no_popups = %d\ntiming_bar = %d\nlive_stats = %d\nvanish = %d\n"
                "no_miss_sound = %d\nno_rear_whammy = %d\nno_bend = %d\nno_countdown = %d\n",
             cfg.no_popups, cfg.timing_bar, cfg.live_stats, cfg.vanish, cfg.no_miss_sound, cfg.no_rear_whammy, cfg.no_bend, cfg.no_countdown);
-    fprintf(f, "touch_layout = %d\n", cfg.touch_frets);
+    fprintf(f, "touch_hands = %d\n", cfg.touch_frets);
     fprintf(f, "double_kick = %d\nfive_pads = %d\neasy_sustains = %d\nno_count_in = %d\nstage_screens = %d\nno_progress = %d\ncup_skin = %d\n", cfg.double_kick, cfg.five_pads, cfg.easy_sustains,
             cfg.no_count_in, cfg.stage_screens, cfg.no_progress, cfg.cup_skin);
     fprintf(f, "no_ghost = %d\nnotes_look = 1\nrival = %d\nhit_window = %d\nlight_fx = %d\nmetronome = %d\nsong_speed = %d\n", cfg.no_ghost, cfg.rival, cfg.hit_window,

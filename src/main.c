@@ -348,6 +348,12 @@ static void menu_touch(void)
             b = BTN_START;
         else if (sy < 84 && sx < 150)
             b = BTN_SELECT;
+        else if (plat_below() > 0 && sy > SCREEN_H + plat_below() - 300 - 70 && sy < SCREEN_H + plat_below() - 300 &&
+                 sx > SCREEN_W - PORTRAIT_CROP - 160)
+            b = BTN_START;              // held upright: the chips over the pads
+        else if (plat_below() > 0 && sy > SCREEN_H + plat_below() - 300 - 70 && sy < SCREEN_H + plat_below() - 300 &&
+                 sx < PORTRAIT_CROP + 220)
+            b = BTN_SELECT;
     } else if (two)
         b = BTN_CIRCLE;
     else if (!ntaps)
@@ -5119,7 +5125,7 @@ static void option_text(int i, char * name, char * value, size_t n)
     case O_COUNTDOWN: strcpy(name, "Countdown on resume"); snprintf(value, n, "%s", cfg.no_countdown ? "Off" : "On"); break;
     case O_TOUCHFRETS:
         strcpy(name, "Touch frets");
-        snprintf(value, n, "%s", cfg.touch_frets == 1 ? "Thumbs" : "Fingers");
+        snprintf(value, n, "%s", cfg.touch_frets == 2 ? "Thumbs" : cfg.touch_frets == 1 ? "Two hands (A S | J K L)" : "One hand (A S D F G)");
         break;
     case O_FIVEPADS: strcpy(name, "Drum pads"); snprintf(value, n, "%s", cfg.five_pads ? "Five, as World Tour" : "As charted"); break;
     case O_SCREENS: strcpy(name, "Stage screens"); snprintf(value, n, "%s", cfg.stage_screens ? "On" : "Off"); break;
@@ -5254,7 +5260,7 @@ static void change_option(int i, int d)
     case O_REAR: cfg.no_rear_whammy = !cfg.no_rear_whammy; break;
     case O_BEND: cfg.no_bend = !cfg.no_bend; break;
     case O_COUNTDOWN: cfg.no_countdown = !cfg.no_countdown; break;
-    case O_TOUCHFRETS: cfg.touch_frets = !cfg.touch_frets; break;
+    case O_TOUCHFRETS: cfg.touch_frets = (cfg.touch_frets + (d < 0 ? 2 : 1)) % 3; break;
     case O_FIVEPADS: cfg.five_pads = !cfg.five_pads; break;
     case O_DOUBLEKICK: cfg.double_kick = !cfg.double_kick; break;
     case O_EASYSUS: cfg.easy_sustains = !cfg.easy_sustains; break;
@@ -5517,8 +5523,9 @@ static void options_screen(void)
     if (!text)                  // an option without a description must never crash the draw
         text = "";
     if (opt == O_TOUCHFRETS)
-        text = cfg.touch_frets == 1 ? "Holding it: round buttons, green, red, yellow under the left thumb, blue and orange under the right."
-                                    : "Fingers, one hand or two: five big pads across the bottom; anywhere in a pad's column counts.";
+        text = cfg.touch_frets == 2 ? "Holding it: green, red, yellow on the left edge for the left thumb, blue and orange on the right edge."
+             : cfg.touch_frets == 1 ? "Two hands, as A S and J K L: green and red on the left, yellow, blue, orange on the right."
+                                    : "One hand, as A S D F G: five side by side; anywhere in a pad's column counts.";
     if (opt == O_LAYOUT) {
         snprintf(line, sizeof(line), "%s   Whammy: right stick, or rub the back", cfg.layout
                  ? "Green L, Red Left, Yellow Up, Blue Triangle, Orange R, open X"

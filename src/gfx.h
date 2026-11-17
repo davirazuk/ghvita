@@ -78,3 +78,4 @@ void mat_lookat(float * m, const float eye[3], const float at[3], const float up
 
 void gfx_below_begin(float below);      // draw under the picture (a phone held upright), in its own 960 x below
 void gfx_below_end(void);
+void gfx_2d_tall(float below);         // the picture and the strip under it as one 2D space

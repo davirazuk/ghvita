@@ -130,7 +130,7 @@ typedef struct {
     bool easy_sustains;     // one fret of a chord keeps its sustain ringing
     bool double_kick;       // Expert+: the kicks charted for a second foot
     bool five_pads;         // 4-pad charts laid out on World Tour's five
-    int touch_frets;        // the frets on a touch screen: 0 fingers (five big equal pads), 1 thumbs (round buttons in the bottom corners)
+    int touch_frets;        // the frets on a touch screen: 0 one hand (A S D F G), 1 two hands (A S | J K L)
     bool sing_along;        // the mic and the lyrics on top of any instrument, when the song has vocals
     bool sing_sp;           // singing in tune starts Star Power, like YARG's voice-activated option
     int sing_diff;          // the singing along is judged at: the instrument's would be Expert (MEDIUM as set)

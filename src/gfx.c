@@ -607,10 +607,28 @@ void gfx_below_begin(float below)
     gfx_flush();
     int vx, vy, vw, vh, fw, fh;
     plat_view(&vx, &vy, &vw, &vh, &fw, &fh);
-    glViewport(0, 0, fw, vy);
+    glViewport(vx, 0, vw, vy);         // as wide as the picture (its sides are off the screen too)
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
     glOrtho(0, SCREEN_W, below, 0, -1, 1);
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+#else
+    (void)below;
+#endif
+}
+
+// the picture and the strip under it as one: 960 across, SCREEN_H + below down (a phone held upright)
+void gfx_2d_tall(float below)
+{
+#ifndef __vita__
+    gfx_flush();
+    int vx, vy, vw, vh, fw, fh;
+    plat_view(&vx, &vy, &vw, &vh, &fw, &fh);
+    glViewport(vx, 0, vw, vy + vh);
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glOrtho(0, SCREEN_W, SCREEN_H + below, 0, -1, 1);
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
 #else
@@ -631,6 +649,13 @@ void gfx_below_end(void)
 void gfx_2d(void)
 {
     gfx_flush();
+#ifndef __vita__
+    {
+        int vx, vy, vw, vh, fw, fh;
+        plat_view(&vx, &vy, &vw, &vh, &fw, &fh);
+        glViewport(vx, vy, vw, vh);         // (gfx_2d_tall widens it)
+    }
+#endif
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
     glOrtho(0, SCREEN_W, SCREEN_H, 0, -1, 1);

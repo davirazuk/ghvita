@@ -54,14 +54,25 @@ static int win_w = SCREEN_W, win_h = SCREEN_H;
 void plat_view(int * x, int * y, int * w, int * h, int * full_w, int * full_h)
 {
     int vw = win_w, vh = win_w * SCREEN_H / SCREEN_W;
-    if (vh > win_h) {
+    if (win_h > win_w) {
+        // held upright: the picture's middle (PORTRAIT_CROP off each side) as wide as the screen, a third bigger
+        vw = win_w * SCREEN_W / (SCREEN_W - 2 * PORTRAIT_CROP);
+        vh = vw * SCREEN_H / SCREEN_W;
+    } else if (vh > win_h) {
         vh = win_h;
         vw = win_h * SCREEN_W / SCREEN_H;
     }
     *x = (win_w - vw) / 2;
     // held upright (a phone in portrait): the picture across the top, the rest of the screen under it for the frets
     // (plat_below); on its side, in the middle
-    *y = win_h > win_w ? win_h - vh : (win_h - vh) / 2;
+    if (win_h > win_w) {
+        // the pads and the song's name under it, the picture over them in the middle of what's left
+        int under = PORTRAIT_UNDER * vw / SCREEN_W;
+        *y = under + (win_h - under - vh) / 2;
+        if (*y + vh > win_h)
+            *y = win_h - vh;
+    } else
+        *y = (win_h - vh) / 2;
     *w = vw;
     *h = vh;
     *full_w = win_w;
@@ -73,8 +84,9 @@ float plat_below(void)
 {
     if (win_h <= win_w || win_w <= 0)
         return 0;
-    int vh = win_w * SCREEN_H / SCREEN_W;
-    return (float)(win_h - vh) * SCREEN_W / win_w;
+    int x, y, w, h, fw, fh;
+    plat_view(&x, &y, &w, &h, &fw, &fh);
+    return (float)y * SCREEN_W / w;      // the strip under it, in the picture's own units
 }
 
 // a place in the window (0..1 across and down) as the game's pixels
