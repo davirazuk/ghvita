@@ -264,7 +264,7 @@ int16_t * voicefx_mix(int16_t * x, int n, float t0, const RFrame * fr, int nf, i
                     corr = diff * styles[style].tune;
             }
             r_target = powf(2, corr / 12);
-            mask = vox_target_at(meant, 0.2) >= 0 ? 1 : 0.3f;
+            mask = 1;       // was 0.3 away from a charted note: a line sung off the chart (a miss) dropped away
         }
         float v = bq(&presence, bq(&lp, bq(&hp, x[i])));
         // the gate: open on the voice, down between lines
