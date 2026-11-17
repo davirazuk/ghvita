@@ -1226,6 +1226,23 @@ static bool cine_clear(int shot, int who, float side)
     return true;
 }
 
+// who the camera wants now: someone's solo (theirs, from their own chart), the drums with nobody else playing (a fill,
+// a break), the singer with a line to sing while the guitars rest; -1 nobody in particular
+static int cine_star(void)
+{
+    for (int r = 2; r >= 0; r -= 2)             // the guitar's solo first, then a drum solo
+        if (G.band[r] && G.band3d[r] && band_soloing(r))
+            return r;
+    if (G.band[3] && G.band3d[3] && band_soloing(3))
+        return 3;
+    bool g = G.band_part[2].on, b = G.band_part[3].on, d = G.band_part[0].on, v = G.band_part[1].on;
+    if (d && !g && !b && !v && G.band[0] && G.band3d[0])
+        return 0;
+    if (v && !g && !b && G.band[1] && G.band3d[1])
+        return 1;
+    return -1;
+}
+
 static void cine_direct(double beat, bool solo)
 {
     bool any = false;
@@ -1243,6 +1260,8 @@ static void cine_direct(double beat, bool solo)
     int shot = G.cine_shot, who = G.cine_who;
     bool cut = false;
     static bool was_sp, was_solo;
+    static int was_star = -1;
+    int star = -1;
     if (G.t < G.intro_end || G.t <= 0) {
         shot = CS_LINE;
         who = 1;
@@ -1260,6 +1279,11 @@ static void cine_direct(double beat, bool solo)
         shot = me == 0 ? CS_DRUMS : me == 1 ? CS_FACE : CS_NECK;
         who = me;
         cut = true;
+    } else if (!solo && (star = cine_star()) >= 0 && star != was_star && beat - G.cine_t0 >= 2) {
+        // someone else's moment: straight to them, the shot that shows what they're doing
+        who = star;
+        shot = star == 0 ? CS_DRUMS : star == 1 ? CS_FACE : (slot & 1) ? CS_NECK : CS_WAIST;
+        cut = true;
     } else if (slot != G.cine_slot && beat - G.cine_t0 >= per * 0.5) {     // not straight after a cut Star Power made
         cut = true;
         int other = me == 2 ? 3 : 2;            // the other guitar
@@ -1267,6 +1291,11 @@ static void cine_direct(double beat, bool solo)
             static const int mine[4] = {CS_WAIST, CS_HERO, CS_NECK, CS_MEDIUM};
             shot = mine[slot & 3];
             who = me;
+        } else if ((star = cine_star()) >= 0) {
+            // their moment goes on: they keep the camera, the shots changing
+            static const int theirs[4] = {CS_NECK, CS_HERO, CS_WAIST, CS_MEDIUM};
+            who = star;
+            shot = star == 0 ? ((slot & 1) ? CS_DRUMS : -1) : star == 1 ? ((slot & 1) ? CS_FACE : CS_MEDIUM) : theirs[slot & 3];
         } else {
             // a round of twelve shots; the big sections lean on the low and the wide ones
             static const int8_t round_shot[12] = {-1, CS_MEDIUM, CS_FACE, CS_HERO, CS_DRUMS, CS_WAIST, CS_LINE, CS_FACE,
@@ -1283,10 +1312,21 @@ static void cine_direct(double beat, bool solo)
                 who = G.band_part[other].on ? other : me;
                 shot = CS_WAIST;
             }
+            // nor a guitar or the drums sitting out a part while others play
+            if (who >= 0 && who != 1 && shot >= 0 && shot != CS_LINE && !G.band_part[who].on) {
+                int alt[3] = {me, other, 0};
+                for (int k = 0; k < 3; k++)
+                    if (G.band_part[alt[k]].on && G.band[alt[k]]) {
+                        who = alt[k];
+                        shot = alt[k] == 0 ? CS_DRUMS : CS_WAIST;
+                        break;
+                    }
+            }
         }
     }
     was_sp = G.sp_active;
     was_solo = solo;
+    was_star = cine_star();
     if (!cut)
         return;
     if (shot >= 0 && shot != CS_LINE) {
@@ -1355,9 +1395,17 @@ static CineCam cine_cam(double beat)
     float t = (float)G.t, rad = 3.14159265f / 180;
     CineCam c;
     c.ppm = SCREEN_H / (cs->vis0 + (cs->vis1 - cs->vis0) * u) * (1 + 0.012f * G.band_loud);
+#ifndef __vita__
+    if (getenv("GHV_VIS"))             // tests: this many metres fill the screen's height (a look at the hands)
+        c.ppm = SCREEN_H / (float)atof(getenv("GHV_VIS"));
+#endif
     c.yaw = -side * (cs->yaw0 + (cs->yaw1 - cs->yaw0) * u) * rad + sinf(t * 0.61f) * 0.012f;
     c.pitch = (cs->pitch0 + (cs->pitch1 - cs->pitch0) * u) * rad + sinf(t * 0.47f + 1) * 0.008f;
     c.dist = cs->dist;
+#ifndef __vita__
+    if (getenv("GHV_CAMYAW"))          // tests: the camera this far round them (degrees)
+        c.yaw = (float)atof(getenv("GHV_CAMYAW")) * rad;
+#endif
     float sx = G.cine_shot == CS_DRUMS || G.cine_shot == CS_LINE || G.cine_shot == CS_FACE ? cs->sx
                : side > 0 ? 1 - cs->sx : cs->sx;
     if (G.cine_shot == CS_FACE)
@@ -1835,6 +1883,8 @@ static void draw_stage(void)
 // The band follows the song a loop at a time: half time while the part rests or the song is going badly, full out when
 // the notes come. Only at a loop's end, so a change never jumps and the loop stays on the bars.
 // a note the member's arm plays: the drummer's pads (a kick is the foot), a guitarist's strums (hammer-ons need none)
+#define BAND_LEAD 0.035        // the 3D band's moves are shown this much ahead of the song, to land on it
+
 static bool band_strikes(int r, const Note * n, double last_hit)
 {
     if (r == 0)
@@ -1913,10 +1963,14 @@ static int band_cell(int r, const BandPart * b, double beat)
         int row = drums ? (beat > 0 && ((int)beat & 1) ? 5 : 1) : (int)fabs(beat) % 4;
         return row * cols + land + (int)((cols - 1 - land) * fmin(hit * 2.5, 1));
     }
+    // seen a frame or two late (the 3D pose is made on a worker thread and eased): the stick lands that much early so
+    // it's on the drum when the note's heard
+    double now = G.t + BAND_LEAD;
     double lead = fmin(b->hit_t - b->last_hit, drums ? 0.12 : 0.09);
-    if (G.t > b->hit_t - lead) {
+    if (now > b->hit_t - lead) {
         int row = drums ? band_strike(b->hit_frets) : band_shape(b->hit_frets);
-        return row * cols + (int)(land * (1 - (b->hit_t - G.t) / lead));
+        double k = 1 - (b->hit_t - now) / lead;
+        return row * cols + (int)(land * (k > 1 ? 1 : k));
     }
     int row = drums ? band_strike(b->last_frets) : band_shape(b->last_frets);
     double since = fmin((G.t - b->last_hit) / (drums ? 0.16 : 0.15), 1);
@@ -2234,7 +2288,7 @@ static void draw_band(double beat)
                 bool missed = r == me && G.miss_pulse > 0.5f;
                 float goal = bp->strum_goal, fast = 2 / 0.055f, slow = 2 / 0.2f, rate = fast;
                 if (bp->part && playing) {
-                    if (bp->hit_t < 1e8 && G.t > bp->hit_t - 0.03 && bp->strum_for != bp->hit_t && !missed) {
+                    if (bp->hit_t < 1e8 && G.t > bp->hit_t - 0.03 - BAND_LEAD && bp->strum_for != bp->hit_t && !missed) {
                         bool quick = bp->hit_t - bp->strum_last < 0.28;
                         goal = quick && goal > 1 ? 0 : 2;
                         if (goal > 1 && bp->strum_pos > 0.5f)
@@ -2276,7 +2330,7 @@ static void draw_band(double beat)
                 // single note and a barre for a chord, the hand open while the part rests. It starts for the next
                 // note a moment before it lands
                 int frets = bp->fret_now & 31;
-                if (bp->part && bp->next < bp->part->note_count && bp->part->notes[bp->next].time / 1e6 - G.t < 0.07)
+                if (bp->part && bp->next < bp->part->note_count && bp->part->notes[bp->next].time / 1e6 - G.t < 0.07 + BAND_LEAD)
                     frets = bp->part->notes[bp->next].frets & 31;
                 int low = -1, count = 0;
                 for (int l = 0; l < 5; l++)
@@ -2292,8 +2346,8 @@ static void draw_band(double beat)
                     shape = G.t < bp->held ? bp->chord_b : 0;       // ringing: held; resting: the hand open
                 (void)count;
                 if (low >= 0) {
-                    bp->hand_lane += ((float)low - bp->hand_lane) * ease(0.04f);
-                    float aim = 0.7f + bp->hand_lane * 0.3f + (frets & 16 ? 0.45f : 0);
+                    bp->hand_lane += ((float)low - bp->hand_lane) * ease(0.18f);    // the hand goes where the notes are
+                    float aim = 0.35f + bp->hand_lane * 0.42f + (frets & 16 ? 0.4f : 0);
                     if (r == me && G.whammy > 0.15f && G.t < bp->held)
                         aim += sinf((float)G.t * 30) * 0.05f * G.whammy;
                     bp->hand_fret += (aim - bp->hand_fret) * ease(0.32f);

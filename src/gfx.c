@@ -80,9 +80,51 @@ static uint8_t * half_size(const uint8_t * src, int w, int h)
     return dst;
 }
 
+// how much of a picture an alpha test at `ref` keeps (an alpha a pixel, scaled by k)
+static float coverage(const uint8_t * px, int n, float k, int ref)
+{
+    int kept = 0;
+    for (int i = 0; i < n; i++)
+        kept += px[i * 4 + 3] * k > ref;
+    return (float)kept / (n ? n : 1);
+}
+
+// a smaller level's alpha scaled so the alpha test keeps as much of it as of the full size: averaged, thin cut-out
+// strands (hair, lashes) fall under the test and vanish when the texture's drawn small or at a slant
+static void keep_coverage(uint8_t * px, int w, int h, float want)
+{
+    const int ref = 115;                // the band's alpha test (0.45)
+    int n = w * h;
+    if (want <= 0 || want >= 1)
+        return;
+    float lo = 1, hi = 4;
+    if (coverage(px, n, 1, ref) >= want)
+        return;
+    for (int it = 0; it < 10; it++) {
+        float mid = (lo + hi) / 2;
+        if (coverage(px, n, mid, ref) < want)
+            lo = mid;
+        else
+            hi = mid;
+    }
+    for (int i = 0; i < n; i++) {
+        int a = (int)(px[i * 4 + 3] * hi + 0.5f);
+        px[i * 4 + 3] = (uint8_t)(a > 255 ? 255 : a);
+    }
+}
+
 // every level down to where a side is 1 pixel, as vitaGL lays its chains out
 static void upload_mipmaps(const uint8_t * px, int w, int h)
 {
+    // the cut-out share of the full picture, kept on every level (none to keep for an opaque one)
+    float cover = 0;
+    {
+        int n = w * h, part = 0;
+        for (int i = 0; i < n; i++)
+            part += px[i * 4 + 3] > 8 && px[i * 4 + 3] < 247;
+        if (part > n / 200)
+            cover = coverage(px, n, 1, 115);
+    }
 #ifdef __vita__
     // vitaGL makes the chain with its own quick downscale (the top level just point-sampled), then gets ours
     glGenerateMipmap(GL_TEXTURE_2D);
@@ -106,6 +148,7 @@ static void upload_mipmaps(const uint8_t * px, int w, int h)
         w = w > 1 ? w / 2 : 1;
         h = h > 1 ? h / 2 : 1;
         level++;
+        keep_coverage(next, w, h, cover);
         glTexImage2D(GL_TEXTURE_2D, level, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, next);
         free(owned);
         owned = next;
@@ -119,6 +162,7 @@ static void upload_mipmaps(const uint8_t * px, int w, int h)
         w /= 2;
         h /= 2;
         level++;
+        keep_coverage(next, w, h, cover);
 #ifdef __vita__
         glTexSubImage2D(GL_TEXTURE_2D, level, 0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, next);
 #else

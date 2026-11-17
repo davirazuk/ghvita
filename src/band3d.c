@@ -658,6 +658,19 @@ void band3d_draw(Band3D * m, const Band3DDraw * d)
         gfx_mesh_xf(mv, p->tex, m->pose[m->front] + at * 3, p->uv, 8, m->col[m->front] + at, p->idx, p->tc * 3);
         at += (size_t)p->vc;
     }
+    if (!d->far) {
+        // close up, the cut-out's edges again, soft: what the alpha test threw away of hair and lashes is blended in
+        // over what's already there, so a strand's edge fades instead of stepping (it writes no depth: nothing behind it
+        // is hidden by it)
+        gfx_mesh_state(false, 0.06f);
+        at = 0;
+        for (int pi = 0; pi < mesh->nparts; pi++) {
+            const B3Part * p = &mesh->parts[pi];
+            gfx_mesh_xf(mv, p->tex, m->pose[m->front] + at * 3, p->uv, 8, m->col[m->front] + at, p->idx, p->tc * 3);
+            at += (size_t)p->vc;
+        }
+        gfx_mesh_state(true, 0.45f);
+    }
 }
 
 // a flat four-cornered thing on the stage (its own axes: x right, y up, z toward the audience, metres from what the
