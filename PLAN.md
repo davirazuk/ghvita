@@ -870,3 +870,5 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   Esc cancels; the on-screen keys stay for the mouse.
 - Mic stand: the bake puts it a step in front of the singer's middle (the place band3d.c centres them on) in every
   frame; band3d.c leaves bones that never move out of its re-centring and gives the wilder loop the same stand.
+- PC full screen: the game opens full screen (desktop resolution, picture letterboxed); F11 or Alt+Enter switches to a
+  window and back, remembered in data/windowed.txt. Window title "GH Vita".

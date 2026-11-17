@@ -159,7 +159,8 @@ static void to_screen(float nx, float ny, float * sx, float * sy)
 
 // the fingers on the screen, by SDL's ids
 static struct { SDL_FingerID id; float x, y; bool down; } fingers[MAX_TOUCH];
-static bool back_key;           // a phone's back button: Circle for a frame
+static bool back_key;
+static bool alt_enter;          // Alt+Enter switched the screen: not a press of Start as well           // a phone's back button: Circle for a frame
 
 typedef struct {
     int64_t frame;
@@ -281,11 +282,25 @@ void plat_init(void)
     Uint32 wflags = SDL_WINDOW_OPENGL;
 #ifdef __ANDROID__
     wflags |= SDL_WINDOW_FULLSCREEN | SDL_WINDOW_RESIZABLE;
+#else
+    // a PC: a window that can be resized, opened full screen as a game is (F11 or Alt+Enter switches; the choice is
+    // kept in data/windowed.txt). Tests (a script, a set window) keep their plain window
+    wflags |= SDL_WINDOW_RESIZABLE;
+    {
+        char wp[600];
+        snprintf(wp, sizeof(wp), "%swindowed.txt", data_dir);
+        FILE * wf = fopen(wp, "r");
+        bool windowed = wf != NULL;
+        if (wf)
+            fclose(wf);
+        if (!windowed && !getenv("GHV_SCRIPT") && !getenv("GHV_WINDOW") && !getenv("GHV_FIXED"))
+            wflags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
+    }
 #endif
     int ww = SCREEN_W, wh = SCREEN_H;
     if ((e = getenv("GHV_WINDOW")))                 // tests: a window of another shape ("1280x600")
         sscanf(e, "%dx%d", &ww, &wh);
-    window = SDL_CreateWindow("GH Vita (test)", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, ww, wh, wflags);
+    window = SDL_CreateWindow("GH Vita", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, ww, wh, wflags);
     if (!window) {
         fprintf(stderr, "SDL_CreateWindow: %s\n", SDL_GetError());
         exit(1);
@@ -341,6 +356,28 @@ bool plat_poll(Pad * pad)
         }
         if (ev.type == SDL_KEYDOWN && ev.key.keysym.sym == SDLK_AC_BACK)
             back_key = true;
+#ifndef __ANDROID__
+        if (ev.type == SDL_KEYDOWN && !ev.key.repeat && (ev.key.keysym.sym == SDLK_F11 ||
+            ((ev.key.keysym.sym == SDLK_RETURN || ev.key.keysym.sym == SDLK_KP_ENTER) && (ev.key.keysym.mod & KMOD_ALT)))) {
+            // full screen and back, remembered for next time
+            bool full = (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN_DESKTOP) == SDL_WINDOW_FULLSCREEN_DESKTOP;
+            SDL_SetWindowFullscreen(window, full ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
+            if (full)
+                SDL_SetWindowSize(window, SCREEN_W * 3 / 2, SCREEN_H * 3 / 2);
+            char wp[600];
+            snprintf(wp, sizeof(wp), "%swindowed.txt", data_dir);
+            if (full) {
+                FILE * wf = fopen(wp, "w");
+                if (wf) {
+                    fputs("1\n", wf);
+                    fclose(wf);
+                }
+            } else
+                remove(wp);
+            SDL_GL_GetDrawableSize(window, &win_w, &win_h);
+            alt_enter = true;
+        }
+#endif
         if (!typing)
             continue;
         if (ev.type == SDL_TEXTINPUT && strlen(typed) + strlen(ev.text.text) < sizeof(typed))
@@ -364,7 +401,11 @@ bool plat_poll(Pad * pad)
         {SDL_SCANCODE_A, BTN_SQUARE}, {SDL_SCANCODE_S, BTN_TRIANGLE}, {SDL_SCANCODE_Q, BTN_L},
         {SDL_SCANCODE_W, BTN_R}, {SDL_SCANCODE_RETURN, BTN_START}, {SDL_SCANCODE_BACKSPACE, BTN_SELECT},
     };
+    if (alt_enter && !k[SDL_SCANCODE_RETURN])
+        alt_enter = false;              // Enter's let go: it's Start again
     for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]) && !typing; i++) {
+        if (keys[i].sc == SDL_SCANCODE_RETURN && alt_enter)
+            continue;
         if (song_keys && keys[i].sc != SDL_SCANCODE_RETURN && keys[i].sc != SDL_SCANCODE_BACKSPACE)
             continue;                   // in a song the keyboard is frets and the strum (Enter pauses, Backspace Star Power)
         if (k[keys[i].sc])
