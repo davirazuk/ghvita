@@ -215,7 +215,7 @@ static void load_script(const char * path)
                 snprintf(l.name, sizeof(l.name), "%s", tok);
             else if (strcmp(l.what, "suspend") == 0 || strcmp(l.what, "sleep") == 0 || strcmp(l.what, "bar") == 0)
                 l.x = atof(tok);
-            else if (strcmp(l.what, "touch") == 0) {
+            else if (strcmp(l.what, "touch") == 0 || strcmp(l.what, "finger") == 0) {
                 l.x = atof(tok);
                 tok = strtok(NULL, " \t\r\n");
                 l.y = tok ? atof(tok) : 0;
@@ -383,6 +383,14 @@ bool plat_poll(Pad * pad)
             script_ty = l->y;
         } else if (strcmp(l->what, "untouch") == 0)
             script_touch = false;
+        else if (strcmp(l->what, "finger") == 0 || strcmp(l->what, "unfinger") == 0) {
+            // a finger as the screen gives one: a place in the window (0..1 across and down), turned into the game's
+            // pixels as a real touch is, by the picture's place now
+            fingers[0].id = 777;
+            fingers[0].down = strcmp(l->what, "finger") == 0;
+            if (fingers[0].down)
+                to_screen((float)l->x, (float)l->y, &fingers[0].x, &fingers[0].y);
+        }
         else if (strcmp(l->what, "bar") == 0)
             script_bar = (float)l->x;
         else if (strcmp(l->what, "shot") == 0)

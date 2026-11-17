@@ -1043,11 +1043,56 @@ static bool fetch_page(int site, const char * query, int page, DlHit ** out, int
         else
             snprintf(post, sizeof(post), "{\"search\":\"%s\",\"page\":%d,\"per_page\":%d%s}", q, page, PAGE, extra);
         const char * headers[] = {"Content-Type: application/json", NULL};
-        HttpReq r = {.url = deep ? "https://api.enchor.us/search/advanced" : "https://api.enchor.us/search",
-                     .post = post, .headers = headers, .stall_s = 20};
-        status = http_fetch(&r, &body, &len, err, err_size);
-        if (status >= 200 && status < 300)
-            *n = parse_chorus(body, len, out, total);
+        if (deep && query[0]) {
+            // the filtered search has no words of its own ("search" is ignored there: every chart came back): the
+            // words asked for as the song's name, then as its artist, the two lists one, each chart once
+            static const char * fields[2] = {"name", "artist"};
+            for (int f = 0; f < 2; f++) {
+                if (f == 1 && flat.artist[0])
+                    break;              // the artist filter has that field already
+                char words[500];
+                snprintf(words, sizeof(words), ",\"%s\":{\"value\":\"%s\",\"exact\":false,\"exclude\":false}", fields[f], q);
+                char post2[1900];
+                if (c_key[0])
+                    snprintf(post2, sizeof(post2), "{\"search\":\"\",\"page\":%d,\"per_page\":%d%s%s"
+                             ",\"sort\":{\"type\":\"%s\",\"direction\":\"%s\"}}", page, PAGE, extra, words,
+                             c_key, word_sort[flat.sort].cdir);
+                else
+                    snprintf(post2, sizeof(post2), "{\"search\":\"\",\"page\":%d,\"per_page\":%d%s%s}", page, PAGE, extra, words);
+                HttpReq r = {.url = "https://api.enchor.us/search/advanced", .post = post2, .headers = headers,
+                             .stall_s = 20};
+                free(body);
+                body = NULL;
+                status = http_fetch(&r, &body, &len, err, err_size);
+                if (status < 200 || status >= 300)
+                    break;
+                DlHit * part = NULL;
+                int pt = 0, pn = parse_chorus(body, len, &part, &pt);
+                *total += pt;
+                if (pn > 0) {
+                    DlHit * all = realloc(*out, sizeof(DlHit) * (size_t)(*n + pn));
+                    if (all) {
+                        *out = all;
+                        for (int i = 0; i < pn; i++) {
+                            bool dup = false;
+                            for (int j = 0; j < *n && !dup; j++)
+                                dup = !strcmp((*out)[j].url, part[i].url);
+                            if (!dup)
+                                (*out)[(*n)++] = part[i];
+                            else
+                                (*total)--;
+                        }
+                    }
+                }
+                free(part);
+            }
+        } else {
+            HttpReq r = {.url = deep ? "https://api.enchor.us/search/advanced" : "https://api.enchor.us/search",
+                         .post = post, .headers = headers, .stall_s = 20};
+            status = http_fetch(&r, &body, &len, err, err_size);
+            if (status >= 200 && status < 300)
+                *n = parse_chorus(body, len, out, total);
+        }
     } else {
         if (query[0] && strlen(query) < 3) {
             snprintf(err, err_size, "RhythmVerse needs 3 letters or more");

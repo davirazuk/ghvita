@@ -833,3 +833,6 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 - Venue camera "Wide shot only" holds the whole stage with the 3D band too.
 - Singer: medium shots aim at her head; the bake turns her back toward the audience (a quarter of the loop's turn kept:
   GHWT's singing loops swing her chest up to 50 degrees away).
+- Chorus Encore search with filters on (an instrument or difficulty, as the default Guitar Expert): its advanced
+  search ignores "search" and gave every chart back; the words now go in as the name, then as the artist, the two
+  merged (dl.c fetch_page).
