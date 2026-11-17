@@ -406,6 +406,9 @@ static void pick_band(const Song * song, uint32_t h)
             if (cfg.band_pick[r][0] && strcmp(res.band_names[found[j]], cfg.band_pick[r]) == 0)
                 pick = found[j];            // chosen in the options
         G.band3d[r] = cfg.band_pictures ? NULL : res_band3d(r, res.band_names[pick], cfg.band_hue[r] * 40 + cfg.band_hair[r] * 1000);
+#ifndef __vita__
+        plat_log("band: %s plays %s", roles[r], res.band_names[pick]);
+#endif
         if (G.band3d[r]) {
             // the model stands in for the pictures: their sheets (megabytes each) aren't loaded, only a sheet's
             // measures kept for the code that picks frames
@@ -2668,7 +2671,7 @@ static void setup_camera(void)
     memcpy(eye_v, eyes[cfg.camera], sizeof(eye_v));
     const float * eye = eye_v;
     float fov = fovs[cfg.camera];
-    G.camera_phone = game_touch_pads && plat_below() <= 0 && cfg.camera == 0;
+    G.camera_phone = game_touch_pads && plat_below() <= 0 && cfg.camera == 0 && cfg.touch_frets != 2;
     if (G.camera_phone) {
         // a phone on its side, played on the glass: nearer and lower, the highway wide across the screen so its
         // gems are a finger's size and each lane stands over its own column
@@ -3956,6 +3959,30 @@ static double win_late(int i)
 }
 
 // the note a press plays, if there's one in reach
+static int pad_lane(int k);
+
+// a chord on a touch screen's thumbs: two thumbs can't hold three frets, nor two on one side. Each thumb's part of the
+// chord played (any one of its frets on that side) is the chord
+static bool thumbs_touch(void)
+{
+    return game_touch_pads && cfg.touch_frets == 2 && !G.drums && plat_below() <= 0;
+}
+
+static bool chord_done(uint8_t got, uint8_t frets)
+{
+    if (got == frets)
+        return true;
+    if (!thumbs_touch() || (frets & FRET_OPEN))
+        return false;
+    int n = G.lanes > 0 ? G.lanes : 5, left = n == 5 ? 3 : n / 2;
+    uint8_t lm = 0;
+    for (int k = 0; k < left; k++)
+        lm |= (uint8_t)(1u << pad_lane(k));
+    uint8_t rm = (uint8_t)(0x1f & ~lm);
+    bool l_ok = !(frets & lm) || (got & frets & lm), r_ok = !(frets & rm) || (got & frets & rm);
+    return l_ok && r_ok && !(got & ~frets);
+}
+
 static bool press_note(int lane)
 {
     const Part * p = G.part;
@@ -3986,7 +4013,7 @@ static bool press_note(int lane)
         G.got[i] |= bit | (G.drums ? 0 : G.held & n->frets);
         if (G.drums && cfg.drum_hits)
             pad_sound(lane, n, 0.5f);
-        if (G.got[i] == n->frets) {
+        if (chord_done(G.got[i], n->frets)) {
             hit_note(i);
             double off = G.t - nt;
             G.hit_log[G.hit_log_n++ % HIT_LOG] = (float)off;
@@ -4345,7 +4372,7 @@ static void update_sustains(void)
         uint32_t need = s->frets & 0x1F;
         bool held = (G.held & need) == need && (!(s->frets & FRET_OPEN) || (G.held & (1 << LANE_OPEN)));
         // a chord on two thumbs: one of its frets keeps it ringing
-        if (cfg.easy_sustains && (G.held & need))
+        if ((cfg.easy_sustains || thumbs_touch()) && (G.held & need))
             held = true;
         // a finger shifting on the button isn't letting go
         if (held)
@@ -4424,7 +4451,7 @@ static void pad_rect(int k, float * x0, float * x1, float * top, float * reach)
         // red, yellow on the left (100 each), blue and orange on the right (150 each); four lanes two and two. The
         // highway between is left alone
         int left = n == 5 ? 3 : n / 2, right = n - left;
-        const float side = 300;
+        const float side = 272;
         if (k < left) {
             *x0 = k * side / left;
             *x1 = (k + 1) * side / left;
@@ -4784,8 +4811,28 @@ static int game_tick(const Pad * pad, uint32_t pressed, const RFrame * rf)
             lanes_pressed |= 1 << lane;
     }
     int new_ids[MAX_TOUCH], new_count = 0;
+    // a finger landing on the screen above the pads (the highway, the stage; not the pause corner) sets Star Power off:
+    // a big place a hand reaches without leaving the frets for a corner
+    static int seen_ids[MAX_TOUCH], seen_n;
+    bool sp_tap = false;
+    for (int i = 0; i < pad->ntouch; i++) {
+        bool seen = false;
+        for (int k = 0; k < seen_n; k++)
+            seen |= seen_ids[k] == pad->touch_id[i];
+        float tx = pad->touch_x[i], ty = pad->touch_y[i];
+        if (!seen && game_touch_pads && touch_lane_at(tx, ty) < 0 && !(ty < 84 && tx > SCREEN_W - 170) &&
+            (plat_below() > 0 ? ty < SCREEN_H : ty < SCREEN_H * 0.4f - 40))
+            sp_tap = true;
+    }
+    seen_n = pad->ntouch;
+    for (int i = 0; i < pad->ntouch; i++)
+        seen_ids[i] = pad->touch_id[i];
     for (int i = 0; i < pad->ntouch; i++) {
         int lane = touch_lane_at(pad->touch_x[i], pad->touch_y[i]);
+#ifndef __vita__
+        if (getenv("GHV_TOUCHLOG"))
+            fprintf(stderr, "touch %.0f %.0f below %.0f pads %d -> lane %d\n", pad->touch_x[i], pad->touch_y[i], plat_below(), game_touch_pads, lane);
+#endif
         if (lane < 0)
             continue;
         held |= 1 << lane;
@@ -4861,7 +4908,7 @@ static int game_tick(const Pad * pad, uint32_t pressed, const RFrame * rf)
         audio_stem_bend(G.my_stem, G.bend > 0.003f && !cfg.no_bend && !stem_is_the_song() ? G.bend : 0);
 
     // Star Power: Select, a quick tilt, or on drums both cymbals at once, as in World Tour
-    bool sp_req = (pressed & BTN_SELECT) || (G.drums && both_cymbals(lanes_pressed));
+    bool sp_req = (pressed & BTN_SELECT) || (G.drums && both_cymbals(lanes_pressed)) || (sp_tap && !G.autoplay);
     if (cfg.tilt && pad->has_motion && !rf)
         sp_req |= tilt(pad->accel);
     if (rf)
@@ -5688,6 +5735,8 @@ static void lcd(const char * which, long value, int cells, float right, float y,
 // the buttons under the lanes, as a song starts
 static void draw_keys(void)
 {
+    if (game_touch_pads)
+        return;                         // a phone: no buttons to name, the pads are the keys
     static const struct {
         uint32_t button;
         const char * name;
@@ -6143,8 +6192,7 @@ static void draw_portrait_pads(float below)
 {
     // under the picture: the pads as on its side (one hand or two), a band at the bottom where the thumbs and fingers
     // are; the screen between is the song's name and the score
-    gfx_below_begin(below);
-    gfx_rect_grad(0, 0, SCREEN_W, below, RGBA(14, 12, 22, 255), RGBA(4, 4, 8, 255));
+    gfx_below_begin(below);             // (its background went down before the HUD: draw_hud)
     float band = PORTRAIT_BAND, top = below - band;
     // pause and Star Power: chips at the top of the strip, in reach (the picture's corners are small up there)
     gfx_rect(SCREEN_W - PORTRAIT_CROP - 150, top - 64, 140, 50, RGBA(255, 255, 255, 30));
@@ -6193,7 +6241,7 @@ static void draw_touch_pads(void)
         // corners pause and set Star Power off
         // nothing over the highway or the HUD: a fingertip-thick strip of each pad's colour along the bottom edge and
         // its column lit softly while it's held (the cups on the highway light up as well); thumbs: rings in the corners
-        bool thumbs = false;            // (thumbs are columns too now)
+        bool thumbs = cfg.touch_frets == 2;     // big round buttons where the thumbs rest, the columns over them faint
         for (int k = 0; k < G.lanes; k++) {
             int l = pad_lane(k);
             float x0, x1, top, reach;
@@ -6201,15 +6249,17 @@ static void draw_touch_pads(void)
             uint32_t c = lane_colour[lane_art(l)];
             bool down = G.held & (1u << l);
             if (thumbs) {
-                float d = x1 - x0, cxp = (x0 + x1) / 2, cyp = top + d / 2;
+                // the column a thumb sweeps (faint), and at its foot a big button in the lane's colour
+                gfx_rect_grad(x0 + 3, reach, x1 - x0 - 6, SCREEN_H - reach, ALPHA(c, 0), ALPHA(c, down ? 90 : 26));
+                float d = fminf(x1 - x0 - 8, 118), cxp = (x0 + x1) / 2, cyp = SCREEN_H - d / 2 - 12;
                 char nm[16];
                 snprintf(nm, sizeof(nm), "cup_%d", lane_art(l));
                 if (down) {
                     gfx_blend(BLEND_ADD);
-                    gfx_sprite(atlas_get(res.game, "cup_glow"), cxp - d, cyp - d, d * 2, d * 2, ALPHA(c, 200));
+                    gfx_sprite(atlas_get(res.game, "cup_glow"), cxp - d, cyp - d, d * 2, d * 2, ALPHA(c, 220));
                     gfx_blend(BLEND_ALPHA);
                 }
-                gfx_sprite(atlas_get(res.game, nm), x0, top, d, d * 0.9f, down ? WHITE : RGBA(255, 255, 255, 150));
+                gfx_sprite(atlas_get(res.game, nm), cxp - d / 2, cyp - d * 0.45f, d, d * 0.9f, down ? WHITE : RGBA(255, 255, 255, 200));
                 continue;
             }
             // where a finger goes is always to be seen, but see-through: each column outlined in its colour and tinted
@@ -6238,9 +6288,11 @@ static void draw_touch_pads(void)
         gfx_rect(SCREEN_W - 96 - cm, 8, 88, 44, RGBA(0, 0, 0, 120));
         font_draw(res.ui, "PAUSE", SCREEN_W - 52 - cm, 18, 20, RGBA(240, 240, 240, 230), ALIGN_CENTER);
         if (G.sp >= 0.5f && !G.sp_active) {
-            float b = 0.7f + 0.3f * sinf(t * 8);
-            gfx_rect(8, 8, 150, 44, RGBA(40, 150, 255, (int)(190 * b)));
-            font_draw(res.ui, "STAR POWER", 83, 18, 20, WHITE, ALIGN_CENTER);
+            // ready: the upper screen says where to tap
+            float b = 0.6f + 0.4f * sinf(t * 7);
+            float cx = SCREEN_W / 2;
+            gfx_rect_grad(cx - 230, 96, 460, 46, RGBA(40, 150, 255, (int)(150 * b)), RGBA(40, 150, 255, (int)(60 * b)));
+            font_draw_shadow(res.ui, "TAP UP HERE: STAR POWER", cx, 106, 24, RGBA(235, 248, 255, (int)(255 * (0.7f + 0.3f * b))), ALIGN_CENTER);
         }
     }
 }
@@ -6270,6 +6322,12 @@ static float hud_rail_x(float y)
 
 static void draw_hud(void)
 {
+    if (plat_below() > 0 && game_touch_pads && !G.vocal && !G.view_mode && G.lanes > 0) {
+        // held upright: the strip under the picture, dark, first; the score and the pads go on it
+        gfx_below_begin(plat_below());
+        gfx_rect_grad(0, 0, SCREEN_W, plat_below(), RGBA(14, 12, 22, 255), RGBA(4, 4, 8, 255));
+        gfx_below_end();
+    }
     gfx_2d();
     gfx_blend(BLEND_ALPHA);
     float t = (float)G.t;
@@ -6309,7 +6367,10 @@ static void draw_hud(void)
         // highway's left rail leaves room there, else against the screen's edge, else up the screen where the rail has
         // narrowed away from it
         float hud_x = 72, hud_y = 413 - lift;
-        if (!upright) {
+        if (!upright && game_touch_pads && cfg.touch_frets == 2) {
+            hud_x = 4;                          // thumbs: the bottom corners are theirs, the group goes to the top
+            hud_y = 122;
+        } else if (!upright) {
             const float need = 188 + 8;         // the plates' width and a gap
             if (hud_rail_x(hud_y + 70) < hud_x + need)
                 hud_x = 4;
@@ -6579,7 +6640,7 @@ void game_draw(void)
     if (getenv("GHV_SPFX"))
         G.sp_active = true;             // to look at Star Power without playing up to it
 #endif
-    if (G.camera != cfg.camera || G.camera_phone != (game_touch_pads && plat_below() <= 0 && cfg.camera == 0))
+    if (G.camera != cfg.camera || G.camera_phone != (game_touch_pads && plat_below() <= 0 && cfg.camera == 0 && cfg.touch_frets != 2))
         setup_camera();         // changed from the pause menu, or the phone turned
     // the frame rate (the frames drawn), and how many updates this frame covers: what moves by the frame moves this much
     G.fps_frames++;

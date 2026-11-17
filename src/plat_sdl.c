@@ -142,8 +142,9 @@ static void to_screen(float nx, float ny, float * sx, float * sy)
 {
     int x, y, w, h, fw, fh;
     plat_view(&x, &y, &w, &h, &fw, &fh);
+    // (plat_view's y counts up from the bottom, as GL's viewport does; a finger's from the top)
     *sx = (nx * fw - x) * SCREEN_W / (w > 0 ? w : 1);
-    *sy = (ny * fh - y) * SCREEN_H / (h > 0 ? h : 1);
+    *sy = (ny * fh - (fh - y - h)) * SCREEN_H / (h > 0 ? h : 1);
 }
 
 // the fingers on the screen, by SDL's ids

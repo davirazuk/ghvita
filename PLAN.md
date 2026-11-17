@@ -836,3 +836,10 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 - Chorus Encore search with filters on (an instrument or difficulty, as the default Guitar Expert): its advanced
   search ignores "search" and gave every chart back; the words now go in as the name, then as the artist, the two
   merged (dl.c fetch_page).
+- Phone fingers: plat_view's y counts from the bottom (GL) but a finger's from the top, so held upright every touch
+  landed ~560 units off: the pads under the picture never answered (to_screen). Test hook: script "finger nx ny"
+  goes through the same conversion as a real finger.
+- Touch: Star Power by tapping anywhere above the pads (a prompt shows when it's ready); thumbs mode has big round
+  buttons, the normal highway, the HUD up top, and plays a chord as each thumb's side of it (any fret of the chord on
+  that side) with sustains held by any of their frets; no Vita button hints on a phone; the portrait strip is drawn
+  before the score so the rock meter shows under the picture.
