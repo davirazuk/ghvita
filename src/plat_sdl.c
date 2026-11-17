@@ -257,6 +257,9 @@ void plat_init(void)
     SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");          // fingers are fingers, not a mouse as well
     SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
     SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight Portrait");
+#ifdef _WIN32
+    SDL_SetMainReady();             // main() is the game's own, not SDL2main's
+#endif
     SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER);
 #ifdef __ANDROID__
     // the art is unpacked into the app's own storage by GHVitaActivity before this runs; songs and saves go where a
