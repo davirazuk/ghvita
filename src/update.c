@@ -122,8 +122,8 @@ static int check_thread(void * arg)
         // quietly stops updating
         if ((status == 401 || status == 403) && !told_token) {
             told_token = true;
-            snprintf(news, sizeof(news), status == 401 ? "Updates: GitHub refused the update token (expired?)"
-                                                       : "Updates: the update token can't read the repository");
+            snprintf(news, sizeof(news), status == 401 ? "Updates: GitHub refused the update token (expired?) [%d]"
+                                                       : "Updates: the update token can't read the repository [%d]", status);
         }
         state = UP_NONE;
         return 0;

@@ -419,7 +419,7 @@ bool plat_poll(Pad * pad)
         for (size_t i = 0; i < sizeof(fk) / sizeof(fk[0]); i++)
             if (k[fk[i].sc])
                 pad->key_frets |= (uint8_t)(1u << fk[i].lane);
-        pad->key_strum = (k[SDL_SCANCODE_UP] ? 1 : 0) | (k[SDL_SCANCODE_DOWN] ? 2 : 0);
+        pad->key_strum = (k[SDL_SCANCODE_UP] ? 1 : 0) | (k[SDL_SCANCODE_DOWN] ? 2 : 0) | (k[SDL_SCANCODE_SPACE] ? 4 : 0);
         if (k[SDL_SCANCODE_RSHIFT] || k[SDL_SCANCODE_LSHIFT])
             pad->buttons |= BTN_SELECT;     // Star Power
     }

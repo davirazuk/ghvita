@@ -5390,7 +5390,7 @@ static void option_text(int i, char * name, char * value, size_t n)
     case O_STRUM:
         strcpy(name, "Strum");
         snprintf(value, n, "%s", !cfg.strum ? "Off (a fret plays)" : touch_only ? "On (tap above the pads)"
-                 : game_pc_keys ? "On (arrow keys)" : "On (Down or Cross)");
+                 : game_pc_keys ? "On (arrows or Space)" : "On (Down or Cross)");
         break;
     case O_TOUCHFRETS:
         strcpy(name, "Touch frets");
