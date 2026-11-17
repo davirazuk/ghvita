@@ -5785,10 +5785,35 @@ static void lcd(const char * which, long value, int cells, float right, float y,
 // GHWT's solo HUD: left of the highway the ROCK dome, the Star Power tubes round its top and the score and streak
 // counters under it; on the right rail the multiplier over its seat of streak lamps
 // the buttons under the lanes, as a song starts
+// a keyboard key as a little keycap with its name on it (the PC build names keys, not the Vita's buttons); its width
+bool game_pc_keys;
+
+float ui_keycap(const char * label, float x, float y, float h, float alpha)
+{
+    float tw = font_width(res.ui, label, h * 0.62f), w = fmaxf(h, tw + h * 0.5f);
+    gfx_rect(x, y + h * 0.08f, w, h * 0.92f, with_alpha(RGBA(20, 20, 24, 255), alpha * 0.85f));
+    gfx_rect(x, y, w, h * 0.86f, with_alpha(RGBA(232, 230, 224, 255), alpha));
+    gfx_rect(x + 2, y + 2, w - 4, h * 0.86f - 4, with_alpha(RGBA(250, 249, 245, 255), alpha));
+    font_draw(res.ui, label, x + w / 2, y + h * 0.1f, h * 0.62f, with_alpha(RGBA(30, 30, 34, 255), alpha), ALIGN_CENTER);
+    return w;
+}
+
 static void draw_keys(void)
 {
     if (game_touch_pads)
         return;                         // a phone: no buttons to name, the pads are the keys
+    if (game_pc_keys) {
+        // a PC: the keyboard's fret keys under the lanes
+        static const char * const fk[5] = {"A", "S", "D", "F", "G"};
+        float a = G.t < 3.5 ? 1 : (float)(4.5 - G.t);
+        for (int lane = 0; lane < G.lanes && lane < 5 && a > 0; lane++) {
+            int src = lefty_now() ? G.lanes - 1 - lane : lane;
+            float x, y;
+            project(lane_x(lane), 0, 0, &x, &y);
+            ui_keycap(fk[src], x - 17, y + 28, 34, a);
+        }
+        return;
+    }
     static const struct {
         uint32_t button;
         const char * name;

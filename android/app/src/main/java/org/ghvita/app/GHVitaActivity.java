@@ -69,6 +69,10 @@ public class GHVitaActivity extends SDLActivity {
                 java.io.FileWriter w = new java.io.FileWriter(new java.io.File(ext, "update.log"), true);
                 w.write(new java.util.Date() + "  " + what + "\n");
                 w.close();
+                // the game's main menu shows the last of them
+                java.io.FileWriter st = new java.io.FileWriter(new java.io.File(ext, "update_state.txt"), false);
+                st.write("Update: " + what + "\n");
+                st.close();
             }
         } catch (Exception e) {
             // nothing to do
@@ -220,7 +224,7 @@ public class GHVitaActivity extends SDLActivity {
             out.delete();
             return;
         }
-        note("build " + latest + " downloaded", false);
+        note("build " + latest + " downloaded, installing", true);
         install(out);
     }
 

@@ -191,6 +191,17 @@ static void help_bar(const char * const * items, int n)
             gfx_rect(x - 6, SCREEN_H - 38, tw + 22, 34, RGBA(255, 255, 255, 34));
             gfx_rect(x - 6, SCREEN_H - 38, tw + 22, 2, RGBA(255, 200, 90, 200));
             x += 5;
+        } else if (game_pc_keys) {
+            // a PC: the key that does it, on a keycap
+            static const struct { const char * name, * key; } kk[] = {
+                {"btn_cross", "Z"}, {"btn_circle", "X"}, {"btn_square", "A"}, {"btn_triangle", "S"}, {"btn_l", "Q"},
+                {"btn_r", "W"}, {"btn_start", "Enter"}, {"btn_select", "Bksp"}, {"btn_left", "<>"}, {"btn_up", "^v"},
+                {"btn_right", ">"}, {"btn_down", "v"}};
+            const char * key = "?";
+            for (size_t m = 0; m < sizeof(kk) / sizeof(kk[0]); m++)
+                if (strcmp(items[i], kk[m].name) == 0)
+                    key = kk[m].key;
+            x += ui_keycap(key, x, SCREEN_H - 36 * k, 30 * k, 1) + 7 * k;
         } else {
             gfx_sprite(b, x, SCREEN_H - 21 - 14 * k, w, 28 * k, WHITE);
             x += w + 6 * k;
@@ -753,7 +764,7 @@ static void title_screen(void)
     res_title_art();
     float a = 0.8f + 0.2f * sinf((float)now_s * 4);   // breathes, never fades out
     gfx_rect_grad(0, 420, SCREEN_W, 90, RGBA(0, 0, 0, 0), RGBA(0, 0, 0, 210));
-    font_draw_shadow(res.title, touch_only ? "TAP TO ROCK" : "PRESS X TO ROCK", SCREEN_W * 0.74f, 452, 46, fade_alpha(RGBA(255, 220, 120, 255), a),
+    font_draw_shadow(res.title, touch_only ? "TAP TO ROCK" : game_pc_keys ? "PRESS ENTER TO ROCK" : "PRESS X TO ROCK", SCREEN_W * 0.74f, 452, 46, fade_alpha(RGBA(255, 220, 120, 255), a),
                      ALIGN_CENTER);
     gfx_end();
 }
@@ -1264,7 +1275,31 @@ static void main_menu(void)
     snprintf(t, sizeof(t), "%d %s", songs_count(), songs_count() == 1 ? "song" : "songs");
     font_draw_shadow(res.ui, t, 244, 112, 20, RGBA(220, 220, 220, 255), ALIGN_LEFT);
     // which build this is: a card can quietly keep an old one
-    font_draw(res.ui, "build " __DATE__ " " __TIME__, SCREEN_W - 20, 490, 16, RGBA(200, 200, 210, 200), ALIGN_RIGHT);
+    {
+        char b[200];
+        snprintf(b, sizeof(b), "build %d  (%s)", GHV_BUILD, __DATE__);
+        font_draw(res.ui, b, SCREEN_W - 20, 490, 16, RGBA(200, 200, 210, 200), ALIGN_RIGHT);
+#ifdef __ANDROID__
+        // what the phone's updater last found (GHVitaActivity writes it): said where it can't be missed
+        static double read_t = -10;
+        static char state[160];
+        if (now_s - read_t > 2) {
+            read_t = now_s;
+            char path[400];
+            snprintf(path, sizeof(path), "%supdate_state.txt", plat_data_dir());
+            FILE * f = fopen(path, "r");
+            state[0] = 0;
+            if (f) {
+                if (!fgets(state, sizeof(state), f))
+                    state[0] = 0;
+                fclose(f);
+                state[strcspn(state, "\r\n")] = 0;
+            }
+        }
+        if (state[0])
+            font_draw_fit(res.ui, state, SCREEN_W - 20, 468, 18, 560, RGBA(255, 214, 120, 235), ALIGN_RIGHT);
+#endif
+    }
     status_corner();
     dl_now(now, sizeof(now));
     if (now[0]) {
@@ -7151,7 +7186,10 @@ int main(void)
         menu_touch();
         plat_portrait_song(screen == S_PLAY || screen == S_PAUSE || screen == S_RESUME);
         plat_song_keys(screen == S_PLAY);
-        game_touch_pads = touch_only;   // the drawn pads are a phone's: a Vita's screen plays its cups as it always did
+        game_touch_pads = touch_only;
+#if !defined(__vita__) && !defined(__ANDROID__)
+        game_pc_keys = !touch_only;     // a PC played on its keyboard
+#endif   // the drawn pads are a phone's: a Vita's screen plays its cups as it always did
         int drawn = screen;
         switch (screen) {
         case S_TITLE: title_screen(); break;

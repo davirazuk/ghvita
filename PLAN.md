@@ -855,3 +855,6 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 - PC: keyboard frets in songs (A S D F G, J K L as yellow blue orange, Space open/kick, Shift Star Power).
 - Windows: .github/workflows/windows.yml ([pc] in a commit message) builds with MSYS2 MinGW-w64 and publishes
   GHVita-windows.zip (exe, DLLs, art, data/songs) as the "windows" pre-release. src/wincompat.h for mkdir.
+- Each build looks like its device: the Vita names its buttons; a phone has touch chips; a PC (game_pc_keys) shows
+  keycaps for the keys in the menus' bar, "PRESS ENTER TO ROCK", and A S D F G under the lanes as a song starts.
+- The main menu says the build number; on a phone the updater's last word under it (update_state.txt).

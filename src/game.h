@@ -42,6 +42,8 @@ void game_force_venue(const char * zone);
 // the frets are played on the screen: five wide pads along its bottom, drawn and taken as lanes (main.c sets it once
 // the screen's been touched, or always on a phone)
 extern bool game_touch_pads;
+extern bool game_pc_keys;        // a PC's keyboard: keys are named, not the Vita's buttons
+float ui_keycap(const char * label, float x, float y, float h, float alpha);
 // the next game_start is practice: from..to seconds over and over at speed (0.5..1), and nothing counts
 void game_practice(double from, double to, float speed);
 float game_song_speed(void);    // the music's speed this run: 1 normal
