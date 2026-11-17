@@ -6924,6 +6924,7 @@ int main(void)
         last_buttons = pad.buttons;
         update_repeat();
         menu_touch();
+        plat_portrait_song(screen == S_PLAY || screen == S_PAUSE || screen == S_RESUME);
         game_touch_pads = touch_only;   // the drawn pads are a phone's: a Vita's screen plays its cups as it always did
         int drawn = screen;
         switch (screen) {

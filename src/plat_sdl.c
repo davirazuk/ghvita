@@ -50,12 +50,13 @@ static char shot_dir[512] = ".";
 // The picture is 960x544 whatever the window is: as big as fits, in the middle (plat_view), and a finger's place is
 // brought back into those 960x544
 static int win_w = SCREEN_W, win_h = SCREEN_H;
+static bool portrait_song;      // plat_portrait_song
 
 void plat_view(int * x, int * y, int * w, int * h, int * full_w, int * full_h)
 {
     int vw = win_w, vh = win_w * SCREEN_H / SCREEN_W;
-    if (win_h > win_w) {
-        // held upright: the picture's middle (PORTRAIT_CROP off each side) as wide as the screen, a third bigger
+    if (win_h > win_w && portrait_song) {
+        // held upright in a song: the picture's middle (PORTRAIT_CROP off each side) as wide as the screen, bigger
         vw = win_w * SCREEN_W / (SCREEN_W - 2 * PORTRAIT_CROP);
         vh = vw * SCREEN_H / SCREEN_W;
     } else if (vh > win_h) {
@@ -65,7 +66,7 @@ void plat_view(int * x, int * y, int * w, int * h, int * full_w, int * full_h)
     *x = (win_w - vw) / 2;
     // held upright (a phone in portrait): the picture across the top, the rest of the screen under it for the frets
     // (plat_below); on its side, in the middle
-    if (win_h > win_w) {
+    if (win_h > win_w && portrait_song) {
         // the pads and the song's name under it, the picture over them in the middle of what's left
         int under = PORTRAIT_UNDER * vw / SCREEN_W;
         *y = under + (win_h - under - vh) / 2;
@@ -79,10 +80,17 @@ void plat_view(int * x, int * y, int * w, int * h, int * full_w, int * full_h)
     *full_h = win_h;
 }
 
-// the screen under the picture in the game's units (its 960 across): 0 on its side
+// held upright, a song's screen is laid out for it (the picture's middle bigger, the pads under it); a menu shows the
+// whole picture in the middle of the screen
+void plat_portrait_song(bool on)
+{
+    portrait_song = on;
+}
+
+// the screen under the picture in the game's units (its 960 across): 0 on its side, or in a menu
 float plat_below(void)
 {
-    if (win_h <= win_w || win_w <= 0)
+    if (win_h <= win_w || win_w <= 0 || !portrait_song)
         return 0;
     int x, y, w, h, fw, fh;
     plat_view(&x, &y, &w, &h, &fw, &fh);
