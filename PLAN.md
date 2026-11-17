@@ -683,3 +683,13 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   hand only drifts along the neck with where the notes have been (BandPart.hand_lane).
 - The rail's lamps were 660 lit quads shaded afresh every frame, over 40% of the game's own CPU in a desktop profile
   (gprof build: -pg). Each lamp's quads are kept (LampKeep) and drawn again until its state or the camera changes.
+
+## Textures the right way up (2026-11-17)
+- The .wtch files' texture places count up from the picture's bottom row (Blender's), and the 3D bakes passed them on
+  as they were: every band member's and every venue's textures went on upside down since the first 3D build (nostrils
+  on the forehead, the eye's white where the iris should be, signs unreadable). tools/band.py (--3d) and
+  tools/venue3d.py turn them over at the read. The picture sheets (band_render.c) were never affected.
+- tools/band.py no_soft: a face's soft shadow layers (over the eyeball, in the socket) are left out; the game's alpha
+  test drew them as solid slabs.
+- VitaSDK moved to a pacman-based vdpm on 2026-11-16 and its supported series (2026.08) lacks most libraries: the
+  workflow falls back to `vdpm refresh nightly`. The Vita build was made and linked here with nightly (GHVita.vpk).

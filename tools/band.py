@@ -495,6 +495,42 @@ def write_parts(o, recs):
         o.write(T1.tobytes())
 
 
+def no_soft(meshes, tex_dir, bones):
+    # World Tour lays soft shadows over a face (across the eyeball under the lid, in the eye's socket): triangles whose
+    # texture is half clear all over. The game draws a model solid or not at all (an alpha test), which made slabs of
+    # them: white and black over the iris, dark patches round the eyes. They go; what's cut out sharp (lashes, brows,
+    # hair) has clear and solid texels, never half ones all over, and stays
+    out, cut = [], 0
+    for tex, V, T in meshes:
+        src = find_tex(tex_dir, tex) if tex else None
+        T = np.asarray(T)
+        if src is None or len(T) == 0:
+            out.append((tex, V, T))
+            continue
+        a = np.asarray(Image.open(src).convert('RGBA'))[:, :, 3].astype(np.float32) / 255
+        if ((a > 0.06) & (a < 0.92)).mean() < 0.02:
+            out.append((tex, V, T))
+            continue
+        h, w = a.shape
+        uv = np.asarray(V['uv'], np.float32)[T]                 # tris x 3 x 2
+        pts = [uv[:, 0], uv[:, 1], uv[:, 2], uv.mean(1), (uv[:, 0] + uv[:, 1]) / 2, (uv[:, 1] + uv[:, 2]) / 2, (uv[:, 2] + uv[:, 0]) / 2]
+        # only on a face: a guitar's strings are thin soft lines too, and they stay
+        wt = np.zeros(len(bones))
+        np.add.at(wt, np.asarray(V['j']).ravel(), np.asarray(V['w']).ravel())
+        if sum(wt[i] for i, b in enumerate(bones) if any(k in b[0].lower() for k in HEAD_WORDS)) < 0.6 * max(wt.sum(), 1e-9):
+            out.append((tex, V, T))
+            continue
+        # soft: nowhere solid (a shadow's middle is clear, so "half clear all over" misses it)
+        soft = np.ones(len(T), bool)
+        for p in pts:
+            s = a[np.clip((np.mod(p[:, 1], 1) * h).astype(int), 0, h - 1), np.clip((np.mod(p[:, 0], 1) * w).astype(int), 0, w - 1)]
+            soft &= s < 0.92
+        cut += int(soft.sum())
+        if (~soft).any():
+            out.append((tex, V, T[~soft]))
+    return out, cut
+
+
 FINGER_TABLE = {}       # member -> (the palm's bone, the fingers' bones, 16 x bones x 3 x 4)
 
 
@@ -523,7 +559,9 @@ def export3d(name, meshes, skins, c, alt, tex_dir, layers, bones, work):
             o.write(L.tobytes())
         print(name, '3d alt', S.shape[0], 'frames', len(lb), 'hand bones')
         return
+    meshes, cut = no_soft(meshes, tex_dir, bones)
     total = sum(len(T) for _, _, T in meshes)
+    print(name, cut, 'soft shadow triangles left out')
     parts = thin(meshes, bones, DRUM_BUDGET if name.startswith('drummer') else TRI_BUDGET, work, name)
     parts = pack_atlas(parts, tex_dir, name, out)
     recs = part_records(parts, name)
@@ -563,6 +601,15 @@ def bake(path, work, tex_dir, alt=False):
     name = os.path.basename(path)[5:-5]
     role = name.split('_')[0]
     bones, meshes, clips = wc.read(path)
+    if THREED:
+        # the file's texture places count up from the picture's bottom row, the game's down from its top: turned over
+        # here (they went on upside down before: nostrils on the forehead, the eye's white where its iris should be)
+        flipped = []
+        for t, V, T in meshes:
+            V = V.copy()
+            V['uv'][:, 1] = 1 - V['uv'][:, 1]
+            flipped.append((t, V, T))
+        meshes = flipped
     N = {b[0]: i for i, b in enumerate(bones)}
     rest = wc.rest_model(bones)
     clip = pick_clip(clips, role)

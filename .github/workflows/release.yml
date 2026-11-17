@@ -46,8 +46,12 @@ jobs:
           sudo chown -R "$USER" $VITASDK
           echo "$VITASDK/bin" >> "$GITHUB_PATH"
           export PATH=$VITASDK/bin:$PATH
-          yes | vdpm install curl-mbedtls mbedtls libarchive un7zip opusfile opus mpg123 bzip2 zstd zlib libvorbis libogg \
-            vitaGL vitaShaRK libmathneon SceShaccCgExt taihen
+          libs="curl-mbedtls mbedtls libarchive un7zip opusfile opus mpg123 bzip2 zstd zlib libvorbis libogg vitaGL vitaShaRK libmathneon SceShaccCgExt taihen"
+          # the supported series hasn't every library yet (2026-11: "target not found" for most of these): nightly has
+          if ! (yes | vdpm install $libs); then
+            yes | vdpm refresh nightly
+            yes | vdpm install $libs
+          fi
 
       - name: The art, from the latest release
         run: |
@@ -76,7 +80,7 @@ jobs:
       # last release's art hasn't this bake (assets/band3d/bake.txt), or has no venues, or the commit says [bake]
       - name: The 3D band and the venues, baked from the source art
         env:
-          BAKE: band 3 (16000 and 22000 triangles, both loops, loose bones mended, the fingers by colour)
+          BAKE: band 4 (16000 and 22000 triangles, both loops, loose bones mended, the fingers by colour, textures the right way up)
         run: |
           said=$(git log -1 --format=%B | grep -c '\[bake\]' || true)
           band=0; venues=0

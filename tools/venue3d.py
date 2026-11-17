@@ -74,7 +74,8 @@ def bake(zone, tex_dir, work):
             continue
         c = P[np.unique(T)].mean(0)
         dist = math.hypot(c[0], c[2] - 1.5)
-        keep.append((tex, P, np.asarray(V['uv'], np.float32), np.asarray(V['a'], np.float32), T, dist))
+        # the file's texture places count up from the picture's bottom row, the game's down from its top
+        keep.append((tex, P, np.asarray(V['uv'], np.float32) * [1, -1] + [0, 1], np.asarray(V['a'], np.float32), T, dist))
     # thin things (a lighting truss's tubes, railings: thousands of slivers) fall to shards when thinned: the nearest of
     # them stay, lightly thinned, up to THIN_KEEP triangles; the rest go
     thin_ix = []
