@@ -2634,11 +2634,13 @@ static float cam_eye[3];     // where the camera stands, for the HUD's lit 3D pi
 static void setup_camera(void)
 {
     // World Tour's, then lower and nearer for bigger gems, then high up to read further ahead
-    static const float eyes[3][3] = {{0, 4.7f, -6.5f}, {0, 4.0f, -5.5f}, {0, 5.7f, -6.9f}};
-    static const float ats[3] = {4.6f, 3.9f, 5.4f};
+    // World Tour's fitted to its own footage (the strikeline 88% down the screen, the outer lanes 35% of its width
+    // apart, the far end 45% down): a longer lens from further back and higher up
+    static const float eyes[3][3] = {{0, 5.4f, -9.5f}, {0, 4.0f, -5.5f}, {0, 5.7f, -6.9f}};
+    static const float ats[3] = {8.75f, 3.9f, 5.4f}, fovs[3] = {34, 40, 40};
     G.camera = cfg.camera;
     const float * eye = eyes[cfg.camera], at[3] = {0, 0, ats[cfg.camera]}, up[3] = {0, 1, 0};
-    float fov = 40;
+    float fov = fovs[cfg.camera];
     mat_perspective(G.proj, fov, (float)SCREEN_W / SCREEN_H, 0.5f, 60);
     mat_lookat(G.view, eye, at, up);
     memcpy(cam_eye, eye, sizeof(cam_eye));
@@ -5205,7 +5207,8 @@ static void draw_rail_meter(void)
     // the streak lamps on the right rail, as World Tour has them: a twisted gold bar lying along the outside of the
     // rail just under the multiplier, five glass bulbs on it pointing out, end to end; unlit they're dark red glass,
     // lit yellow up to x2, green to x3, purple on to the top, blue in Star Power
-    const float z0 = 0.55f, z1 = 2.15f, rb = 0.072f, seat_x = -HALF_W - 0.045f, seat_r = 0.045f;
+    // as World Tour's footage has them: from just above the strikeline a long way up the rail, the multiplier over them
+    const float z0 = 0.6f, z1 = 3.3f, rb = 0.092f, seat_x = -HALF_W - 0.045f, seat_r = 0.05f;
     int m = multiplier(), base_m = 1 + G.streak / 10, max_m = G.part_id == PART_BASS ? 6 : 4;
     int lit = base_m >= max_m ? 5 : (G.streak % 10) / 2;
     bool half = base_m < max_m && G.streak % 2;
@@ -6063,9 +6066,10 @@ static void draw_hud(void)
     {
         // laid out as World Tour's solo HUD (footage in ~/.cache/ghv-work/lampref): the score bar, the streak counter
         // under it, both a little wider than the dome, which sits on the bar
-        const float bar_x = 16, bar_w = 170, bar_y = 400, bar_h = 36;      // the score bar's leather, on the screen
-        const float cnt_w = 158, cnt_h = 31, cnt_y = bar_y + bar_h + 2;
-        const float k = 0.66f, ks = k / 0.6f;                                // the dome's 256x256 texture
+        // (placed as World Tour's footage has it: against the highway's left rail, the plates tucked just under it)
+        const float bar_x = 100, bar_w = 188, bar_y = 413, bar_h = 36;      // the score bar's leather, on the screen
+        const float cnt_w = 174, cnt_h = 32, cnt_y = bar_y + bar_h + 2;
+        const float k = 0.73f, ks = k / 0.6f;                                // the dome's 256x256 texture
         const float dx = bar_x + bar_w / 2 - 128 * k, dy = bar_y + 6 - 172 * k;
         const float cx = dx + 129 * k, cy = dy + 124 * k;   // the centre of the dome's arc
         const float pi = 3.14159265f;
@@ -6130,9 +6134,10 @@ static void draw_hud(void)
             had = stars;
             const Sprite * on = atlas_get(res.hud, stars >= 6 ? "hud_star_gold" : "hud_star_on");
             const Sprite * off = atlas_get(res.hud, "hud_star_off");
-            const float size = 24, gap = (bar_w - 5 * size) / 4, y0 = cnt_y + cnt_h + 5;
+            // (World Tour has none: they sit under its plates, clear of the rail, which leans in over them)
+            const float st_x = bar_x - 70, st_w = 180, size = 24, gap = (st_w - 5 * size) / 4, y0 = cnt_y + cnt_h + 5;
             for (int i = 0; i < 5; i++) {
-                float x = bar_x + i * (size + gap), grow = 0;
+                float x = st_x + i * (size + gap), grow = 0;
                 if (i == stars - 1 && G.t - pop_t < 0.35 && G.t >= pop_t)
                     grow = (float)(1 - (G.t - pop_t) / 0.35) * 8;
                 gfx_sprite(off, x, y0, size, size, RGBA(255, 255, 255, 150));
@@ -6146,7 +6151,8 @@ static void draw_hud(void)
             // Star Power as a bar under the stars: how full, the half where it can be set off marked, blue and
             // glowing when it's ready, draining white-blue while it's on (the dome's tubes are small to read mid-song)
             {
-                float sy = y0 + size + 4, sw = bar_w, sh = 8, f = G.sp < 0 ? 0 : G.sp > 1 ? 1 : G.sp;
+                float sy = y0 + size + 4, sw = st_w, sh = 8, f = G.sp < 0 ? 0 : G.sp > 1 ? 1 : G.sp;
+                const float bar_x = st_x;      // under the stars
                 bool ready = f >= 0.5f && !G.sp_active;
                 gfx_rect(bar_x - 1, sy - 1, sw + 2, sh + 2, RGBA(0, 0, 0, 170));
                 uint32_t c0 = G.sp_active ? RGBA(170, 230, 255, 255) : ready ? RGBA(60, 170, 255, 255) : RGBA(40, 110, 200, 230);
