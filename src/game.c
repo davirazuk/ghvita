@@ -402,7 +402,7 @@ static void pick_band(const Song * song, uint32_t h)
         for (int j = 0; j < n; j++)
             if (cfg.band_pick[r][0] && strcmp(res.band_names[found[j]], cfg.band_pick[r]) == 0)
                 pick = found[j];            // chosen in the options
-        G.band3d[r] = cfg.band_pictures ? NULL : res_band3d(r, res.band_names[pick], cfg.band_hue[r] * 40);
+        G.band3d[r] = cfg.band_pictures ? NULL : res_band3d(r, res.band_names[pick], cfg.band_hue[r] * 40 + cfg.band_hair[r] * 1000);
         if (G.band3d[r]) {
             // the model stands in for the pictures: their sheets (megabytes each) aren't loaded, only a sheet's
             // measures kept for the code that picks frames

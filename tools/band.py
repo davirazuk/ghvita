@@ -431,6 +431,8 @@ def pack_atlas(parts, tex_dir, name, out, ATLAS=ATLAS, dens=1.0, tag='_atlas', P
         place[k] = (x, y, tw * nu, th * nv)
     aname = name + tag
     atlas.save(os.path.join(out, 'tex', aname + '.png'), optimize=True)
+    # where each texture went (the hair's places, for a dye: export3d)
+    pack_atlas.last = {'atlas': aname, 'h': AH, 'place': {k[0]: v for k, v in place.items()}, 'alone': {}}
     # the atlas's meshes as one part, the rest as they were
     merged = {k: [] for k in ('p', 'n', 'uv', 'j', 'w', 'a')}
     tris, base = [], 0
@@ -458,6 +460,7 @@ def pack_atlas(parts, tex_dir, name, out, ATLAS=ATLAS, dens=1.0, tag='_atlas', P
             if k > 1:
                 im = im.resize((max(1, int(im.width / k)), max(1, int(im.height / k))), Image.LANCZOS)
             im.save(os.path.join(out, 'tex', tname + '.png'), optimize=True)
+            pack_atlas.last['alone'][src] = tname
         result.append((tname, V, T, True))          # True: wraps
     print(name, 'atlas', ATLAS, 'x', AH, 'scale %.2f' % scale, len(place), 'textures,', len(alone), 'parts alone')
     return result
@@ -536,6 +539,47 @@ def no_soft(meshes, tex_dir, bones):
     return out, cut
 
 
+FACE_BONES = ('jaw', 'lip', 'mouth', 'eye', 'brow', 'cheek', 'nostril', 'tongue')
+
+
+def hair_textures(meshes, bones, tex_dir):
+    # the textures of what's on the head that isn't the face: hair, a hat, a band in the hair. The face's textures are
+    # the ones any mesh moved by the jaw, lips, eyes or brows uses (a face painted with its hairline stays the face's)
+    eye = [np.linalg.inv(b[4])[:3, 3] for b in bones if b[0].lower() in ('bone_eye_l', 'bone_eye_r')]
+    eye_y = float(np.mean([e[1] for e in eye])) if eye else 1.6
+    near_head = set()
+    for i, b in enumerate(bones):
+        n = b[0].lower()
+        y = float(np.linalg.inv(b[4])[1, 3])
+        if 'head' in n or ('acc' in n and y > eye_y - 0.3):
+            near_head.add(i)
+    face, cand = set(), []
+    for tex, V, T in meshes:
+        src = find_tex(tex_dir, tex) if tex else None
+        if not src or len(T) == 0:
+            continue
+        w = np.zeros(len(bones))
+        np.add.at(w, np.asarray(V['j']).ravel(), np.asarray(V['w']).ravel())
+        tot = max(w.sum(), 1e-9)
+        if sum(w[i] for i, b in enumerate(bones) if any(k in b[0].lower() for k in FACE_BONES)) > 0.1 * tot:
+            face.add(src)
+        elif sum(w[i] for i in near_head) > 0.6 * tot:
+            cand.append(src)
+    return set(c for c in cand if c not in face)
+
+
+def write_hair(out, hair):
+    # tex/<atlas>.hair: the hair's places in that atlas (x y w h in its pixels), or "all <texture>" for one of its own
+    info = pack_atlas.last
+    lines = ['%d %d %d %d' % info['place'][src] for src in hair if src in info['place']]
+    lines += ['all %s' % info['alone'][src] for src in hair if src in info['alone']]
+    path = os.path.join(out, 'tex', info['atlas'] + '.hair')
+    if lines:
+        open(path, 'w').write('\n'.join(lines) + '\n')
+    elif os.path.exists(path):
+        os.remove(path)
+
+
 FINGER_TABLE = {}       # member -> (the palm's bone, the fingers' bones, 16 x bones x 3 x 4)
 
 
@@ -568,13 +612,17 @@ def export3d(name, meshes, skins, c, alt, tex_dir, layers, bones, work):
     total = sum(len(T) for _, _, T in meshes)
     print(name, cut, 'soft shadow triangles left out')
     parts = thin(meshes, bones, DRUM_BUDGET if name.startswith('drummer') else TRI_BUDGET, work, name)
+    hair = hair_textures(meshes, bones, tex_dir)
     parts = pack_atlas(parts, tex_dir, name, out)
+    write_hair(out, hair)
     recs = part_records(parts, name)
     # the far body: a quarter of the triangles and a small atlas with no mipmaps (an atlas's mipmaps run its pictures
     # into each other, which is what a small figure would be drawn with)
     drum = name.startswith('drummer')
     far = thin(meshes, bones, FAR_DRUM if drum else FAR_BUDGET, work, name + '_far', 60, 0.3, 1.3, 0.07)
-    far = part_records(pack_atlas(far, tex_dir, name, out, FAR_ATLAS, 0.25, '_far', 2), name)
+    far = pack_atlas(far, tex_dir, name, out, FAR_ATLAS, 0.25, '_far', 2)
+    write_hair(out, hair)
+    far = part_records(far, name)
     os.makedirs(os.path.join(out, 'far'), exist_ok=True)
     with open(os.path.join(out, 'far', name + '.b3d'), 'wb') as o:
         o.write(b'B3F1' + struct.pack('<i', len(far)))

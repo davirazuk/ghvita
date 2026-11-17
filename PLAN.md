@@ -730,3 +730,24 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   button pictures and the title says TAP. In a song, game_touch_pads (set once the screen's touched, always on a
   phone): five pads the screen's width along the bottom, lane colours, PAUSE and STAR POWER boxes in the top corners.
   Open notes and drum kicks have no pad yet.
+
+## Hair edges, the hands on time, a camera that follows the action, hair dyes, Android cleanup (2026-11-17)
+- band3d_draw: close shots draw the mesh twice: alpha test 0.45 with depth, then 0.06 blended without depth (soft hair
+  and lash edges). gfx.c upload_mipmaps keep_coverage: each mip level's alpha scaled so the 0.45 test keeps the full
+  size's share (thin strands vanished when drawn small or at a slant).
+- BAND_LEAD 0.035 s: band_cell (sticks land early), the strum (starts 0.065 s early), the fret change (0.105 s): the
+  3D pose shows about two frames late (worker thread + easing). The fret hand's place follows the lowest lane quickly
+  (ease 0.18, was 0.04).
+- cine_star(): anyone's chart solo, the drums playing alone, the singer singing while the guitars rest: the camera
+  cuts to them (shots that show what they're doing) and keeps them while it lasts; the round never cuts to a member
+  sitting out while others play. GHV_CAMYAW (tests) turns a close shot's camera.
+- Hair dyes: tools/band.py hair_textures (head-weighted meshes whose texture no face bone uses) -> tex/<atlas>.hair
+  ("x y w h" places, "all <tex>" for one of its own). band3d_load reads them; gfx_load_hair masks those pixels: the
+  clothes' hue skips them, a dye (cfg.band_hair, 1..9) recolours them by their own lightness. The hue now hands
+  1000 x dye + degrees through res_band3d. turn_hue's skin test is by hue (-25..50 deg, not vivid): pale skin went
+  blue before. ROCKERS: Square cycles the dye. Bake marker band 6.
+- Android: Vita-only options hidden (tilt, rear pad, button layouts: opt_list), the Vita updater off, phone paths in
+  the empty-library text, a real microphone through SDL capture (port 1; GHV_MIC=sdl on the desktop).
+- select_bar is the main menu's slanted orange wedge everywhere.
+- Mornye: its extension runtime gives extensions Blowfish and segmented CTR decryption to unlock streaming services'
+  protected tracks; not ported (declined). A plain Vita downloader for the user's own files was offered instead.

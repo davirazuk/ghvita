@@ -247,7 +247,63 @@ void gfx_load_hue(int degrees)
     load_hue = ((degrees % 360) + 360) % 360;
 }
 
-static void turn_hue(uint8_t * px, int w, int h)
+// the hair's places in the next picture (its pixels; all of it for a hair texture of its own), and its dye (0: none)
+static struct { int x, y, w, h; } hair_rect[32];
+static int hair_n, hair_dye;
+static bool hair_all;
+
+void gfx_load_hair(int dye, const int * rects, int n, bool all)
+{
+    hair_dye = dye;
+    hair_all = all;
+    hair_n = n > 32 ? 32 : n;
+    for (int i = 0; i < hair_n; i++) {
+        hair_rect[i].x = rects[i * 4];
+        hair_rect[i].y = rects[i * 4 + 1];
+        hair_rect[i].w = rects[i * 4 + 2];
+        hair_rect[i].h = rects[i * 4 + 3];
+    }
+}
+
+// a dye: the hair's own light and shade, in the dye's colour (black hair comes out dark, but the colour shows)
+static const uint8_t dyes[10][3] = {{0, 0, 0}, {236, 196, 112}, {196, 34, 28}, {212, 104, 40}, {40, 96, 236},
+                                    {244, 88, 184}, {56, 204, 84}, {136, 60, 212}, {236, 236, 242}, {26, 26, 32}};
+
+static uint8_t * hair_mask(int w, int h)
+{
+    if (!hair_n && !hair_all)
+        return NULL;
+    uint8_t * m = calloc((size_t)w * h, 1);
+    if (!m)
+        return NULL;
+    if (hair_all)
+        memset(m, 1, (size_t)w * h);
+    for (int i = 0; i < hair_n; i++)
+        for (int y = hair_rect[i].y; y < hair_rect[i].y + hair_rect[i].h && y < h; y++)
+            for (int x = hair_rect[i].x; x < hair_rect[i].x + hair_rect[i].w && x < w; x++)
+                if (x >= 0 && y >= 0)
+                    m[(size_t)y * w + x] = 1;
+    return m;
+}
+
+static void dye_hair(uint8_t * px, const uint8_t * mask, int w, int h)
+{
+    if (!mask || hair_dye <= 0 || hair_dye > 9)
+        return;
+    const uint8_t * d = dyes[hair_dye];
+    for (size_t i = 0, n = (size_t)w * h; i < n; i++) {
+        if (!mask[i])
+            continue;
+        uint8_t * p = px + i * 4;
+        float lum = (0.3f * p[0] + 0.59f * p[1] + 0.11f * p[2]) / 255, k = 0.16f + 1.15f * lum;
+        for (int c = 0; c < 3; c++) {
+            float v = d[c] * k;
+            p[c] = (uint8_t)(v > 255 ? 255 : v);
+        }
+    }
+}
+
+static void turn_hue(uint8_t * px, int w, int h, const uint8_t * skip)
 {
     // a rotation about the grey axis (YIQ), as a 3 x 3 in 8.8 fixed point
     float a = (float)load_hue * 3.14159265f / 180, c = cosf(a), s = sinf(a);
@@ -258,13 +314,19 @@ static void turn_hue(uint8_t * px, int w, int h)
     for (int i = 0; i < 9; i++)
         m[i] = (int)(M[i] * 256);
     for (size_t i = 0, n = (size_t)w * h; i < n; i++, px += 4) {
+        if (skip && skip[i])
+            continue;                   // hair: its own colour, or its dye
         int r = px[0], g = px[1], b = px[2];
         int hi = r > g ? (r > b ? r : b) : (g > b ? g : b), lo = r < g ? (r < b ? r : b) : (g < b ? g : b), sat = hi - lo;
         if (sat < 24)
             continue;                   // grey: nothing to turn
-        // skin and wood: red the most, then green, then blue, and not a vivid colour
-        if (r >= g && g >= b && sat * 100 < hi * 62 && (r - g) * 100 < sat * 72)
-            continue;
+        // skin (and wood): a hue from rose round to orange-yellow (about -25 to 50 degrees) and not a vivid colour. Pale
+        // skin is often a touch more blue than green, which the old test ("red, then green, then blue") turned blue
+        if (r == hi && sat * 100 < hi * 66) {
+            int hue6 = g >= b ? (g - b) * 60 / (sat ? sat : 1) : -((b - g) * 60 / (sat ? sat : 1));   // -60..60, 0 red
+            if (hue6 >= -25 && hue6 <= 50)
+                continue;
+        }
         int nr = (m[0] * r + m[1] * g + m[2] * b) >> 8, ng = (m[3] * r + m[4] * g + m[5] * b) >> 8;
         int nb = (m[6] * r + m[7] * g + m[8] * b) >> 8;
         px[0] = (uint8_t)(nr < 0 ? 0 : nr > 255 ? 255 : nr);
@@ -276,7 +338,7 @@ static void turn_hue(uint8_t * px, int w, int h)
 Tex * tex_load(const char * path, int flags)
 {
     int w, h, n;
-    uint8_t * px = load_hue ? NULL : load_raw(path, &w, &h);
+    uint8_t * px = load_hue || hair_dye ? NULL : load_raw(path, &w, &h);
     if (px) {
         Tex * t = tex_rgba(px, w, h, flags);
         free(px);
@@ -287,8 +349,13 @@ Tex * tex_load(const char * path, int flags)
         plat_log("tex: can't load %s", path);
         return NULL;
     }
-    if (load_hue)
-        turn_hue(px, w, h);
+    if (load_hue || hair_dye) {
+        uint8_t * mask = hair_mask(w, h);
+        if (load_hue)
+            turn_hue(px, w, h, mask);
+        dye_hair(px, mask, w, h);
+        free(mask);
+    }
     Tex * t = tex_rgba(px, w, h, flags);
     stbi_image_free(px);
     return t;

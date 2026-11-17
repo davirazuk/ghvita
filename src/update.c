@@ -133,6 +133,10 @@ static int check_thread(void * arg)
 
 void update_check(bool now)
 {
+#ifdef __ANDROID__
+    (void)now;
+    return;                     // a phone gets a new APK from the releases page, not the Vita's updater
+#endif
     // at the first menu, then again every RECHECK_S or on waking (now) while nothing's on offer: before, it asked once a
     // launch, and a Vita that only ever sleeps never asked again
     double t = plat_now_us() / 1e6;
@@ -290,6 +294,9 @@ void update_install(void)
 
 void update_boot(void)
 {
+#ifdef __ANDROID__
+    return;
+#endif
     char flag[300], path[300], line[200] = "";
     path_of(flag, sizeof(flag), "pending");
     FILE * f = fopen(flag, "r");

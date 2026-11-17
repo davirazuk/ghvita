@@ -90,6 +90,34 @@ static void * read_all(const char * path, long * size)
     return d;
 }
 
+// the hair dye for the model being loaded, and the textures of its own that are all hair (from the atlas's .hair "all"
+// lines, read by band3d_load)
+static int load_dye;
+static char alone_hair[8][40];
+static int alone_n;
+
+static bool hair_alone(const char * tex)
+{
+    for (int i = 0; i < alone_n; i++)
+        if (strcmp(alone_hair[i], tex) == 0)
+            return true;
+    return false;
+}
+
+static void read_alone(const char * name, const char * tag)
+{
+    char path[512], line[96];
+    snprintf(path, sizeof(path), "%sband3d/tex/%s%s.hair", plat_asset_dir(), name, tag);
+    FILE * f = fopen(path, "r");
+    while (f && fgets(line, sizeof(line), f))
+        if (strncmp(line, "all ", 4) == 0 && alone_n < 8) {
+            line[strcspn(line, "\r\n")] = 0;
+            snprintf(alone_hair[alone_n++], sizeof(alone_hair[0]), "%s", line + 4);
+        }
+    if (f)
+        fclose(f);
+}
+
 // a file's parts from `at` on into a mesh; where they end, or -1: damaged
 static long read_parts(B3Mesh * mesh, int nparts, int nbones, const uint8_t * d, long size, long at, bool mipmaps)
 {
@@ -136,8 +164,24 @@ static long read_parts(B3Mesh * mesh, int nparts, int nbones, const uint8_t * d,
             if (p->idx[k] >= p->vc)
                 p->idx[k] = 0;
         if (tex[0]) {
+            // the hair in it, from the bake's .hair beside it (the atlas's places, or a hair texture of its own)
+            int rects[32 * 4], nr = 0;
+            bool all = false;
+            snprintf(path, sizeof(path), "%sband3d/tex/%s.hair", plat_asset_dir(), tex);
+            FILE * hf = fopen(path, "r");         // even undyed: the clothes' colour leaves hair alone
+            char line[96];
+            while (hf && fgets(line, sizeof(line), hf)) {
+                if (nr < 32 && sscanf(line, "%d %d %d %d", &rects[nr * 4], &rects[nr * 4 + 1], &rects[nr * 4 + 2], &rects[nr * 4 + 3]) == 4)
+                    nr++;
+            }
+            if (hf)
+                fclose(hf);
+            if (hair_alone(tex))
+                all = true;
+            gfx_load_hair(load_dye, rects, nr, all);
             snprintf(path, sizeof(path), "%sband3d/tex/%s.png", plat_asset_dir(), tex);
             p->tex = tex_load(path, (mipmaps ? TEX_MIPMAP : 0) | (c[2] ? TEX_REPEAT : 0));
+            gfx_load_hair(0, NULL, 0, false);
         }
         mesh->total_v += p->vc;
     }
@@ -185,6 +229,12 @@ static bool read_layers(Band3D * m, const uint8_t * d, long size, long at, const
 
 Band3D * band3d_load(const char * name, int hue)
 {
+    // hue: the clothes' turn in degrees, plus 1000 times the hair's dye
+    load_dye = hue / 1000;
+    hue %= 1000;
+    alone_n = 0;
+    read_alone(name, "_atlas");
+    read_alone(name, "_far");
     gfx_load_hue(hue);
     char path[512];
     long size = 0;

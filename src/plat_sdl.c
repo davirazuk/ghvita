@@ -510,8 +510,51 @@ static double mic_phase, mic_due, mic_late;
 static short * mic_file;           // GHV_MIC=<raw file>: that's what's sung
 static long mic_file_n;
 
+// a real microphone through SDL (a phone's; GHV_MIC=sdl on the desktop): what it hears goes into a ring the reader
+// takes grains from
+static SDL_AudioDeviceID cap_dev;
+static int16_t cap_ring[48000];
+static volatile int cap_w, cap_r;
+static void cap_feed(void * ud, Uint8 * stream, int len)
+{
+    (void)ud;
+    const int16_t * s = (const int16_t *)stream;
+    int n = len / 2, cap = (int)(sizeof(cap_ring) / sizeof(cap_ring[0]));
+    for (int i = 0; i < n; i++) {
+        cap_ring[cap_w] = s[i];
+        cap_w = (cap_w + 1) % cap;
+        if (cap_w == cap_r)
+            cap_r = (cap_r + 1) % cap;          // full: the oldest goes
+    }
+}
+
 int plat_mic_open(int grain, int rate)
 {
+#ifdef __ANDROID__
+    bool real = true;
+#else
+    bool real = getenv("GHV_MIC") && strcmp(getenv("GHV_MIC"), "sdl") == 0;
+#endif
+    if (real) {
+        SDL_AudioSpec want = {0}, have;
+        want.freq = rate;
+        want.format = AUDIO_S16SYS;
+        want.channels = 1;
+        want.samples = (Uint16)(grain < 256 ? 256 : grain);
+        want.callback = cap_feed;
+        cap_w = cap_r = 0;
+        cap_dev = SDL_OpenAudioDevice(NULL, 1, &want, &have, 0);
+        if (!cap_dev) {
+            plat_log("mic: %s", SDL_GetError());
+            return -1;
+        }
+        if (have.freq != rate)
+            plat_log("mic: %d Hz, not %d", have.freq, rate);
+        mic_grain = grain;
+        mic_rate = rate;
+        SDL_PauseAudioDevice(cap_dev, 0);
+        return 1;
+    }
     if (!getenv("GHV_MIC"))
         return -1;
     mic_grain = grain;
@@ -533,9 +576,24 @@ int plat_mic_open(int grain, int rate)
 
 void plat_mic_read(int port, short * out)
 {
-    (void)port;
     if (!mic_grain)
         return;
+    if (port == 1 && cap_dev) {
+        // a grain from the ring, waiting for it as a real mic's read does
+        int cap = (int)(sizeof(cap_ring) / sizeof(cap_ring[0]));
+        for (int tries = 0; tries < 200 && (cap_w - cap_r + cap) % cap < mic_grain; tries++)
+            SDL_Delay(2);
+        SDL_LockAudioDevice(cap_dev);
+        for (int i = 0; i < mic_grain; i++) {
+            if (cap_r != cap_w) {
+                out[i] = cap_ring[cap_r];
+                cap_r = (cap_r + 1) % cap;
+            } else
+                out[i] = 0;
+        }
+        SDL_UnlockAudioDevice(cap_dev);
+        return;
+    }
     double now = SDL_GetPerformanceCounter() / (double)SDL_GetPerformanceFrequency();
     if (mic_due < now - 0.2)
         mic_due = now;
@@ -580,7 +638,10 @@ void plat_mic_read(int port, short * out)
 
 void plat_mic_close(int port)
 {
-    (void)port;
+    if (port == 1 && cap_dev) {
+        SDL_CloseAudioDevice(cap_dev);
+        cap_dev = 0;
+    }
 }
 
 void plat_sleep_us(int us)

@@ -94,6 +94,7 @@ typedef struct {
     bool band_pictures;     // the band as the old picture sheets, not the 3D models
     bool stage_only;        // the 3D band always seen from the whole stage: none of the camera's cuts to its members
     int band_hue[4];        // each one's clothes: 0 as they are, 1..8 turned round the colour wheel in steps of 40 degrees
+    int band_hair[4];       // each one's hair dye: 0 their own, 1..9 (gfx_load_hair)
     char band_pick[4][16];  // drummer, singer, guitarist, bassist chosen in the options ("": a different one each song)
     int camera;             // 0 World Tour, 1 lower and nearer, 2 high and long
     int highway_alpha;      // 0-10, how solid the highway is

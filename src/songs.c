@@ -1029,6 +1029,8 @@ void config_load(void)
             cfg.stage_only = atoi(v) != 0;
         else if (strncmp(k, "band_hue", 8) == 0 && k[8] >= '0' && k[8] <= '3' && !k[9])
             cfg.band_hue[k[8] - '0'] = atoi(v) < 0 ? 0 : atoi(v) > 8 ? 8 : atoi(v);
+        else if (strncmp(k, "band_hair", 9) == 0 && k[9] >= '0' && k[9] <= '3' && !k[10])
+            cfg.band_hair[k[9] - '0'] = atoi(v) < 0 ? 0 : atoi(v) > 9 ? 9 : atoi(v);
         else if (strncmp(k, "band_pick", 9) == 0 && k[9] >= '0' && k[9] <= '3' && !k[10])
             snprintf(cfg.band_pick[k[9] - '0'], sizeof(cfg.band_pick[0]), "%s", strcmp(v, "song") ? v : "");
         else if (strcmp(k, "sing_along") == 0)
@@ -1105,6 +1107,7 @@ void config_save(void)
     for (int r = 0; r < 4; r++) {
         fprintf(f, "band_pick%d = %s\n", r, cfg.band_pick[r][0] ? cfg.band_pick[r] : "song");
         fprintf(f, "band_hue%d = %d\n", r, cfg.band_hue[r]);
+        fprintf(f, "band_hair%d = %d\n", r, cfg.band_hair[r]);
     }
     fprintf(f, "camera = %d\nhighway_alpha = %d\nvenue_light = %d\nflashes = %d\n",
             cfg.camera, cfg.highway_alpha, cfg.venue_light, cfg.flashes);

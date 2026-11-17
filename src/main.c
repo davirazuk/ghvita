@@ -384,14 +384,22 @@ static void draw_cover(Tex * t, float x, float y, float size)
 // the menus' highlight on the chosen row: World Tour's bar, breathing, a soft glow sweeping along it
 static void select_bar(float x, float y, float w, float h, uint32_t col)
 {
-    (void)col;
-    float b = 0.82f + 0.18f * sinf((float)now_s * 5);
-    int v = (int)(255 * b);
-    gfx_sprite(atlas_get(res.hud, "wor_select"), x, y, w, h, RGBA(v, v, v, 255));
+    // the main menu's mark for the choice, wherever there's a list: a wedge of stage light cut on the slant, hot at its
+    // left, a bright line under it, breathing; a glint runs along it now and then. A grey col: chosen but not live
+    int grey = (int)(col & 255);
+    float b = (0.85f + 0.15f * sinf((float)now_s * 5)) * grey / 255.0f, cut = h * 0.7f;
+    const float uvq[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+    const float pq[4][3] = {{x, y, 0}, {x + w, y, 0}, {x + w - cut, y + h, 0}, {x, y + h, 0}};
+    uint32_t c0 = RGBA(255, 150, 20, (int)(225 * b)), c1 = RGBA(200, 40, 10, (int)(90 * b));
+    const uint32_t cq[4] = {c0, c1, c1, c0};
+    gfx_tex(NULL);
+    gfx_quad(pq, uvq, cq);
+    gfx_rect(x, y + h - 3, w - cut, 3, RGBA(255, 240, 200, (int)(220 * b)));
+    gfx_rect(x, y, 4, h, RGBA(255, 250, 235, (int)(240 * b)));
     float sweep = (float)fmod(now_s * 0.6, 1.6) - 0.3f;
     if (sweep > 0 && sweep < 1) {
         gfx_blend(BLEND_ADD);
-        gfx_sprite(atlas_get(res.game, "glow"), x + w * sweep - h, y - h * 0.2f, h * 2, h * 1.4f, RGBA(255, 220, 140, 70));
+        gfx_sprite(atlas_get(res.game, "glow"), x + w * sweep - h, y - h * 0.2f, h * 2, h * 1.4f, RGBA(255, 220, 140, 60));
         gfx_blend(BLEND_ALPHA);
     }
 }
@@ -809,7 +817,7 @@ static bool daily_finished(const Song * s)
 // kit a little smaller); turn: how far they swing round (radians)
 static void menu_rocker(int r, const char * name, float cx, float cy, float ppm, float turn)
 {
-    Band3D * model = name ? res_band3d(r, name, cfg.band_hue[r] * 40) : NULL;
+    Band3D * model = name ? res_band3d(r, name, cfg.band_hue[r] * 40 + cfg.band_hair[r] * 1000) : NULL;
     if (!model)
         return;
     {
@@ -1069,12 +1077,21 @@ static void empty_screen(void)
     banner("NO SONGS");
     panel(60, 120, 840, 330);
     static const char * lines[] = {
+#ifdef __ANDROID__
+        "There are no songs on this phone yet.",
+        "",
+        "Get some with DOWNLOAD SONGS on the main menu,",
+        "or copy Clone Hero song folders or .sng files to",
+        "    Android/data/org.ghvita.app/files/songs/",
+        "(they're made ready the next time the game starts).",
+#else
         "There are no songs on the memory card yet.",
         "",
         "Get some with DOWNLOAD SONGS on the main menu (Wi-Fi),",
         "or copy Clone Hero song folders or .sng files to",
         "    ux0:data/ghvita/songs/",
         "(they're made ready the next time the game starts).",
+#endif
     };
     for (int i = 0; i < 6; i++)
         font_draw(res.ui, lines[i], 100, 160 + i * 42, 28, RGBA(235, 230, 220, 255), ALIGN_LEFT);
@@ -4815,6 +4832,22 @@ static const int opt_tabs[OPT_TABS][OPT_TAB_MAX + 1] = {
     {O_SHRINKCHECK, -1},
 };
 static int opt_tab, opt_top;
+// the tabs as shown: on a phone without the Vita's buttons, tilt, the rear pad and the button layouts aren't there
+static int opt_list[OPT_TABS][OPT_TAB_MAX + 1];
+
+static void opt_list_make(bool phone)
+{
+    for (int t = 0; t < OPT_TABS; t++) {
+        int k = 0;
+        for (int i = 0; opt_tabs[t][i] >= 0; i++) {
+            int o = opt_tabs[t][i];
+            if (phone && (o == O_TILT || o == O_REAR || o == O_LAYOUT || o == O_DRUMKEYS))
+                continue;
+            opt_list[t][k++] = o;
+        }
+        opt_list[t][k] = -1;
+    }
+}
 static bool opt_reset_armed;
 // the shrink check: a song a frame, so the menu keeps moving. X then shrinks what the check found, on a worker
 // thread; each song waits for a song being played to end before its files are swapped. The menus' tune is a preview
@@ -4865,7 +4898,7 @@ static int shrink_worker(void * arg)
 static int opt_tab_count(void)
 {
     int n = 0;
-    while (opt_tabs[opt_tab][n] >= 0)
+    while (opt_list[opt_tab][n] >= 0)
         n++;
     return n;
 }
@@ -5174,7 +5207,7 @@ static void options_screen(void)
         ui_sound(SND_UI_MOVE);
     }
     shrink_check_step();
-    int opt = opt_tabs[opt_tab][menu_index];
+    int opt = opt_list[opt_tab][menu_index];
     if (opt == O_SHRINKCHECK && (pressed & BTN_CROSS) && !shrink_running) {
         if (shrink_seen && shrink_left) {
             shrink_done_n = 0;
@@ -5244,7 +5277,7 @@ static void options_screen(void)
     if (menu_index >= opt_top + ROWS)
         opt_top = menu_index - ROWS + 1;
     for (int r = 0; r < ROWS && opt_top + r < count; r++) {
-        int i = opt_tabs[opt_tab][opt_top + r];
+        int i = opt_list[opt_tab][opt_top + r];
         char name[48], value[48];
         option_text(i, name, value, sizeof(value));
         float y = 140 + r * 32;
@@ -6366,7 +6399,12 @@ static void rockers_screen(void)
         cfg.band_hue[r] = (cfg.band_hue[r] + turn + 9) % 9;
         ui_sound(SND_UI_MOVE);
     }
+    if (pressed & BTN_SQUARE) {
+        cfg.band_hair[r] = (cfg.band_hair[r] + 1) % 10;      // the next dye, and back to their own
+        ui_sound(SND_UI_MOVE);
+    }
     if (pressed & BTN_TRIANGLE) {
+        cfg.band_hair[r] = 0;
         cfg.band_hue[r] = 0;
         cfg.band_pick[r][0] = 0;
         ui_sound(SND_UI_SELECT);
@@ -6397,6 +6435,13 @@ static void rockers_screen(void)
                      us ? atoi(us + 1) : 1);
         }
         font_draw(res.ui, who, 78, y + 38, 20, RGBA(225, 225, 230, 255), ALIGN_LEFT);
+        {
+            static const char * dye_names[10] = {"own hair", "blonde", "red", "ginger", "blue", "pink", "green", "purple",
+                                                 "platinum", "jet black"};
+            char hl[40];
+            snprintf(hl, sizeof(hl), "Hair: %s", dye_names[cfg.band_hair[rr] % 10]);
+            font_draw(res.ui, hl, 330, y + 6, 18, RGBA(225, 225, 230, 255), ALIGN_LEFT);
+        }
         // their clothes' colour: the wheel in nine steps, the one worn ringed
         for (int k = 0; k < 9; k++) {
             float a = (float)k * 40 * 3.14159265f / 180, x = 330 + k * 18.0f, sy = y + 44;
@@ -6409,9 +6454,9 @@ static void rockers_screen(void)
     // whoever the cursor's on, as they'll be on the stage: turning slowly, playing World Tour's loop
     const char * name = cur ? res.band_names[found[cur - 1]] : cnt ? res.band_names[found[(int)(now_s / 4) % cnt]] : NULL;
     menu_rocker(r, name, 730, 268, 196, 0.9f);
-    static const char * help[] = {"btn_up", "Member", "btn_left", "Who", "btn_l", "", "btn_r", "Clothes' colour",
-                                  "btn_triangle", "Reset", "btn_circle", "Back"};
-    help_bar(help, 12);
+    static const char * help[] = {"btn_up", "Member", "btn_left", "Who", "btn_l", "", "btn_r", "Clothes",
+                                  "btn_square", "Hair", "btn_triangle", "Reset", "btn_circle", "Back"};
+    help_bar(help, 14);
     draw_toast();
     gfx_end();
 }
@@ -6691,6 +6736,7 @@ int main(void)
     touch_only = getenv("GHV_TOUCH") != NULL;
 #endif
 #endif
+    opt_list_make(touch_only);
     update_boot();
     plat_log("GH Vita starting");
     // QUICKPLAY's song and a random venue differ from boot to boot (test runs on the fixed clock stay repeatable)

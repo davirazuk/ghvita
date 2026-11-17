@@ -32,7 +32,10 @@ typedef struct {
 void gfx_init(void);
 Tex * tex_load(const char * path, int flags);
 Tex * tex_load_mem(const uint8_t * data, int size, int flags);     // a PNG or JPEG's bytes
-void gfx_load_hue(int degrees);     // pictures loaded next: their colours turned this far round the wheel (0: not)
+void gfx_load_hue(int degrees);
+// the next picture's hair: its places (x y w h in pixels, n of them, or all of it) and a dye (0 none, 1..9 blonde, red,
+// ginger, blue, pink, green, purple, platinum, black); the clothes' hue leaves hair alone
+void gfx_load_hair(int dye, const int * rects, int n, bool all);     // pictures loaded next: their colours turned this far round the wheel (0: not)
 void gfx_mesh_begin(bool clear_depth);
 void gfx_mesh(Tex * t, const float * xyz, const float * uv, int uv_stride, const uint32_t * col, const uint16_t * idx,
               int n);
