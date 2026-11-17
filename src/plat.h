@@ -36,6 +36,7 @@ void plat_quit(void);
 // reads the pad; false when the app should close (the desktop window was closed)
 // in a song a PC keyboard's letters are frets (A S D F G, J K L, Space): not the Vita buttons they stand for in menus
 void plat_song_keys(bool on);
+void plat_key_frets(int layout);    // 0: A S D F G, 1: A S + J K L
 bool plat_poll(Pad * pad);
 void plat_swap(void);
 // where the 960x544 picture sits in the window (pixels, from the bottom left), and the window's size (not the Vita's)

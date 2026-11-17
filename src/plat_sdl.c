@@ -56,6 +56,12 @@ static char shot_dir[512] = ".";
 static int win_w = SCREEN_W, win_h = SCREEN_H;
 static bool portrait_song;      // plat_portrait_song
 static bool song_keys;          // plat_song_keys
+static int key_layout;          // plat_key_frets
+
+void plat_key_frets(int layout)
+{
+    key_layout = layout;
+}
 
 void plat_song_keys(bool on)
 {
@@ -413,11 +419,12 @@ bool plat_poll(Pad * pad)
     }
     if (song_keys && !typing) {
         // the frets as the keyboard plays them: one hand on A S D F G, or two on A S and J K L; Space the open note
-        static const struct { int sc, lane; } fk[] = {
-            {SDL_SCANCODE_A, 0}, {SDL_SCANCODE_S, 1}, {SDL_SCANCODE_D, 2}, {SDL_SCANCODE_F, 3}, {SDL_SCANCODE_G, 4},
-            {SDL_SCANCODE_J, 2}, {SDL_SCANCODE_K, 3}, {SDL_SCANCODE_L, 4}, {SDL_SCANCODE_SPACE, 5}};
+        static const struct { int sc, lane, layout; } fk[] = {
+            {SDL_SCANCODE_A, 0, -1}, {SDL_SCANCODE_S, 1, -1}, {SDL_SCANCODE_D, 2, 0}, {SDL_SCANCODE_F, 3, 0},
+            {SDL_SCANCODE_G, 4, 0}, {SDL_SCANCODE_J, 2, 1}, {SDL_SCANCODE_K, 3, 1}, {SDL_SCANCODE_L, 4, 1},
+            {SDL_SCANCODE_SPACE, 5, -1}};
         for (size_t i = 0; i < sizeof(fk) / sizeof(fk[0]); i++)
-            if (k[fk[i].sc])
+            if (k[fk[i].sc] && (fk[i].layout < 0 || fk[i].layout == key_layout))
                 pad->key_frets |= (uint8_t)(1u << fk[i].lane);
         pad->key_strum = (k[SDL_SCANCODE_UP] ? 1 : 0) | (k[SDL_SCANCODE_DOWN] ? 2 : 0) | (k[SDL_SCANCODE_SPACE] ? 4 : 0);
         if (k[SDL_SCANCODE_RSHIFT] || k[SDL_SCANCODE_LSHIFT])

@@ -872,3 +872,6 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   frame; band3d.c leaves bones that never move out of its re-centring and gives the wilder loop the same stand.
 - PC full screen: the game opens full screen (desktop resolution, picture letterboxed); F11 or Alt+Enter switches to a
   window and back, remembered in data/windowed.txt. Window title "GH Vita".
+- Updates fall back step by step: update.txt's token, the built-in one, then no token at all (what a public repository
+  answers): the game (update.c no_token) and the phone (GHVitaActivity).
+- PC "Keyboard frets": A S D F G or A S + J K L (strum on forces A S D F G); the hint under the lanes follows it.

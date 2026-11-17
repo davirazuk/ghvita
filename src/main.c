@@ -5197,8 +5197,8 @@ static void opt_list_make(bool phone)
             int o = opt_tabs[t][i];
             if (phone && (o == O_TILT || o == O_REAR || o == O_LAYOUT || o == O_DRUMKEYS))
                 continue;
-            if (!phone && o == O_TOUCHFRETS)
-                continue;               // the touch layout is a phone's
+            if (!phone && !game_pc_keys && o == O_TOUCHFRETS)
+                continue;               // the touch layout is a phone's (a PC's keyboard has one of its own)
             if (game_pc_keys && (o == O_TILT || o == O_REAR || o == O_LAYOUT || o == O_DRUMKEYS))
                 continue;               // a PC has no tilt, no rear pad, no Vita buttons to lay out
 
@@ -5398,6 +5398,12 @@ static void option_text(int i, char * name, char * value, size_t n)
                  : game_pc_keys ? "On (arrows or Space)" : "On (Down or Cross)");
         break;
     case O_TOUCHFRETS:
+        if (game_pc_keys) {
+            // a PC's keyboard: one hand on A S D F G, or two on A S and J K L; strumming keeps one hand on the frets
+            strcpy(name, "Keyboard frets");
+            snprintf(value, n, "%s", cfg.strum ? "A S D F G (strum is on)" : cfg.touch_frets == 1 ? "Two hands (A S + J K L)" : "One hand (A S D F G)");
+            break;
+        }
         strcpy(name, "Touch frets");
         snprintf(value, n, "%s", cfg.touch_frets == 2 ? "Thumbs" : cfg.touch_frets == 1 ? "Two hands (A S | J K L)" : "One hand (A S D F G)");
         break;
@@ -5534,7 +5540,12 @@ static void change_option(int i, int d)
     case O_REAR: cfg.no_rear_whammy = !cfg.no_rear_whammy; break;
     case O_BEND: cfg.no_bend = !cfg.no_bend; break;
     case O_COUNTDOWN: cfg.no_countdown = !cfg.no_countdown; break;
-    case O_TOUCHFRETS: cfg.touch_frets = (cfg.touch_frets + (d < 0 ? 2 : 1)) % 3; break;
+    case O_TOUCHFRETS:
+        if (game_pc_keys)
+            cfg.touch_frets = cfg.strum ? cfg.touch_frets : !(cfg.touch_frets == 1);     // the keyboard: two layouts
+        else
+            cfg.touch_frets = (cfg.touch_frets + (d < 0 ? 2 : 1)) % 3;
+        break;
     case O_STRUM: cfg.strum = !cfg.strum; break;
     case O_FIVEPADS: cfg.five_pads = !cfg.five_pads; break;
     case O_DOUBLEKICK: cfg.double_kick = !cfg.double_kick; break;
@@ -7204,6 +7215,7 @@ int main(void)
         menu_touch();
         plat_portrait_song(screen == S_PLAY || screen == S_PAUSE || screen == S_RESUME);
         plat_song_keys(screen == S_PLAY);
+        plat_key_frets(cfg.strum || cfg.touch_frets != 1 ? 0 : 1);
         game_touch_pads = touch_only;
 #if !defined(__vita__) && !defined(__ANDROID__)
         game_pc_keys = !touch_only;     // a PC played on its keyboard

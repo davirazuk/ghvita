@@ -66,6 +66,7 @@ static void fail(const char * why)
 }
 
 static bool skip_file_token;     // update.txt's token was refused: the built-in one instead
+static bool no_token;            // the built-in one was refused too: no token at all (a public repository)
 
 static bool read_token(void)
 {
@@ -88,8 +89,11 @@ static bool read_token(void)
         snprintf(token, sizeof(token), "%s", getenv("GHV_UPDATE_TOKEN"));
 #endif
     token[strcspn(token, " \t\r\n")] = 0;
-    if (!token[0])
-        return false;
+    if (!token[0] || no_token) {
+        // no token, or none GitHub takes: asked as anyone (works once the repository is public)
+        snprintf(auth, sizeof(auth), "X-GHVita: no-token");
+        return true;
+    }
     snprintf(auth, sizeof(auth), "Authorization: Bearer %s", token);
     return true;
 }
@@ -136,6 +140,21 @@ static int check_thread(void * arg)
                 j = status == 200 && body ? json_parse(body, len) : NULL;
                 free(body);
             }
+        }
+    }
+    if (!j && (status == 401 || status == 403 || status == 404) && !no_token) {
+        no_token = true;
+        plat_log("update: the token got %d, asking without one", status);
+        read_token();
+        body = NULL;
+        len = 0;
+        HttpReq r3 = {.url = url, .headers = json_headers, .stall_s = 15};
+        status = http_fetch(&r3, &body, &len, err, sizeof(err));
+        j = status == 200 && body ? json_parse(body, len) : NULL;
+        free(body);
+        if (!j) {
+            no_token = false;               // next time the token again
+            read_token();
         }
     }
     if (!j) {

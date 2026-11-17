@@ -137,7 +137,8 @@ public class GHVitaActivity extends SDLActivity {
 
     private java.net.HttpURLConnection open(String url, String token, String accept) throws Exception {
         java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
-        c.setRequestProperty("Authorization", "Bearer " + token);
+        if (token != null && !token.isEmpty())
+            c.setRequestProperty("Authorization", "Bearer " + token);
         c.setRequestProperty("Accept", accept);
         c.setRequestProperty("User-Agent", "GHVita-Android");
         c.setInstanceFollowRedirects(true);
@@ -179,10 +180,7 @@ public class GHVitaActivity extends SDLActivity {
 
     private void checkUpdate() throws Exception {
         String token = readToken();
-        if (token == null || token.isEmpty()) {
-            note("This build can't check for updates (no token)", true);
-            return;
-        }
+        // (no token: asked as anyone, which a public repository answers)
         java.net.HttpURLConnection rc = open(API, token, "application/vnd.github+json");
         int code = rc.getResponseCode();
         if (code == 401 || code == 403 || code == 404) {
@@ -198,6 +196,11 @@ public class GHVitaActivity extends SDLActivity {
                 rc = open(API, token, "application/vnd.github+json");
                 code = rc.getResponseCode();
             }
+        }
+        if ((code == 401 || code == 403 || code == 404) && token != null) {
+            token = null;                   // refused: asked without one (a public repository answers)
+            rc = open(API, token, "application/vnd.github+json");
+            code = rc.getResponseCode();
         }
         if (code != 200) {
             note("GitHub answered " + code + " to the update check", true);

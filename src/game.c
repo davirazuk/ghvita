@@ -5864,7 +5864,8 @@ static void draw_keys(void)
         return;                         // a phone: no buttons to name, the pads are the keys
     if (game_pc_keys) {
         // a PC: the keyboard's fret keys under the lanes
-        static const char * const fk[5] = {"A", "S", "D", "F", "G"};
+        static const char * const fk1[5] = {"A", "S", "D", "F", "G"}, * const fk2[5] = {"A", "S", "J", "K", "L"};
+        const char * const * fk = !cfg.strum && cfg.touch_frets == 1 ? fk2 : fk1;
         float a = G.t < 3.5 ? 1 : (float)(4.5 - G.t);
         for (int lane = 0; lane < G.lanes && lane < 5 && a > 0; lane++) {
             int src = lefty_now() ? G.lanes - 1 - lane : lane;
