@@ -648,6 +648,20 @@ def export3d(name, meshes, skins, c, alt, tex_dir, layers, bones, work):
           ')', len(recs), 'parts', len(lb), 'hand bones', os.path.getsize(os.path.join(out, name + '.b3d')) // 1024, 'KB')
 
 
+def guitar_swing(bones, c, N, start, sp):
+    # how far the guitar turns against the chest over a loop, in degrees (the worst frame against the first)
+    ref = None
+    worst = 0.0
+    for k in range(start, start + sp, max(1, sp // 16)):
+        M = wc.pose(bones, c, k)
+        rel = np.linalg.inv(M[N['bone_chest']]) @ M[N['bone_guitar_body']]
+        if ref is None:
+            ref = rel
+        cosang = (np.trace(ref[:3, :3].T @ rel[:3, :3]) - 1) / 2
+        worst = max(worst, float(np.degrees(np.arccos(np.clip(cosang, -1, 1)))))
+    return worst
+
+
 def bake(path, work, tex_dir, alt=False):
     # alt: the member's other GHWT loop (the wilder one, for choruses and solos) into assets/band/alt/<name>.png: the
     # guitars' 48 groove frames, the singer's 32 singing ones, laid out as the main sheet's first rows
@@ -675,6 +689,39 @@ def bake(path, work, tex_dir, alt=False):
         clip = byname0[want[0]]
     span = int(round(BEATS * 60 / 100 * clip[1]))
     s0 = loop_start(bones, clip, N, span, role)
+    if role in ('guitarist', 'bassist') and alt:
+        # the wilder loop is only worth having if the guitar stays where a player can fret it: one that throws the
+        # neck about is left out, and the steady loop plays the choruses too
+        sp = int(round(BEATS * 60 / 100 * clip[1]))
+        w = guitar_swing(bones, clip, N, s0, sp)
+        print(name, 'other loop', clip[0], 'guitar swing %.0f deg' % w)
+        if w > 12:
+            print(name, 'left out')
+            for f in (os.path.join(OUT, 'alt', name + '.png'), os.path.join(HERE, '..', 'assets', 'band3d', 'alt', name + '.b3a')):
+                if os.path.exists(f):
+                    os.remove(f)
+            return
+    if role in ('guitarist', 'bassist') and not alt:
+        # the loop that holds the guitar in playing position: World Tour's own "t100" swings some guitars from flat to
+        # upright and back every couple of beats (it's made for being seen from the crowd), and a hand fretting the
+        # chart's notes on a neck that's pointing at the ceiling looks like nothing at all. Of the 100 bpm loops, the
+        # one whose four beats keep the neck steadiest on the body
+        def swing(c, start):
+            return guitar_swing(bones, c, N, start, int(round(BEATS * 60 / 100 * c[1])))
+        best = (swing(clip, s0), clip, s0)
+        for c in clips:
+            if c is clip or not c[0].endswith('_100'):
+                continue
+            sp = int(round(BEATS * 60 / 100 * c[1]))
+            if c[2] < sp + 8:
+                continue
+            st = loop_start(bones, c, N, sp, role)
+            w = swing(c, st)
+            if w < best[0] - 8:
+                best = (w, c, st)
+        print(name, 'loop', best[1][0], 'guitar swing %.0f deg' % best[0])
+        clip, s0 = best[1], best[2]
+        span = int(round(BEATS * 60 / 100 * clip[1]))
     M0 = wc.pose(bones, clip, s0)
     g0 = None
     if role in ('guitarist', 'bassist'):

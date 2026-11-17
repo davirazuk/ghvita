@@ -798,3 +798,8 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   update.c reads when the card has no update.txt.
 - release.py makes the release empty then uploads, with retries and the error printed: several releases died on
   HTTP 403 "Resource not accessible by integration" at `gh release create` after everything else passed.
+
+- Band realism: guitarists and bassists now use the 100 bpm loop that keeps the guitar steadiest against the chest
+  (World Tour's t100 swings some guitars up to vertical, which made the fretting hand look fake). Wild chorus/solo
+  loops that turn the guitar more than 12 degrees are left out of the bake, so the steady loop plays those too and the
+  chart-driven fret fingers and strum stay readable all song.
