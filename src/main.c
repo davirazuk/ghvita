@@ -43,6 +43,10 @@ static bool overlay_on;             // the system's quick menu just came up
 static volatile bool shrink_running;    // the settings' shrink is working through the songs (menu_music stands down)
 static Pad pad;
 static uint32_t pressed, repeat;    // repeat: pressed, plus held directions repeating
+// what the help bar drew last frame, for a finger: each button's stretch of the bar; and whether the screen's been touched
+static struct { float x0, x1; uint32_t btn; } tap_spots[12];
+static int tap_count;
+static bool touch_used;
 static bool autoplay;
 
 // the song list: sel is the song in the library; the view is what's shown of it, searched and filtered
@@ -134,12 +138,114 @@ static void help_bar(const char * const * items, int n)
     float x = 18;
     for (int i = 0; i + 1 < n; i += 2) {
         const Sprite * b = atlas_get(res.hud, items[i]);
-        float w = b->w * 28.0f * k / b->h;
+        float w = b->w * 28.0f * k / b->h, x0 = x;
         gfx_sprite(b, x, SCREEN_H - 21 - 14 * k, w, 28 * k, WHITE);
         x += w + 6 * k;
         x += font_draw(res.ui, items[i + 1], x, SCREEN_H - 21 - 13 * k, 26 * k, RGBA(230, 230, 230, 255), ALIGN_LEFT) +
              22 * k;
+        // each is a thing to tap: the button it shows (menu_touch)
+        static const struct { const char * name; uint32_t btn; } map[] = {
+            {"btn_cross", BTN_CROSS}, {"btn_circle", BTN_CIRCLE}, {"btn_square", BTN_SQUARE}, {"btn_triangle", BTN_TRIANGLE},
+            {"btn_l", BTN_L}, {"btn_r", BTN_R}, {"btn_start", BTN_START}, {"btn_select", BTN_SELECT},
+            {"btn_left", BTN_LEFT}, {"btn_up", BTN_UP},
+        };
+        for (size_t m = 0; m < sizeof(map) / sizeof(map[0]) && tap_count < 12; m++)
+            if (strcmp(items[i], map[m].name) == 0) {
+                tap_spots[tap_count].x0 = x0 - 8;
+                tap_spots[tap_count].x1 = x - 10 * k;
+                tap_spots[tap_count++].btn = map[m].btn;
+            }
     }
+}
+
+// Touch in the menus. A finger dragged up or down moves the choice as the d-pad would (a step every 46 pixels), across
+// as left and right; a tap on one of the help bar's buttons presses that button, a tap anywhere else is Cross, and a
+// tap with two fingers is Circle (back). In a song the notes have the touch screen: only the top corners are taken,
+// the right one for Start (pause), the left one for Select (Star Power)
+static void menu_touch(void)
+{
+    static int id = -1;
+    static float sx, sy, lx, ly;
+    static double t0;
+    static bool moved, two;
+    static struct { float x0, x1; uint32_t btn; } spots[12];
+    static int nspots;
+    bool playing = screen == S_PLAY;
+    int at = -1;
+    for (int i = 0; i < pad.ntouch; i++)
+        if (pad.touch_id[i] == id)
+            at = i;
+    if (id < 0 && pad.ntouch > 0) {
+        // a finger lands: the help bar as it was drawn when it did
+        id = pad.touch_id[0];
+        at = 0;
+        sx = lx = pad.touch_x[0];
+        sy = ly = pad.touch_y[0];
+        t0 = now_s;
+        moved = two = false;
+        nspots = tap_count < 12 ? tap_count : 12;
+        for (int i = 0; i < nspots; i++) {
+            spots[i].x0 = tap_spots[i].x0;
+            spots[i].x1 = tap_spots[i].x1;
+            spots[i].btn = tap_spots[i].btn;
+        }
+        touch_used = true;
+    }
+    tap_count = 0;              // the bar's drawn again this frame
+    if (id < 0)
+        return;
+    if (pad.ntouch >= 2)
+        two = true;
+    if (at >= 0) {
+        float x = pad.touch_x[at], y = pad.touch_y[at];
+        if (fabsf(x - sx) > 16 || fabsf(y - sy) > 16)
+            moved = true;
+        if (!playing && moved && !two) {
+            const float step = 46, wide = 80;
+            while (y - ly <= -step) {
+                pressed |= BTN_DOWN;            // the list goes up under the finger: the choice goes down it
+                repeat |= BTN_DOWN;
+                ly -= step;
+            }
+            while (y - ly >= step) {
+                pressed |= BTN_UP;
+                repeat |= BTN_UP;
+                ly += step;
+            }
+            while (x - lx >= wide) {
+                pressed |= BTN_RIGHT;
+                repeat |= BTN_RIGHT;
+                lx += wide;
+            }
+            while (x - lx <= -wide) {
+                pressed |= BTN_LEFT;
+                repeat |= BTN_LEFT;
+                lx -= wide;
+            }
+        }
+        return;
+    }
+    // lifted
+    id = -1;
+    if (moved || now_s - t0 > 0.6)
+        return;
+    uint32_t b = 0;
+    if (playing) {
+        if (sy < 84 && sx > SCREEN_W - 150)
+            b = BTN_START;
+        else if (sy < 84 && sx < 150)
+            b = BTN_SELECT;
+    } else if (two)
+        b = BTN_CIRCLE;
+    else {
+        b = BTN_CROSS;
+        if (sy > SCREEN_H - 50)
+            for (int i = 0; i < nspots; i++)
+                if (sx >= spots[i].x0 && sx <= spots[i].x1)
+                    b = spots[i].btn;
+    }
+    pressed |= b;
+    repeat |= b;
 }
 
 static void banner(const char * text)
@@ -6533,6 +6639,7 @@ int main(void)
         pressed = pad.buttons & ~last_buttons;
         last_buttons = pad.buttons;
         update_repeat();
+        menu_touch();
         int drawn = screen;
         switch (screen) {
         case S_TITLE: title_screen(); break;
