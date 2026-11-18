@@ -825,6 +825,7 @@ typedef struct {
     uint8_t * light;
     uint32_t * col;
     uint16_t * idx;
+    float lo[3], hi[3];         // its box: a line that misses it misses its triangles
 } V3Part;
 
 struct Venue3D {
@@ -912,6 +913,12 @@ Venue3D * venue3d_load(const char * zone)
             V3Vert one;
             memcpy(&one, &src[k], sizeof(one));
             memcpy(p->xyz + k * 3, one.p, 12);
+            for (int a = 0; a < 3; a++) {
+                if (!k || one.p[a] < p->lo[a])
+                    p->lo[a] = one.p[a];
+                if (!k || one.p[a] > p->hi[a])
+                    p->hi[a] = one.p[a];
+            }
             memcpy(p->uv + k * 2, one.uv, 8);
             p->light[k] = one.l[0];
         }
@@ -990,6 +997,25 @@ bool venue3d_blocked(const Venue3D * v, const float from[3], const float to[3])
     float d[3] = {to[0] - from[0], to[1] - from[1], to[2] - from[2]};
     for (int i = 0; i < v->nparts; i++) {
         const V3Part * p = &v->parts[i];
+        // the box first (the line between 2% and 90% of the way, as the triangles are judged)
+        float t0 = 0.02f, t1 = 0.9f;
+        for (int a = 0; a < 3 && t0 <= t1; a++) {
+            if (fabsf(d[a]) < 1e-9f) {
+                if (from[a] < p->lo[a] || from[a] > p->hi[a])
+                    t0 = 2;
+                continue;
+            }
+            float ta = (p->lo[a] - from[a]) / d[a], tb = (p->hi[a] - from[a]) / d[a];
+            if (ta > tb) {
+                float x = ta;
+                ta = tb;
+                tb = x;
+            }
+            t0 = ta > t0 ? ta : t0;
+            t1 = tb < t1 ? tb : t1;
+        }
+        if (t0 > t1)
+            continue;
         for (int t = 0; t < p->tc; t++) {
             const float * a = p->xyz + p->idx[t * 3] * 3, * b = p->xyz + p->idx[t * 3 + 1] * 3, * c = p->xyz + p->idx[t * 3 + 2] * 3;
             float e1[3] = {b[0] - a[0], b[1] - a[1], b[2] - a[2]}, e2[3] = {c[0] - a[0], c[1] - a[1], c[2] - a[2]};

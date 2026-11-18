@@ -1208,7 +1208,36 @@ static void run_cues(void)
 static void cine_mark(int r, float m[3]);
 
 // whether a shot's camera, at both ends of its move, sees who it's on past the venue
+static bool cine_clear_now(int shot, int who, float side);
+
+// the answer for each shot, member and side, worked out once for the venue (cine_warm, as the song loads): a cut
+// took up to a few milliseconds on a PC, many more on a Vita, and showed as a stutter at the cut
+static int8_t cine_memo[CS_COUNT][4][2];
+static const void * cine_memo_for;
+
 static bool cine_clear(int shot, int who, float side)
+{
+    if (cine_memo_for != (const void *)G.venue3d) {
+        memset(cine_memo, -1, sizeof(cine_memo));
+        cine_memo_for = G.venue3d;
+    }
+    int8_t * m = &cine_memo[shot][who & 3][side > 0];
+    if (*m < 0)
+        *m = cine_clear_now(shot, who, side) ? 1 : 0;
+    return *m == 1;
+}
+
+static void cine_warm(void)
+{
+    if (!G.venue3d || !G.marks)
+        return;
+    for (int shot = 0; shot < CS_COUNT; shot++)
+        for (int who = 0; who < 4; who++)
+            for (int sd = 0; sd < 2; sd++)
+                cine_clear(shot, who, sd ? 1 : -1);
+}
+
+static bool cine_clear_now(int shot, int who, float side)
 {
     const CineShot * cs = &cine_shots[shot];
     float at[3], rad = 3.14159265f / 180;
@@ -3254,6 +3283,7 @@ bool game_start(Song * song, int part, int diff)
     }
     G.crowd_voice = -1;
     setup_camera();
+    cine_warm();                // the close shots' views of the venue, now and not at each cut
     plat_set_perf(1);
     reset_play();
     plat_log("game: %s - %s, %s %s, %d notes, %d phrases, lead-in %.2f s", song->artist, song->name,
@@ -6526,7 +6556,7 @@ static void draw_hud(void)
         if (!upright && game_touch_pads && cfg.touch_frets == 2) {
             hud_x = 4;                          // thumbs: the bottom corners are theirs, the group goes to the top
             hud_y = 122;
-        } else if (!upright) {
+        } else if (!upright && !G.vocal) {      // (singing: no highway to keep clear of)
             const float need = 188 + 8;         // the plates' width and a gap
             if (hud_rail_x(hud_y + 70) < hud_x + need)
                 hud_x = 4;
