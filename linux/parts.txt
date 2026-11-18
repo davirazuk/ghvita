@@ -1,0 +1,3 @@
+GHVita-x86_64.AppImage.00 47185920
+GHVita-x86_64.AppImage.01 47185920
+GHVita-x86_64.AppImage.02 19610104
