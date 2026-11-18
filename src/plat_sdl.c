@@ -166,6 +166,10 @@ static void to_screen(float nx, float ny, float * sx, float * sy)
 // the fingers on the screen, by SDL's ids
 static struct { SDL_FingerID id; float x, y; bool down; } fingers[MAX_TOUCH];
 static bool back_key;
+static bool esc_key;
+static int wheel;               // mouse wheel notches not yet turned into steps            // Esc: back in a menu, pause in a song
+static SDL_GameController * pads[4];
+static int pads_n;
 static bool alt_enter;          // Alt+Enter switched the screen: not a press of Start as well           // a phone's back button: Circle for a frame
 
 typedef struct {
@@ -267,7 +271,7 @@ void plat_init(void)
 #ifdef _WIN32
     SDL_SetMainReady();             // main() is the game's own, not SDL2main's
 #endif
-    SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER);
+    SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER | SDL_INIT_GAMECONTROLLER);
 #ifdef __ANDROID__
     // the art is unpacked into the app's own storage by GHVitaActivity before this runs; songs and saves go where a
     // file manager can reach them (Android/data/<package>/files)
@@ -362,6 +366,23 @@ bool plat_poll(Pad * pad)
         }
         if (ev.type == SDL_KEYDOWN && ev.key.keysym.sym == SDLK_AC_BACK)
             back_key = true;
+        if (ev.type == SDL_MOUSEWHEEL && !song_keys)
+            wheel += ev.wheel.y;        // the wheel scrolls a list, a step a notch
+        if (ev.type == SDL_KEYDOWN && ev.key.keysym.sym == SDLK_ESCAPE && !typing && !ev.key.repeat)
+            esc_key = true;
+        if (ev.type == SDL_CONTROLLERDEVICEADDED && pads_n < 4) {
+            SDL_GameController * gc = SDL_GameControllerOpen(ev.cdevice.which);
+            if (gc) {
+                pads[pads_n++] = gc;
+                plat_log("controller: %s", SDL_GameControllerName(gc));
+            }
+        }
+        if (ev.type == SDL_CONTROLLERDEVICEREMOVED)
+            for (int i = 0; i < pads_n; i++)
+                if (SDL_GameControllerGetAttached(pads[i]) == SDL_FALSE) {
+                    SDL_GameControllerClose(pads[i]);
+                    pads[i--] = pads[--pads_n];
+                }
 #ifndef __ANDROID__
         if (ev.type == SDL_KEYDOWN && !ev.key.repeat && (ev.key.keysym.sym == SDLK_F11 ||
             ((ev.key.keysym.sym == SDLK_RETURN || ev.key.keysym.sym == SDLK_KP_ENTER) && (ev.key.keysym.mod & KMOD_ALT)))) {
@@ -433,6 +454,59 @@ bool plat_poll(Pad * pad)
     if (back_key) {
         pad->buttons |= BTN_CIRCLE;
         back_key = false;
+    }
+    static bool wheel_gap;
+    if (wheel && !wheel_gap) {
+        // a step every other frame (a press needs a frame without it), so a quick spin moves as far as it was turned
+        pad->buttons |= wheel > 0 ? BTN_UP : BTN_DOWN;
+        wheel += wheel > 0 ? -1 : 1;
+        wheel_gap = true;
+    } else
+        wheel_gap = false;
+    if (esc_key) {
+        pad->buttons |= song_keys ? BTN_START : BTN_CIRCLE;
+        esc_key = false;
+    }
+    // game controllers: an Xbox-style pad, or a USB guitar (they map the same: frets A B Y X and the left shoulder,
+    // the strum on the D-pad, Back Star Power, the whammy on the right stick). In a menu, the pad as a pad
+    for (int i = 0; i < pads_n && !typing; i++) {
+        SDL_GameController * gc = pads[i];
+#define GB(b) SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_##b)
+        int16_t lx = SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_LEFTX), ly = SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_LEFTY);
+        int16_t rx = SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_RIGHTX), ry = SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_RIGHTY);
+        if (GB(START))
+            pad->buttons |= BTN_START;
+        if (GB(BACK))
+            pad->buttons |= BTN_SELECT;
+        if (song_keys) {
+            static const struct { SDL_GameControllerButton b; int lane; } gf[] = {
+                {SDL_CONTROLLER_BUTTON_A, 0}, {SDL_CONTROLLER_BUTTON_B, 1}, {SDL_CONTROLLER_BUTTON_Y, 2},
+                {SDL_CONTROLLER_BUTTON_X, 3}, {SDL_CONTROLLER_BUTTON_LEFTSHOULDER, 4}};
+            for (size_t f = 0; f < sizeof(gf) / sizeof(gf[0]); f++)
+                if (SDL_GameControllerGetButton(gc, gf[f].b))
+                    pad->key_frets |= (uint8_t)(1u << gf[f].lane);
+            if (GB(DPAD_UP) || ly < -20000)
+                pad->key_strum |= 8;
+            if (GB(DPAD_DOWN) || ly > 20000)
+                pad->key_strum |= 16;
+            if (GB(RIGHTSHOULDER))
+                pad->buttons |= BTN_SELECT;         // Star Power on a pad, too
+            float w = fabsf(rx / 32767.0f) > fabsf(ry / 32767.0f) ? rx / 32767.0f : ry / 32767.0f;
+            if (fabsf(w) > fabsf(pad->rx))
+                pad->rx = w;
+        } else {
+            if (GB(A)) pad->buttons |= BTN_CROSS;
+            if (GB(B)) pad->buttons |= BTN_CIRCLE;
+            if (GB(X)) pad->buttons |= BTN_SQUARE;
+            if (GB(Y)) pad->buttons |= BTN_TRIANGLE;
+            if (GB(LEFTSHOULDER)) pad->buttons |= BTN_L;
+            if (GB(RIGHTSHOULDER)) pad->buttons |= BTN_R;
+            if (GB(DPAD_UP) || ly < -20000) pad->buttons |= BTN_UP;
+            if (GB(DPAD_DOWN) || ly > 20000) pad->buttons |= BTN_DOWN;
+            if (GB(DPAD_LEFT) || lx < -20000) pad->buttons |= BTN_LEFT;
+            if (GB(DPAD_RIGHT) || lx > 20000) pad->buttons |= BTN_RIGHT;
+        }
+#undef GB
     }
     for (int i = 0; i < MAX_TOUCH; i++)
         if (fingers[i].down && pad->ntouch < MAX_TOUCH) {

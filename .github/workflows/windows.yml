@@ -56,7 +56,7 @@ jobs:
           cp -r assets/. out/GHVita/assets/
           # the owner's read-only token (as the phone's build has it): the game updates itself from the windows release
           cp android/update_token out/GHVita/assets/update_token
-          printf 'GH Vita for Windows, build %s\r\n\r\nRun GHVita.exe. Put songs (Clone Hero / YARG folders) in data\\songs, or download them in the game.\r\nMenus: arrow keys move, Z picks, X goes back, Enter opens options.\r\nPlaying: frets on A S D F G with one hand, or A S + J K L with two (pressing a fret plays the note).\r\nSpace: open notes / the kick. Shift: Star Power. Enter: pause.\r\n' "$(git rev-list --count HEAD)" > out/GHVita/README.txt
+          printf 'GH Vita for Windows, build %s\r\n\r\nRun GHVita.exe. Put songs (Clone Hero / YARG folders) in data\\songs, or download them in the game.\r\nMenus: arrow keys move, Z picks, X goes back, Enter opens options.\r\nPlaying: frets on A S D F G with one hand, or A S + J K L with two (pressing a fret plays the note).\r\nSpace: open notes / the kick. Shift: Star Power. Enter or Esc: pause. F11: full screen or a window.\r\nA controller or a USB guitar works too: frets A B Y X and LB, strum on the D-pad, Back for Star Power.\r\n' "$(git rev-list --count HEAD)" > out/GHVita/README.txt
           (cd out && zip -qr ../GHVita-windows.zip GHVita)
           ls -la GHVita-windows.zip
 

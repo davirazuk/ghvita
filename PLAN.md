@@ -875,3 +875,6 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 - Updates fall back step by step: update.txt's token, the built-in one, then no token at all (what a public repository
   answers): the game (update.c no_token) and the phone (GHVitaActivity).
 - PC "Keyboard frets": A S D F G or A S + J K L (strum on forces A S D F G); the hint under the lanes follows it.
+- PC controllers (SDL GameController: pads and USB guitars): menus as a pad (A pick, B back); songs as a guitar (frets
+  A B Y X LB, strum D-pad / left stick, Back or RB Star Power, Start pause, right stick whammy). Esc: back / pause.
+  Mouse wheel scrolls lists.
