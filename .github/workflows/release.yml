@@ -14,6 +14,7 @@ on:
 
 permissions:
   contents: write
+  actions: write          # to start the phone's, Windows' and Linux's builds once the release (and its art) is out
 
 jobs:
   release:
@@ -139,3 +140,12 @@ jobs:
           done
           ls /tmp/others
           [ -n "$(ls /tmp/others)" ] && gh release upload "$tag" /tmp/others/* --clobber || true
+
+      - name: Now the phone's, Windows' and Linux's builds, from this release's art (the band as just baked)
+        run: |
+          msg=$(git log -1 --format=%B)
+          for w in android:apk windows:pc linux:linux; do
+            if [ "${{ github.event_name }}" = workflow_dispatch ] || echo "$msg" | grep -qF "[${w#*:}]"; then
+              gh workflow run "${w%%:*}.yml" --ref "${{ github.ref_name }}" && echo "started ${w%%:*}"
+            fi
+          done

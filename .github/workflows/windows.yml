@@ -13,7 +13,9 @@ permissions:
 
 jobs:
   exe:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[pc]')
+    # a commit that also makes a release waits for it: the art (the band, the venues) comes out of the newest release,
+    # and the release bakes it afresh. The release starts this build itself when it's out (release.yml)
+    if: github.event_name == 'workflow_dispatch' || (contains(github.event.head_commit.message, '[pc]') && !contains(github.event.head_commit.message, '[release]'))
     runs-on: windows-latest
     timeout-minutes: 60
     defaults:
