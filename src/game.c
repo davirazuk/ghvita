@@ -2710,7 +2710,7 @@ static void setup_camera(void)
     const float * eye = eye_v;
     float fov = fovs[cfg.camera];
     G.camera_phone = game_touch_pads && plat_below() <= 0 && cfg.camera == 0 && cfg.touch_frets != 2;
-    G.camera_tall = plat_below() > 0;
+    G.camera_tall = false;          // (held upright the picture keeps its own camera: all of it on the screen)
     if (G.camera_tall) {
         // a phone held upright: only the picture's middle shows, tall: further back and higher, all five lanes across
         // it and the highway running up most of it
@@ -4547,7 +4547,7 @@ static int pad_lane(int k)
 
 // the k-th pad from the left, by the Touch frets setting: where it's drawn (x0..x1, from top to the screen's bottom)
 // and how high up the screen a finger still counts for it (reach)
-#define PORTRAIT_BAND (fminf(300.0f, plat_below() - 90))   // a phone held upright: the pads' band at the bottom, in game units (what the strip under the picture leaves)
+#define PORTRAIT_BAND 300.0f   // a phone held upright: the pads' band at the bottom, in game units (what the strip under the picture leaves)
 #define PAD_H 52.0f            // the pads drawn: a strip under the cups (the columns over them take taps too)
 #define OPEN_H 22.0f            // the open bar: the top of the pads' strip, the pads under it
 static void pad_rect(int k, float * x0, float * x1, float * top, float * reach)
@@ -6357,9 +6357,8 @@ static void draw_portrait_pads(float below)
     }
     if (G.song) {
         // the song's name left of the pause chip, in what's between the picture and the pads
-        float ny = fmaxf(4, top - 64 - 6);
-        font_draw_fit(res.title, G.song->name, PORTRAIT_CROP + 12, ny, 34, SCREEN_W - 2 * PORTRAIT_CROP - 190, RGBA(255, 210, 90, 255), ALIGN_LEFT);
-        font_draw_fit(res.ui, G.song->artist, PORTRAIT_CROP + 14, ny + 38, 20, SCREEN_W - 2 * PORTRAIT_CROP - 190, RGBA(220, 220, 220, 255), ALIGN_LEFT);
+        font_draw_fit(res.title, G.song->name, 640, top - 220, 40, 300, RGBA(255, 210, 90, 255), ALIGN_CENTER);
+        font_draw_fit(res.ui, G.song->artist, 640, top - 168, 24, 300, RGBA(220, 220, 220, 255), ALIGN_CENTER);
     }
     for (int k = 0; k < G.lanes; k++) {
         int l = pad_lane(k);
@@ -6534,8 +6533,8 @@ static void draw_hud(void)
                 hud_y -= 10;
         }
         // (held upright: in the picture's top left corner, over the stage behind the highway)
-        const float bar_x = upright ? PORTRAIT_CROP + 6 : hud_x, bar_w = 188,
-                    bar_y = upright ? 136 : hud_y, bar_h = 36;  // the score bar's leather
+        const float bar_x = upright ? PORTRAIT_CROP + 24 : hud_x, bar_w = 188,
+                    bar_y = upright ? SCREEN_H + 150 : hud_y, bar_h = 36;  // the score bar's leather
         const float cnt_w = 174, cnt_h = 32, cnt_y = bar_y + bar_h + 2;
         const float k = 0.73f, ks = k / 0.6f;                                // the dome's 256x256 texture
         const float dx = bar_x + bar_w / 2 - 128 * k, dy = bar_y + 6 - 172 * k;
@@ -6797,7 +6796,7 @@ void game_draw(void)
     if (getenv("GHV_SPFX"))
         G.sp_active = true;             // to look at Star Power without playing up to it
 #endif
-    if (G.camera != cfg.camera || G.camera_tall != (plat_below() > 0) || G.camera_phone != (game_touch_pads && plat_below() <= 0 && cfg.camera == 0 && cfg.touch_frets != 2))
+    if (G.camera != cfg.camera ||  G.camera_phone != (game_touch_pads && plat_below() <= 0 && cfg.camera == 0 && cfg.touch_frets != 2))
         setup_camera();         // changed from the pause menu, or the phone turned
     // the frame rate (the frames drawn), and how many updates this frame covers: what moves by the frame moves this much
     G.fps_frames++;

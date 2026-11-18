@@ -361,8 +361,8 @@ static void menu_focus(bool snap)
         x1 = fmaxf(x1, tap_items[i].x + tap_items[i].w);
     }
     float want_x = 0, want_w = SCREEN_W;
-    if (!keys && x1 > x0) {
-        want_w = fmaxf(x1 - x0 + 8, 470);      // as close as the list allows: bigger on a phone
+    if (false && !keys && x1 > x0) {        // (zoomed in, the screens' other parts were cut off: all of it shows)
+        want_w = fmaxf(x1 - x0 + 8, 470);
         want_x = (x0 + x1) / 2 - want_w / 2;
         if (want_w > SCREEN_W * 0.9f) {
             want_w = SCREEN_W;

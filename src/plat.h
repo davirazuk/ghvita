@@ -49,7 +49,7 @@ void plat_portrait_song(bool on);    // a song's own portrait layout (on) or a m
 // the thumb pad; and where that leaves things: the picture's units shown across, and the strip under it (0: not upright)
 void plat_menu_focus(float x0, float w);
 float plat_menu_band(float * x0, float * w);
-#define PORTRAIT_CROP 300       // held upright, this much of each side of the picture is off the screen (the highway fills the width, the picture is tall)
+#define PORTRAIT_CROP 190       // held upright, this much of each side of the picture is off the screen
 #define PORTRAIT_UNDER 560      // and this much under it (in its units) for the song's name and the pads
 // a frame not drawn (30 fps): its time passes as if it were shown, nothing new goes on the screen
 void plat_skip_frame(void);
