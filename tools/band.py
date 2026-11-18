@@ -1153,7 +1153,7 @@ def bake(path, work, tex_dir, alt=False):
                 # World Tour's own hit on that drum, the frames round its stick landing (the strike's 8 cells: the
                 # landing at the 4th)
                 hc, hk = drum_hits[i // HIT]
-                fk = int(min(max(hk + (i % HIT - 3) * 2, 0), hc[2] - 1))
+                fk = int(min(max(hk + (i % HIT - 3), 0), hc[2] - 1))    # (a frame a cell: a short lift, not a wind-up past the face)
                 pose = (hc[0], hc[1], 1, hc[3], hc[4][fk][None], hc[5][fk][None])
         if g0 is not None:
             rig = wc.Rig(bones, pose_over(bones, pose, hand_pose(anims, role == 'bassist', sex_of(tex_dir, name) != 'f',
