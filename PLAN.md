@@ -910,3 +910,6 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 - Drummers: each strike's 8 frames come from World Tour's own clip for that drum (ss snare, hs hi-hat, t1s tom, c2s
   crash, t3s floor, hs both), round the frame its stick comes lowest: the sticks land on that model's own kit (the
   swung sticks aimed at fixed guesses and went into the toms).
+- Guitars held the right way: a neck that runs back behind the player is brought round across the body, and a guitar
+  whose strings face away is turned about its neck to face the audience (bassist_3 held his bass backwards, on edge).
+- Phone upright songs: the pads fill the screen's width and the strip's height (PORTRAIT_CROP 270).

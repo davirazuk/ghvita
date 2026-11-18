@@ -77,7 +77,8 @@ def blended(clip, f, end):
 # the hips until the head is within SING_LEAN of over them; the hair, the hats and what hangs on the chest are bones of
 # the pelvis's in these models (Bone_ACC_*), so they're turned with it or they'd stay behind in the air
 SING_LEAN = 12.0
-NECK_MAX, NECK_TO = 32.0, 28.0     # a guitar's neck above the horizontal, at most, and where a steeper one goes
+NECK_MAX, NECK_TO = 32.0, 28.0
+FACE_MIN = 0.6           # a guitar's face toward where the chest looks, at least (cos of the angle)     # a guitar's neck above the horizontal, at most, and where a steeper one goes
 STAND_AHEAD = 0.42       # the mic stand this far in front of the singer (toward the audience, -z)
 
 
@@ -962,6 +963,39 @@ def bake(path, work, tex_dir, alt=False):
                 R = R.T                     # (the other way round: down, not up)
             G[:3, :3] = R @ G[:3, :3]
         print(name, 'neck %.0f deg' % elev, '-> %d' % NECK_TO if elev > NECK_MAX else '')
+        # the strings facing out from the chest: some loops have the guitar turned on edge, its back or its side to
+        # the audience (bassist_3's faced across him). Turned about its own neck until its face is at least FACE_MIN
+        # toward where the chest looks
+        # (first the neck brought round to run across the body: bassist_3's ran back behind him)
+        z = G[:3, 2] / np.linalg.norm(G[:3, 2])
+        hz = np.array([z[0], 0, z[2]])
+        if np.linalg.norm(hz) > 1e-6 and abs(hz[2]) / np.linalg.norm(hz) > 0.35:
+            hn = hz / np.linalg.norm(hz)
+            tx = math.copysign(math.sqrt(1 - 0.3 ** 2), hn[0] if abs(hn[0]) > 1e-3 else 1.0)
+            target = np.array([tx, 0, math.copysign(0.3, hn[2])])
+            a = math.atan2(hn[0], hn[2]) - math.atan2(target[0], target[2])
+            c, s_ = math.cos(-a), math.sin(-a)
+            Ry = np.array([[c, 0, s_], [0, 1.0, 0], [-s_, 0, c]])
+            if np.linalg.norm(Ry @ hn - target) > 1e-3:
+                Ry = Ry.T
+            G[:3, :3] = Ry @ G[:3, :3]
+            print(name, 'neck ran back (%.2f), brought across' % hn[2])
+        cf = np.array([0, 0, -1.0])         # the face toward the audience
+        z = G[:3, 2] / np.linalg.norm(G[:3, 2])
+        want = cf - (cf @ z) * z
+        if np.linalg.norm(want) > 1e-6:
+            want /= np.linalg.norm(want)
+            y = G[:3, 1] - (G[:3, 1] @ z) * z
+            y /= np.linalg.norm(y)
+            face = float(y @ want)
+            if face < FACE_MIN:
+                ang = math.acos(float(np.clip(face, -1, 1))) - math.acos(FACE_MIN)
+                sgn = 1.0 if float(np.cross(y, want) @ z) > 0 else -1.0
+                K = np.array([[0, -z[2], z[1]], [z[2], 0, -z[0]], [-z[1], z[0], 0]])
+                R = np.eye(3) + math.sin(sgn * ang) * K + (1 - math.cos(sgn * ang)) * K @ K
+                piv = G[:3, 3].copy()
+                G[:3, :3] = R @ G[:3, :3]
+                print(name, 'guitar face %.2f, turned to %.2f' % (face, FACE_MIN))
         g0 = (np.linalg.inv(M0[N['bone_pelvis']]) @ G, np.linalg.inv(M0[N['bone_chest']]) @ G)
     anims = load_hands(tex_dir, sex_of(tex_dir, name)) if g0 is not None else None
     frames, centre, rises, stand_y, skins = [], [], [], 0.0, []
@@ -1066,6 +1100,9 @@ def bake(path, work, tex_dir, alt=False):
                 M[:3, :3] = rig.W[tg][:3, :3]
                 rig.set_world(pm, M)
         level_gaze(rig, N)
+        if os.environ.get('FACELOG') and g0 is not None and i % 6 == 0:
+            G = rig.W[N['bone_guitar_body']]
+            print('face', i, 'board.audience %.2f' % -G[2, 1], 'neck', np.round(G[:3, 2], 2))
         if os.environ.get('STICKLOG') and role == 'drummer' and i < JUMP:
             for sd, sb in (('l', 'bone_guitar_body'), ('r', 'BONE_GUITAR_FRET_POS')):
                 if sb in N:
