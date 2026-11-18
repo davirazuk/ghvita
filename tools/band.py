@@ -992,6 +992,24 @@ def bake(path, work, tex_dir, alt=False):
             peak = int(np.argmax(ys))
             j0 = max(0, min(jp[2] - 33, peak - 16))
             print(name, 'spjump peak', peak, 'window', j0, j0 + 32)
+    drum_hits = None
+    if role == 'drummer':
+        # each strike from World Tour's clip for that drum (snare, hi-hat, tom, crash, floor tom, the groove), at
+        # the frame its stick comes lowest: the hit lands on that model's own kit, not on fixed guesses at it
+        want = [('ss_100', 'r'), ('hs_100', 'l'), ('t1s_100', 'r'), ('c2s_100', 'r'), ('t3s_100', 'r'), ('hs_100', 'r')]
+        sticks = {'l': 'bone_guitar_body', 'r': 'BONE_GUITAR_FRET_POS'}
+        if all(w in byname for w, _ in want) and all(b in N for b in sticks.values()):
+            drum_hits = []
+            for w, side in want:
+                hc = byname[w]
+                lo, best = 6, (1e9, 6)
+                for k in range(lo, hc[2] - 6):
+                    M = wc.pose(bones, hc, k)
+                    tip = (M[N[sticks[side]]] @ np.array([0, 0, STICK_LEN, 1]))[1]
+                    if tip < best[0]:
+                        best = (tip, k)
+                drum_hits.append((hc, best[1]))
+            print(name, 'drum hits from', [w for w, _ in want])
     for i in range(nframes):
         f = s0 + i * span // FRAMES
         if role == 'vocalist':
@@ -1017,12 +1035,18 @@ def bake(path, work, tex_dir, alt=False):
             pose = (jp[0], jp[1], 1, jp[3], jp[4][f][None], jp[5][f][None]) if jp is not None else blended(clip, s0, (s0, s0 + span))
         else:
             pose = blended(clip, f if role != 'drummer' else s0 + span - BLEND, (s0, s0 + span))
+            if role == 'drummer' and drum_hits is not None:
+                # World Tour's own hit on that drum, the frames round its stick landing (the strike's 8 cells: the
+                # landing at the 4th)
+                hc, hk = drum_hits[i // HIT]
+                fk = int(min(max(hk + (i % HIT - 3) * 2, 0), hc[2] - 1))
+                pose = (hc[0], hc[1], 1, hc[3], hc[4][fk][None], hc[5][fk][None])
         if g0 is not None:
             rig = wc.Rig(bones, pose_over(bones, pose, hand_pose(anims, role == 'bassist', sex_of(tex_dir, name) != 'f',
                                                                  GROOVE_SHAPE, STRUM_K[i % STRUMS if i < JUMP else 0])))
         else:
             rig = wc.Rig(bones, wc.pose(bones, pose, 0))
-        if role == 'drummer' and i < JUMP and not os.environ.get('NOSWING'):
+        if role == 'drummer' and i < JUMP and drum_hits is None and not os.environ.get('NOSWING'):
             for side, pad in STRIKES[i // HIT].items():
                 swing_stick(rig, side, pad, HIT_W[i % HIT], HIT_RAISE[i % HIT])
         if role != 'drummer' or 'bone_ik_hand_slave_l' in N:

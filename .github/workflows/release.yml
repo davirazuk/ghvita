@@ -80,7 +80,7 @@ jobs:
       # last release's art hasn't this bake (assets/band3d/bake.txt), or has no venues, or the commit says [bake]
       - name: The 3D band and the venues, baked from the source art
         env:
-          BAKE: band 13 (16000 and 22000 triangles, steadiest guitar loops, necks held at most 28 degrees up, every face kept looking about level, fret hand placed on the neck with fingers pressing strings, singers kept upright and facing the audience, mic stand fixed in front of the singer, swinging wild loops left out, loose bones mended, textures the right way up, hair kept, hair places for dyes)
+          BAKE: band 14 (16000 and 22000 triangles, steadiest guitar loops, necks held at most 28 degrees up, every face kept looking about level, drum hits from World Tour own per-drum clips, fret hand placed on the neck with fingers pressing strings, singers kept upright and facing the audience, mic stand fixed in front of the singer, swinging wild loops left out, loose bones mended, textures the right way up, hair kept, hair places for dyes)
         run: |
           said=$(git log -1 --format=%B | grep -c '\[bake\]' || true)
           band=0; venues=0

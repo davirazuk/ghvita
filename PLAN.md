@@ -907,3 +907,6 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   margin gave the pad to its left: orange read as blue). PC: L/R glyphs as keycaps, calibrate says Z, no empty keycaps.
 - Phone one hand: back to the original layout (five equal pads side by side in the middle, World Tour's camera): the
   lane-aligned pads and the phone's nearer camera played worse.
+- Drummers: each strike's 8 frames come from World Tour's own clip for that drum (ss snare, hs hi-hat, t1s tom, c2s
+  crash, t3s floor, hs both), round the frame its stick comes lowest: the sticks land on that model's own kit (the
+  swung sticks aimed at fixed guesses and went into the toms).
