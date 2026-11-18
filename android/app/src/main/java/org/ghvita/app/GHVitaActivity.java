@@ -181,10 +181,11 @@ public class GHVitaActivity extends SDLActivity {
     // The second way builds arrive: the repository's "builds" branch, pushed straight from a build machine (no release and
     // no GitHub Actions needed). android/version.txt is the build, android/parts.txt the pieces (each under GitHub's
     // 100 MB a file) that joined make the APK. The newer of the release and the branch is taken.
-    private static final String RAW = "https://raw.githubusercontent.com/davirazuk/ghvita/builds/android/";
+    private static final String CONTENTS = "https://api.github.com/repos/davirazuk/ghvita/contents/android/";
+    private String rawToken;            // the token the release check got through with (the repository is private)
 
     private InputStream raw(String name) throws Exception {
-        java.net.HttpURLConnection c = open(RAW + name, null, "*/*");
+        java.net.HttpURLConnection c = open(CONTENTS + name + "?ref=builds", rawToken, "application/vnd.github.raw");
         if (c.getResponseCode() != 200)
             throw new java.io.IOException(name + ": HTTP " + c.getResponseCode());
         return c.getInputStream();
@@ -236,6 +237,7 @@ public class GHVitaActivity extends SDLActivity {
             android.util.Log.w("GHVita", "release check", e);
         }
         // the builds branch
+        rawToken = token;
         java.util.List<String> parts = new java.util.ArrayList<>();
         java.util.List<Long> sizes = new java.util.ArrayList<>();
         int branch = 0;

@@ -240,13 +240,13 @@ static int release_check(void)
 #elif defined(__linux__) && !defined(__ANDROID__)
 #define BRANCH_PLAT "linux"
 #endif
-#define RAW "https://raw.githubusercontent.com/davirazuk/ghvita/builds/"
 #define MAX_PARTS 16
-static char part_url[MAX_PARTS][160];
+static char part_url[MAX_PARTS][200];
 static int64_t part_size[MAX_PARTS];
 static int parts;                       // 0: the offer is a release's asset; else these pieces, joined in order
 static int64_t parts_done;              // the bytes of the pieces already down (progress across them all)
-static const char * const raw_headers[] = {"X-GHVita: raw", NULL};
+// through the API with the same token (the repository is private), each file as it is
+static const char * const raw_headers[] = {auth, "Accept: application/vnd.github.raw", "X-GitHub-Api-Version: 2022-11-28", NULL};
 
 #ifdef BRANCH_PLAT
 static void branch_check(void)
@@ -254,7 +254,7 @@ static void branch_check(void)
     char err[160] = "", url[300];
     char * body = NULL;
     size_t len = 0;
-    snprintf(url, sizeof(url), RAW BRANCH_PLAT "/version.txt");
+    snprintf(url, sizeof(url), "%s/contents/" BRANCH_PLAT "/version.txt?ref=builds", api_base());
     HttpReq r = {.url = url, .headers = raw_headers, .stall_s = 15};
     int status = http_fetch(&r, &body, &len, err, sizeof(err));
     int version = status == 200 && body ? atoi(body) : 0;
@@ -265,7 +265,7 @@ static void branch_check(void)
         return;
     body = NULL;
     len = 0;
-    snprintf(url, sizeof(url), RAW BRANCH_PLAT "/parts.txt");
+    snprintf(url, sizeof(url), "%s/contents/" BRANCH_PLAT "/parts.txt?ref=builds", api_base());
     HttpReq pr = {.url = url, .headers = raw_headers, .stall_s = 15};
     if (http_fetch(&pr, &body, &len, err, sizeof(err)) != 200 || !body) {
         free(body);
@@ -277,7 +277,7 @@ static void branch_check(void)
         char name[100];
         long long size = 0;
         if (sscanf(line, "%99s %lld", name, &size) == 2 && size > 0 && !strchr(name, '/') && !strstr(name, "..")) {
-            snprintf(part_url[n], sizeof(part_url[n]), RAW BRANCH_PLAT "/%s", name);
+            snprintf(part_url[n], sizeof(part_url[n]), "%s/contents/" BRANCH_PLAT "/%s?ref=builds", api_base(), name);
             part_size[n++] = size;
             all += size;
         }
