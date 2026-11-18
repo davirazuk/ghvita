@@ -4559,7 +4559,7 @@ static void pad_rect(int k, float * x0, float * x1, float * top, float * reach)
         *reach = SCREEN_H * 0.4f;
         return;
     }
-    if (plat_below() > 0 || (cfg.touch_frets == 0 && plat_below() <= 0)) {
+    if (cfg.touch_frets == 0 && plat_below() <= 0) {
         // one hand on its side: each lane's column stands under that lane where the highway meets its cups (the
         // middle way between neighbours), the outer two reaching on to the screen's edges: a gem falls into the column
         // that plays it

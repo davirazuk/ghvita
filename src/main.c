@@ -317,7 +317,7 @@ static void draw_menu_pad(bool show)
             extra[ne++] = i;
     }
     float m = bw * 0.03f, y = m * 1.5f;
-    float ah = fminf(bw * 0.14f, (below * 0.42f - m) / (ne > 3 ? 2 : 1) - m);
+    float ah = fminf(bw * 0.11f, (below * 0.36f - m) / (ne > 3 ? 2 : 1) - m);
     for (int i = 0; i < ne; i++) {
         int row = i / 3, col = i % 3, in_row = ne - row * 3 > 3 ? 3 : ne - row * 3;
         float w = (bw - m * (in_row + 1)) / in_row;
@@ -362,7 +362,7 @@ static void menu_focus(bool snap)
     }
     float want_x = 0, want_w = SCREEN_W;
     if (!keys && x1 > x0) {
-        want_w = fmaxf(x1 - x0 + 60, 640);
+        want_w = fmaxf(x1 - x0 + 24, 560);     // as close as the list allows: bigger on a phone
         want_x = (x0 + x1) / 2 - want_w / 2;
         if (want_w > SCREEN_W * 0.9f) {
             want_w = SCREEN_W;

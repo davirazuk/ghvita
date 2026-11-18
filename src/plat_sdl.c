@@ -68,7 +68,7 @@ void plat_song_keys(bool on)
     song_keys = on;
 }
 static float menu_x0, menu_w = SCREEN_W;    // plat_menu_focus
-#define MENU_PAD 0.66f          // a menu held upright: the thumb pad under the picture, this much of the width tall
+#define MENU_PAD 0.80f          // a menu held upright: the thumb pad under the picture, this much of the width tall
 
 void plat_view(int * x, int * y, int * w, int * h, int * full_w, int * full_h)
 {
@@ -86,7 +86,7 @@ void plat_view(int * x, int * y, int * w, int * h, int * full_w, int * full_h)
         }
         float shown = menu_w * vw / SCREEN_W;           // the focus's width on the screen
         *x = (int)((win_w - shown) / 2 - menu_x0 * vw / SCREEN_W);
-        *y = win_h - vh - (int)(win_w * 0.03f);         // GL's y is up from the bottom: at the top, under the status bar
+        *y = win_h - vh - (int)(win_w * 0.09f);         // GL's y is up from the bottom: near the top, clear of the status bar and camera
         *w = vw;
         *h = vh;
         *full_w = win_w;
