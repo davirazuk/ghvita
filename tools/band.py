@@ -514,8 +514,8 @@ def skinned(meshes, skin):
     return out
 
 
-ALT = {'guitarist': ['horse_100', 'jimi_100', 'areyou_100', 'joker_100', 'bleed_100', 'damnit_100'],
-       'bassist': ['joker_100', 'bleed_100', 'danjoker_100', 'horse_100', 'jimi_100'],
+ALT = {'guitarist': ['horse_100', 'areyou_100', 'joker_100', 'bleed_100', 'damnit_100'],
+       'bassist': ['joker_100', 'bleed_100', 'danjoker_100', 'horse_100'],
        'vocalist': ['today_100', 'areyou_100', 'dammit_100']}
 
 
@@ -932,8 +932,8 @@ def bake(path, work, tex_dir, alt=False):
             return guitar_swing(bones, c, N, start, int(round(BEATS * 60 / 100 * c[1])))
         best = (swing(clip, s0), clip, s0)
         for c in clips:
-            if c is clip or not c[0].endswith('_100'):
-                continue
+            if c is clip or not c[0].endswith('_100') or c[0].startswith('jimi'):
+                continue                # (jimi: played left-handed, the guitar the wrong way round)
             sp = int(round(BEATS * 60 / 100 * c[1]))
             if c[2] < sp + 8:
                 continue
@@ -969,7 +969,7 @@ def bake(path, work, tex_dir, alt=False):
         # (first the neck brought round to run across the body: bassist_3's ran back behind him)
         z = G[:3, 2] / np.linalg.norm(G[:3, 2])
         hz = np.array([z[0], 0, z[2]])
-        if np.linalg.norm(hz) > 1e-6 and abs(hz[2]) / np.linalg.norm(hz) > 0.35:
+        if np.linalg.norm(hz) > 1e-6 and hz[2] / np.linalg.norm(hz) > 0.35:     # (running back, away from the audience)
             hn = hz / np.linalg.norm(hz)
             tx = math.copysign(math.sqrt(1 - 0.3 ** 2), hn[0] if abs(hn[0]) > 1e-3 else 1.0)
             target = np.array([tx, 0, math.copysign(0.3, hn[2])])
@@ -1085,6 +1085,8 @@ def bake(path, work, tex_dir, alt=False):
                 swing_stick(rig, side, pad, HIT_W[i % HIT], HIT_RAISE[i % HIT])
         if role != 'drummer' or 'bone_ik_hand_slave_l' in N:
             wc.solve(rig, rest, role, (f - s0) / span * BEATS, g0)
+        if g0 is not None and i < JUMP:
+            face_front(rig, rest, N)        # a guitar player turned back toward the audience, as the singer is
         if role == 'vocalist':
             straighten(rig, N)
             level_head(rig, N, rest)
@@ -1176,6 +1178,7 @@ def bake(path, work, tex_dir, alt=False):
                         rig = wc.Rig(bones, pose_over(bones, pose, hand_pose(anims, role == 'bassist', male, 0,
                                                                              STRUM_K[0], chord, fret)))
                         wc.solve(rig, rest, role, (f - s0) / span * BEATS, g0)
+                        face_front(rig, rest, N)
                         guitar_hands(rig)
                         all_[g, pi, ci] = np.stack([(m @ b[4])[:3, :] for m, b in zip(rig.W, bones)])
             spread = np.abs(all_ - all_[:, :1, :1]).max(axis=(0, 1, 2, 4, 5))
@@ -1192,6 +1195,7 @@ def bake(path, work, tex_dir, alt=False):
                 over.update(finger_pose(anims, male, mask))
                 rig = wc.Rig(bones, pose_over(bones, pose, over))
                 wc.solve(rig, rest, role, 0, g0)
+                face_front(rig, rest, N)
                 guitar_hands(rig)
                 press_fingers(rig, mask)
                 S = [m @ b[4] for m, b in zip(rig.W, bones)]

@@ -913,3 +913,5 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 - Guitars held the right way: a neck that runs back behind the player is brought round across the body, and a guitar
   whose strings face away is turned about its neck to face the audience (bassist_3 held his bass backwards, on edge).
 - Phone upright songs: the pads fill the screen's width and the strip's height (PORTRAIT_CROP 270).
+- Guitar players turned back toward the audience frame by frame (as the singers), fret-hand layers too; the "jimi"
+  loop (played left-handed: the guitar the wrong way round) never used.
