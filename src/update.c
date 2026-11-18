@@ -98,9 +98,8 @@ static bool read_token(void)
     return true;
 }
 
-static int check_thread(void * arg)
+static int release_check(void)
 {
-    (void)arg;
     char err[160] = "", url[300];
     if (!plat_net_up(err, sizeof(err))) {
         state = UP_NONE;                // no Wi-Fi is no news, not an error
@@ -231,6 +230,90 @@ static int check_thread(void * arg)
     return 0;
 }
 
+// The second way builds arrive: the repository's "builds" branch, pushed straight from a build machine, with no release
+// and no GitHub Actions needed. <platform>/version.txt is the build; parts.txt names the pieces (each under GitHub's
+// 100 MB a file) that joined make the very file a release would carry. The newer of the two is offered.
+#if defined(_WIN32)
+#define BRANCH_PLAT "windows"
+#elif defined(__vita__)
+#define BRANCH_PLAT "vita"
+#elif defined(__linux__) && !defined(__ANDROID__)
+#define BRANCH_PLAT "linux"
+#endif
+#define RAW "https://raw.githubusercontent.com/davirazuk/ghvita/builds/"
+#define MAX_PARTS 16
+static char part_url[MAX_PARTS][160];
+static int64_t part_size[MAX_PARTS];
+static int parts;                       // 0: the offer is a release's asset; else these pieces, joined in order
+static int64_t parts_done;              // the bytes of the pieces already down (progress across them all)
+static const char * const raw_headers[] = {"X-GHVita: raw", NULL};
+
+#ifdef BRANCH_PLAT
+static void branch_check(void)
+{
+    char err[160] = "", url[300];
+    char * body = NULL;
+    size_t len = 0;
+    snprintf(url, sizeof(url), RAW BRANCH_PLAT "/version.txt");
+    HttpReq r = {.url = url, .headers = raw_headers, .stall_s = 15};
+    int status = http_fetch(&r, &body, &len, err, sizeof(err));
+    int version = status == 200 && body ? atoi(body) : 0;
+    free(body);
+    int best = offered > GHV_BUILD ? offered : GHV_BUILD;
+    plat_log("update: the builds branch has build %d (status %d)", version, status);
+    if (version <= best)
+        return;
+    body = NULL;
+    len = 0;
+    snprintf(url, sizeof(url), RAW BRANCH_PLAT "/parts.txt");
+    HttpReq pr = {.url = url, .headers = raw_headers, .stall_s = 15};
+    if (http_fetch(&pr, &body, &len, err, sizeof(err)) != 200 || !body) {
+        free(body);
+        return;
+    }
+    int n = 0;
+    int64_t all = 0;
+    for (char * line = strtok(body, "\r\n"); line && n < MAX_PARTS; line = strtok(NULL, "\r\n")) {
+        char name[100];
+        long long size = 0;
+        if (sscanf(line, "%99s %lld", name, &size) == 2 && size > 0 && !strchr(name, '/') && !strstr(name, "..")) {
+            snprintf(part_url[n], sizeof(part_url[n]), RAW BRANCH_PLAT "/%s", name);
+            part_size[n++] = size;
+            all += size;
+        }
+    }
+    free(body);
+    if (!n)
+        return;
+    parts = n;
+    offered = version;
+    offered_size = all;
+    state = UP_AVAILABLE;
+}
+#endif
+
+static int check_thread(void * arg)
+{
+    (void)arg;
+    parts = 0;
+    offered = 0;
+    release_check();
+#ifdef BRANCH_PLAT
+#if defined(PC_TAG) && !defined(_WIN32)
+    if (!getenv("APPIMAGE"))
+        return 0;                       // run from its folder (development): nothing to update
+#endif
+    UpState was = state;
+    if (was != UP_AVAILABLE)
+        offered = 0;
+    state = UP_CHECKING;
+    branch_check();
+    if (state == UP_CHECKING)
+        state = was;
+#endif
+    return 0;
+}
+
 void update_check(bool now)
 {
 #if defined(__ANDROID__)
@@ -321,8 +404,46 @@ static int get_thread(void * arg)
     path_of(dir, sizeof(dir), "new");
     path_of(old, sizeof(old), "old");
     wipe(dir);
-    HttpReq r = {.url = asset_url, .headers = file_headers, .to_file = zip, .cancel = &cancelling, .done = &got, .total = &total, .stall_s = 30};
-    int status = http_fetch(&r, NULL, NULL, err, sizeof(err));
+    int status;
+    parts_done = 0;
+    if (parts) {
+        // the builds branch: each piece down, then onto the end of the whole
+        char piece[320];
+        snprintf(piece, sizeof(piece), "%s.piece", zip);
+        FILE * whole = fopen(zip, "wb");
+        status = whole ? 200 : 0;
+        for (int i = 0; whole && i < parts && status == 200 && !cancelling; i++) {
+            HttpReq r = {.url = part_url[i], .headers = raw_headers, .to_file = piece, .cancel = &cancelling, .done = &got, .total = &total, .stall_s = 30};
+            status = http_fetch(&r, NULL, NULL, err, sizeof(err));
+            FILE * in = status == 200 ? fopen(piece, "rb") : NULL;
+            int64_t have = 0;
+            if (in) {
+                static unsigned char buf[64 * 1024];
+                size_t k;
+                while ((k = fread(buf, 1, sizeof(buf), in)) > 0) {
+                    if (fwrite(buf, 1, k, whole) != k) {
+                        status = 0;
+                        snprintf(err, sizeof(err), "the disk is full");
+                        break;
+                    }
+                    have += k;
+                }
+                fclose(in);
+            }
+            remove(piece);
+            if (status == 200 && have != part_size[i]) {
+                status = 0;
+                snprintf(err, sizeof(err), "piece %d of the download came out the wrong size", i + 1);
+            }
+            parts_done += have;
+            got = 0;
+        }
+        if (whole && fclose(whole) != 0 && status == 200)
+            status = 0;
+    } else {
+        HttpReq r = {.url = asset_url, .headers = file_headers, .to_file = zip, .cancel = &cancelling, .done = &got, .total = &total, .stall_s = 30};
+        status = http_fetch(&r, NULL, NULL, err, sizeof(err));
+    }
     if (cancelling) {
         remove(zip);
         state = UP_AVAILABLE;
@@ -648,4 +769,13 @@ UpState update_state(void) { return state; }
 int update_version(void) { return offered; }
 int64_t update_size(void) { return offered_size; }
 const char * update_error(void) { return error; }
-void update_progress(int64_t * done, int64_t * all) { *done = got; *all = total; }
+void update_progress(int64_t * done, int64_t * all)
+{
+    if (parts) {
+        *done = parts_done + got;       // across every piece of a builds-branch download
+        *all = offered_size;
+    } else {
+        *done = got;
+        *all = total;
+    }
+}

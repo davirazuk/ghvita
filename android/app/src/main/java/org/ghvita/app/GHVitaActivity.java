@@ -178,50 +178,84 @@ public class GHVitaActivity extends SDLActivity {
         return b.toString("UTF-8");
     }
 
+    // The second way builds arrive: the repository's "builds" branch, pushed straight from a build machine (no release and
+    // no GitHub Actions needed). android/version.txt is the build, android/parts.txt the pieces (each under GitHub's
+    // 100 MB a file) that joined make the APK. The newer of the release and the branch is taken.
+    private static final String RAW = "https://raw.githubusercontent.com/davirazuk/ghvita/builds/android/";
+
+    private InputStream raw(String name) throws Exception {
+        java.net.HttpURLConnection c = open(RAW + name, null, "*/*");
+        if (c.getResponseCode() != 200)
+            throw new java.io.IOException(name + ": HTTP " + c.getResponseCode());
+        return c.getInputStream();
+    }
+
     private void checkUpdate() throws Exception {
-        String token = readToken();
-        // (no token: asked as anyone, which a public repository answers)
-        java.net.HttpURLConnection rc = open(API, token, "application/vnd.github+json");
-        int code = rc.getResponseCode();
-        if (code == 401 || code == 403 || code == 404) {
-            // an old token in update.txt: the one built into the app instead
-            String baked = null;
-            try {
-                baked = readAll(getAssets().open("ghv/update_token")).trim();
-            } catch (java.io.IOException e) {
-                baked = null;
+        int mine = getPackageManager().getPackageInfo(getPackageName(), 0).versionCode;
+        String token = readToken(), apk = null;
+        int latest = 0;
+        try {
+            // (no token: asked as anyone, which a public repository answers)
+            java.net.HttpURLConnection rc = open(API, token, "application/vnd.github+json");
+            int code = rc.getResponseCode();
+            if (code == 401 || code == 403 || code == 404) {
+                // an old token in update.txt: the one built into the app instead
+                String baked = null;
+                try {
+                    baked = readAll(getAssets().open("ghv/update_token")).trim();
+                } catch (java.io.IOException e) {
+                    baked = null;
+                }
+                if (baked != null && !baked.isEmpty() && !baked.equals(token)) {
+                    token = baked;
+                    rc = open(API, token, "application/vnd.github+json");
+                    code = rc.getResponseCode();
+                }
             }
-            if (baked != null && !baked.isEmpty() && !baked.equals(token)) {
-                token = baked;
+            if ((code == 401 || code == 403 || code == 404) && token != null) {
+                token = null;                   // refused: asked without one (a public repository answers)
                 rc = open(API, token, "application/vnd.github+json");
                 code = rc.getResponseCode();
             }
+            if (code == 200) {
+                org.json.JSONObject rel = new org.json.JSONObject(readAll(rc.getInputStream()));
+                org.json.JSONArray assets = rel.getJSONArray("assets");
+                String ver = null;
+                for (int i = 0; i < assets.length(); i++) {
+                    org.json.JSONObject a = assets.getJSONObject(i);
+                    if (a.getString("name").equals("GHVita-android.apk"))
+                        apk = a.getString("url");
+                    if (a.getString("name").equals("version.txt"))
+                        ver = a.getString("url");
+                }
+                if (apk != null && ver != null)
+                    latest = Integer.parseInt(readAll(asset(ver, token)).trim());
+            } else
+                note("GitHub answered " + code + " to the update check", false);
+        } catch (Exception e) {
+            android.util.Log.w("GHVita", "release check", e);
         }
-        if ((code == 401 || code == 403 || code == 404) && token != null) {
-            token = null;                   // refused: asked without one (a public repository answers)
-            rc = open(API, token, "application/vnd.github+json");
-            code = rc.getResponseCode();
+        // the builds branch
+        java.util.List<String> parts = new java.util.ArrayList<>();
+        java.util.List<Long> sizes = new java.util.ArrayList<>();
+        int branch = 0;
+        try {
+            branch = Integer.parseInt(readAll(raw("version.txt")).trim());
+            if (branch > Math.max(latest, mine)) {
+                for (String line : readAll(raw("parts.txt")).split("\\r?\\n")) {
+                    String[] f = line.trim().split("\\s+");
+                    if (f.length == 2 && !f[0].contains("/") && !f[0].contains(".."))  {
+                        parts.add(f[0]);
+                        sizes.add(Long.parseLong(f[1]));
+                    }
+                }
+            }
+        } catch (Exception e) {
+            android.util.Log.w("GHVita", "builds branch check", e);
         }
-        if (code != 200) {
-            note("GitHub answered " + code + " to the update check", true);
-            return;
-        }
-        org.json.JSONObject rel = new org.json.JSONObject(readAll(rc.getInputStream()));
-        org.json.JSONArray assets = rel.getJSONArray("assets");
-        String apk = null, ver = null;
-        for (int i = 0; i < assets.length(); i++) {
-            org.json.JSONObject a = assets.getJSONObject(i);
-            if (a.getString("name").equals("GHVita-android.apk"))
-                apk = a.getString("url");
-            if (a.getString("name").equals("version.txt"))
-                ver = a.getString("url");
-        }
-        if (apk == null || ver == null) {
-            note("the android release has no APK yet", false);
-            return;
-        }
-        int latest = Integer.parseInt(readAll(asset(ver, token)).trim());
-        int mine = getPackageManager().getPackageInfo(getPackageName(), 0).versionCode;
+        boolean fromBranch = !parts.isEmpty() && branch > Math.max(latest, mine);
+        if (fromBranch)
+            latest = branch;
         if (latest <= mine) {
             note("GH Vita is up to date (build " + mine + ")", true);
             return;
@@ -232,14 +266,32 @@ public class GHVitaActivity extends SDLActivity {
         java.io.File out = new java.io.File(dir, "GHVita-" + latest + ".apk");
         if (!out.exists() || out.length() < 1000000) {
             java.io.File part = new java.io.File(dir, "download.part");
-            InputStream in = asset(apk, token);
             OutputStream o = new FileOutputStream(part);
             byte[] buf = new byte[1 << 16];
             int n;
-            while ((n = in.read(buf)) > 0)
-                o.write(buf, 0, n);
+            if (fromBranch) {
+                for (int i = 0; i < parts.size(); i++) {
+                    InputStream in = raw(parts.get(i));
+                    long have = 0;
+                    while ((n = in.read(buf)) > 0) {
+                        o.write(buf, 0, n);
+                        have += n;
+                    }
+                    in.close();
+                    if (have != sizes.get(i)) {
+                        o.close();
+                        part.delete();
+                        note("piece " + (i + 1) + " of the download came out the wrong size", true);
+                        return;
+                    }
+                }
+            } else {
+                InputStream in = asset(apk, token);
+                while ((n = in.read(buf)) > 0)
+                    o.write(buf, 0, n);
+                in.close();
+            }
             o.close();
-            in.close();
             part.renameTo(out);
         }
         if (out.length() < 1000000) {
