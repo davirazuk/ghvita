@@ -106,6 +106,48 @@ def straighten(rig, N):
         rig.W[k] = T @ rig.W[k]
 
 
+LOOK_UP, LOOK_DOWN = 10.0, 30.0     # where a face may point: this far above the horizontal, this far below
+
+
+def level_gaze(rig, N):
+    # the face turned to look about level: GHWT's loops have some staring at the ceiling (46 degrees up) and others
+    # at their shoes (65 down), which read as a broken neck from the camera. The head (with the hair and hats,
+    # pelvis bones in these models) turned about its joint, round the line between the eyes
+    need = ('Bone_Brow_Mid', 'Bone_Lip_Lower_Mid', 'Bone_Eye_L', 'Bone_Eye_R', 'bone_head')
+    if not all(n in N for n in need):
+        return
+    P = lambda n: rig.W[N[n]][:3, 3]
+    up = P('Bone_Brow_Mid') - P('Bone_Lip_Lower_Mid')
+    lr = P('Bone_Eye_L') - P('Bone_Eye_R')
+    if np.linalg.norm(up) < 1e-6 or np.linalg.norm(lr) < 1e-6:
+        return
+    up /= np.linalg.norm(up)
+    fwd = np.cross(lr, up)
+    if fwd @ ((P('Bone_Eye_L') + P('Bone_Eye_R')) / 2 - P('bone_head')) < 0:
+        fwd = -fwd
+    fwd /= np.linalg.norm(fwd)
+    el = math.degrees(math.asin(float(np.clip(fwd[1], -1, 1))))
+    want = min(max(el, -LOOK_DOWN), LOOK_UP)
+    if abs(el - want) < 0.5:
+        return
+    axis = lr / np.linalg.norm(lr)
+    a = math.radians(want - el)
+    K = np.array([[0, -axis[2], axis[1]], [axis[2], 0, -axis[0]], [-axis[1], axis[0], 0]])
+    R = np.eye(3) + math.sin(a) * K + (1 - math.cos(a)) * K @ K
+    if ((R @ fwd)[1] - fwd[1]) * (want - el) < 0:
+        R = R.T                     # the other way round
+    piv = P('bone_head').copy()
+    T = np.eye(4)
+    T[:3, :3] = R
+    T[:3, 3] = piv - R @ piv
+    moved = set(rig.subtree(N['bone_head']))
+    for name, i in N.items():
+        if name.lower().startswith('bone_acc_head'):
+            moved.update(rig.subtree(i))
+    for k in moved:
+        rig.W[k] = T @ rig.W[k]
+
+
 HEAD_TILT = 25.0        # the head against the chest, at most (a head thrown right back read as a broken neck)
 
 
@@ -999,6 +1041,10 @@ def bake(path, work, tex_dir, alt=False):
                 M = rig.W[pm].copy()
                 M[:3, :3] = rig.W[tg][:3, :3]
                 rig.set_world(pm, M)
+        level_gaze(rig, N)
+        if os.environ.get('GAZELOG'):
+            P = lambda n: rig.W[N[n]][:3, 3]
+            print('gaze', i, np.round(P('Bone_Brow_Mid') - P('Bone_Lip_Lower_Mid'), 3), np.round((P('Bone_Eye_L') + P('Bone_Eye_R')) / 2 - P('bone_head'), 3))
         skin = [m @ b[4] for m, b in zip(rig.W, bones)]
         if os.environ.get('LEANLOG') and role == 'vocalist':
             v = rig.W[N['bone_head']][:3, 3] - rig.W[N['bone_pelvis']][:3, 3]

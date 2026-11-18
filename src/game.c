@@ -536,7 +536,7 @@ static const CineShot cine_shots[CS_COUNT] = {
     [CS_HERO] = {2, 0.0f, 2.30f, 2.05f, 38, 24, -20, -16, 2.6f, 0.21f, 0.50f},       // from the floor, legs long
     [CS_FACE] = {0, -0.03f, 1.02f, 0.92f, 34, 18, -8, -5, 3.4f, 0.50f, 0.24f},       // the face over the top of the board
     [CS_NECK] = {1, -0.06f, 1.50f, 1.32f, -30, -18, -2, 2, 2.8f, 0.23f, 0.46f},     // from the neck's side, the fret hand near
-    [CS_DRUMS] = {1, 0.05f, 2.5f, 2.2f, 24, 8, 34, 28, 4.6f, 0.50f, 0.36f},          // the kit from above, the drummer over it
+    [CS_DRUMS] = {1, 0.15f, 2.3f, 2.0f, 30, 16, 20, 14, 4.4f, 0.20f, 0.36f},         // the drummer over his kit, beside the highway
     [CS_LINE] = {2, 0.25f, 5.0f, 4.5f, 10, -6, -8, -6, 8.0f, 0.50f, 0.27f},          // the whole band strung across
     [CS_WAIST] = {1, -0.10f, 1.95f, 1.75f, -22, -8, -10, -8, 3.6f, 0.25f, 0.46f},    // waist up, the guitar in the picture
 };
@@ -1489,7 +1489,7 @@ static CineCam cine_cam(double beat)
     if (getenv("GHV_CAMYAW"))          // tests: the camera this far round them (degrees)
         c.yaw = (float)atof(getenv("GHV_CAMYAW")) * rad;
 #endif
-    float sx = G.cine_shot == CS_DRUMS || G.cine_shot == CS_LINE || G.cine_shot == CS_FACE ? cs->sx
+    float sx = G.cine_shot == CS_LINE || G.cine_shot == CS_FACE ? cs->sx
                : side > 0 ? 1 - cs->sx : cs->sx;
     if (G.cine_shot == CS_FACE)
         sx = 0.5f - side * 0.06f;

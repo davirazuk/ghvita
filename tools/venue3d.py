@@ -209,6 +209,8 @@ def main():
     # a venue's textures in one file beside its model (<zone>.v3t: "V3T1", count, then name[32] + size each, then the
     # PNGs): some 770 loose pictures took an update past the 1024 files the Updater app moves, and it stopped short
     for f in sorted(glob.glob(os.path.join(OUT, '*.v3d'))):
+        if os.path.basename(f)[:-4] not in zones:
+            continue                    # (only the zones baked now: the others' textures aren't here to pack)
         d = open(f, 'rb').read()
         n, at, names = struct.unpack_from('<i', d, 4)[0], 56, []
         for _ in range(n):

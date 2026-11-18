@@ -895,3 +895,7 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   it as big as the room leaves (run_screen twice, plat_menu_pass, the second view's own scissor; taps there map by it),
   and a compact pad at the bottom (the menu's own actions over the arrows, BACK and the named OK). A side too narrow
   for a view stays with the list.
+- Band: every member's face kept between 30 degrees down and 10 up (level_gaze, from the brow, lips and eyes): some
+  loops had them staring at the ceiling (guitarist_2 46 up, bassist_2 and two drummers 30-35) or at their shoes (65
+  down). The drum close-up has the drummer beside the highway instead of behind it.
+- venue3d.py packs only the zones it baked (baking a few emptied every other venue's textures).
