@@ -2387,6 +2387,23 @@ static void draw_band(double beat)
             // World Tour's model, posed by the same frames the sheet has, two of them blended so it moves smoothly
             Band3DDraw d3 = {0};
             d3.hands.ga = -1;
+            if (r == 1 && bp->mic > 0.3f && jump_f < 0) {
+                // the singer's mouth: open on the sung notes (a syllable's start wide, then held a little open),
+                // shut between them; with no chart for them, in time with the beat while the mic's up
+                float open = 0;
+                if (bp->part) {
+                    const Part * vp = bp->part;
+                    for (int k = bp->next > 0 ? bp->next - 1 : 0; k < vp->note_count && k <= bp->next + 1; k++) {
+                        double t0 = vp->notes[k].time / 1e6, t1 = t0 + vp->notes[k].len / 1e6;
+                        if (G.t >= t0 - 0.03 && G.t <= t1 + 0.03) {
+                            float in = (float)(G.t - t0);
+                            open = in < 0.08f ? 0.4f + in * 7.5f : 0.55f + 0.25f * sinf((float)G.t * 9);
+                        }
+                    }
+                } else
+                    open = 0.3f + 0.4f * fabsf(sinf((float)(phase * 3.14159265 * 4)));
+                d3.mouth = open * bp->mic;
+            }
             bool alt3 = wild_now && band3d_frames(m3, true) > 0;
             d3.fa = d3.fb = f;
             if (r >= 2 && jump_f < 0 && f < 48) {

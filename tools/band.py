@@ -209,12 +209,25 @@ def hold_mic(rig, sing, rest_up=np.array([0, 1.0, 0])):
     # BandAnimator.Solve for the singer: the mic is in the right hand; a left hand out of reach hangs at the side
     mic = rig.p('Bone_Mic_Microphone')
     fwd = np.array([0, 0, -1.0])
+    # (the way the face looks, where there are eyes and lips to tell: the mic goes in front of the mouth, not of where
+    # the audience is)
+    names = {n.lower(): i for i, n in enumerate(rig.N)}
+    if all(k in names for k in ('bone_eye_l', 'bone_eye_r', 'bone_brow_mid', 'bone_lip_lower_mid', 'bone_head')):
+        P = lambda k: rig.W[names[k]][:3, 3]
+        up_f = P('bone_brow_mid') - P('bone_lip_lower_mid')
+        f2 = np.cross(P('bone_eye_l') - P('bone_eye_r'), up_f)
+        if f2 @ ((P('bone_eye_l') + P('bone_eye_r')) / 2 - P('bone_head')) < 0:
+            f2 = -f2
+        if np.linalg.norm(f2) > 1e-6:
+            fwd = f2 / np.linalg.norm(f2)
+            rest_up = up_f / np.linalg.norm(up_f)
     axis = None
     if sing:
         # singing: the grille (the mic's +z end) at the lips, the handle down and out in front of the chin
         axis = rest_up * 0.7 - fwd * 0.7
         axis /= np.linalg.norm(axis)
-        centre = rig.p('Bone_Jaw') + fwd * 0.13 - axis * 0.1
+        lips = rig.p('Bone_Lip_Lower_Mid') if 'bone_lip_lower_mid' in names else rig.p('Bone_Jaw')
+        centre = lips + fwd * 0.07 - rest_up * 0.02 - axis * 0.1
         mic = centre - axis * 0.06
     for side in 'rl':
         sh, el, pm = rig.p('bone_bicep_' + side), rig.p('bone_forearm_' + side), rig.p('bone_palm_' + side)
@@ -866,6 +879,31 @@ def export3d(name, meshes, skins, c, alt, tex_dir, layers, bones, work):
         if name in FINGER_TABLE:
             palm, fb, C = FINGER_TABLE[name]
             o.write(b'FNG1' + struct.pack('<ii', palm, len(fb)) + fb.tobytes() + C.tobytes())
+        else:
+            o.write(b'FNG1' + struct.pack('<ii', -1, 0))       # (none: the jaw's block follows)
+        # the jaw, for the game to open the mouth as they sing: its bone, the bones that go with it (the lower lip),
+        # its joint and the axis it turns about (the line between the eyes, the sense that drops the chin), at rest
+        if 'bone_jaw' in low and 'bone_eye_l' in low and 'bone_eye_r' in low:
+            jaw = low['bone_jaw']
+            par = {i: b[1] for i, b in enumerate(bones)}
+            def under(i, top):
+                while i >= 0:
+                    if i == top:
+                        return True
+                    i = par[i]
+                return False
+            moved = [i for i, b in enumerate(bones) if under(i, jaw) or b[0].lower().startswith('bone_lip_lower')]
+            pos = lambda i: np.linalg.inv(bones[i][4])[:3, 3]
+            joint = pos(jaw)
+            axis = pos(low['bone_eye_l']) - pos(low['bone_eye_r'])
+            axis /= np.linalg.norm(axis)
+            chin = pos(low['bone_lip_lower_mid']) if 'bone_lip_lower_mid' in low else joint + np.array([0, -0.05, -0.05])
+            K = np.array([[0, -axis[2], axis[1]], [axis[2], 0, -axis[0]], [-axis[1], axis[0], 0]])
+            R = np.eye(3) + math.sin(0.2) * K + (1 - math.cos(0.2)) * K @ K
+            if (R @ (chin - joint))[1] > (chin - joint)[1]:
+                axis = -axis                # (turned the other way, the chin went up)
+            o.write(b'JAW1' + struct.pack('<ii', jaw, len(moved)) + np.array(moved, '<i4').tobytes() +
+                    np.r_[joint, axis].astype('<f4').tobytes())
     print(name, '3d', sum(len(r) for _, r, _, _ in recs), 'verts', sum(len(t) for _, _, t, _ in recs), 'tris (from', total,
           ')', len(recs), 'parts', len(lb), 'hand bones', os.path.getsize(os.path.join(out, name + '.b3d')) // 1024, 'KB')
 
@@ -1091,6 +1129,7 @@ def bake(path, work, tex_dir, alt=False):
             straighten(rig, N)
             level_head(rig, N, rest)
             face_front(rig, rest, N)
+            level_gaze(rig, N)              # (the head where it'll be before the mic goes to its mouth)
             hold_mic(rig, i < REST)
         if g0 is not None:
             guitar_hands(rig)
@@ -1101,7 +1140,8 @@ def bake(path, work, tex_dir, alt=False):
                 M = rig.W[pm].copy()
                 M[:3, :3] = rig.W[tg][:3, :3]
                 rig.set_world(pm, M)
-        level_gaze(rig, N)
+        if role != 'vocalist':
+            level_gaze(rig, N)
         if os.environ.get('FACELOG') and g0 is not None and i % 6 == 0:
             G = rig.W[N['bone_guitar_body']]
             print('face', i, 'board.audience %.2f' % -G[2, 1], 'neck', np.round(G[:3, 2], 2))

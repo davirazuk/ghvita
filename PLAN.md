@@ -915,3 +915,9 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 - Phone upright songs: the pads fill the screen's width and the strip's height (PORTRAIT_CROP 270).
 - Guitar players turned back toward the audience frame by frame (as the singers), fret-hand layers too; the "jimi"
   loop (played left-handed: the guitar the wrong way round) never used.
+- Singers: the mouth opens on each sung note (a JAW1 block in the .b3d: the jaw, the bones it carries, its joint and
+  axis; band3d.c turns them by Band3DDraw.mouth, game.c drives it from the vocal chart). The mic held at the mouth:
+  the head's levelling now comes before the mic's placing, and the mic follows the face's own direction (it was held
+  at the eye).
+- Strum mode as Clone Hero: every overstrum breaks the streak and drops the meter; a strum within 80 ms of a note
+  played on its fret (hammer-on, pull-off, tap) is forgiven.
