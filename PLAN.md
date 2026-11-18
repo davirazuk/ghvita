@@ -884,3 +884,6 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   own lanes (any layout); the rock meter and score in the picture's top left over the stage; the song's name by PAUSE.
 - Guitars and basses: the bake brings a neck steeper than 32 degrees down to 28 (bassist_3's stood at 79, most at
   35-46: a bass held like a flagpole). The singer's face shot is 30% wider so the head stays in it.
+- Phone upright, songs: a taller picture (PORTRAIT_CROP 300: the middle 360 of 960 across, ~70% of the screen's
+  height) with its own camera (camera_tall: higher and further back) so all five lanes fill the width and the highway
+  runs up most of the screen; the pads' band takes what's left under it (PORTRAIT_BAND). Controls unchanged.

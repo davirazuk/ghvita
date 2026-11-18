@@ -221,7 +221,7 @@ static struct {
     int count_done;
     int fail_frames;                    // the power-down after a failed song
     int sus_dropped, camera, mult_seen;
-    bool camera_phone;                  // the highway's camera is the phone's (played on the glass, on its side)
+    bool camera_phone, camera_tall;                  // the highway's camera is the phone's (played on the glass, on its side)
     bool big_section;                   // a chorus or a solo: the band goes harder
     float mult_pop;                     // the multiplier jumps as it goes up
     double press_t[6];                  // when each lane last went down
@@ -2710,7 +2710,19 @@ static void setup_camera(void)
     const float * eye = eye_v;
     float fov = fovs[cfg.camera];
     G.camera_phone = game_touch_pads && plat_below() <= 0 && cfg.camera == 0 && cfg.touch_frets != 2;
-    if (G.camera_phone) {
+    G.camera_tall = plat_below() > 0;
+    if (G.camera_tall) {
+        // a phone held upright: only the picture's middle shows, tall: further back and higher, all five lanes across
+        // it and the highway running up most of it
+        eye_v[1] = 8.5f;
+        eye_v[2] = -9.0f;
+        at[2] = 8.0f;
+        fov = 42;
+#ifndef __vita__
+        if (getenv("GHV_TALLCAM"))      // tests: "height back ahead fov"
+            sscanf(getenv("GHV_TALLCAM"), "%f %f %f %f", &eye_v[1], &eye_v[2], &at[2], &fov);
+#endif
+    } else if (G.camera_phone) {
         // a phone on its side, played on the glass: nearer and lower, the highway wide across the screen so its
         // gems are a finger's size and each lane stands over its own column
         eye_v[1] = 4.8f;
@@ -4535,7 +4547,7 @@ static int pad_lane(int k)
 
 // the k-th pad from the left, by the Touch frets setting: where it's drawn (x0..x1, from top to the screen's bottom)
 // and how high up the screen a finger still counts for it (reach)
-#define PORTRAIT_BAND 300.0f   // a phone held upright: the pads' band at the bottom, in game units
+#define PORTRAIT_BAND (fminf(300.0f, plat_below() - 90))   // a phone held upright: the pads' band at the bottom, in game units (what the strip under the picture leaves)
 #define PAD_H 52.0f            // the pads drawn: a strip under the cups (the columns over them take taps too)
 #define OPEN_H 22.0f            // the open bar: the top of the pads' strip, the pads under it
 static void pad_rect(int k, float * x0, float * x1, float * top, float * reach)
@@ -6785,7 +6797,7 @@ void game_draw(void)
     if (getenv("GHV_SPFX"))
         G.sp_active = true;             // to look at Star Power without playing up to it
 #endif
-    if (G.camera != cfg.camera || G.camera_phone != (game_touch_pads && plat_below() <= 0 && cfg.camera == 0 && cfg.touch_frets != 2))
+    if (G.camera != cfg.camera || G.camera_tall != (plat_below() > 0) || G.camera_phone != (game_touch_pads && plat_below() <= 0 && cfg.camera == 0 && cfg.touch_frets != 2))
         setup_camera();         // changed from the pause menu, or the phone turned
     // the frame rate (the frames drawn), and how many updates this frame covers: what moves by the frame moves this much
     G.fps_frames++;
