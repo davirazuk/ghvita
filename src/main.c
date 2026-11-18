@@ -169,8 +169,26 @@ static void update_repeat(void)
     }
 }
 
+// a menu held upright on a phone: the help bar's actions become the pad's buttons (hb), the bar itself not drawn
+static bool portrait_menu;
+static struct { char label[32]; uint32_t btn; } hb[12];
+static int hb_n;
+
 static void help_bar(const char * const * items, int n)
 {
+    if (portrait_menu) {
+        static const struct { const char * name; uint32_t btn; } pm[] = {
+            {"btn_cross", BTN_CROSS}, {"btn_circle", BTN_CIRCLE}, {"btn_square", BTN_SQUARE}, {"btn_triangle", BTN_TRIANGLE},
+            {"btn_l", BTN_L}, {"btn_r", BTN_R}, {"btn_start", BTN_START}, {"btn_select", BTN_SELECT}};
+        hb_n = 0;
+        for (int i = 0; i + 1 < n && hb_n < 12; i += 2)
+            for (size_t m = 0; m < sizeof(pm) / sizeof(pm[0]); m++)
+                if (!strcmp(items[i], pm[m].name) && items[i + 1][0]) {
+                    snprintf(hb[hb_n].label, sizeof(hb[0].label), "%s", items[i + 1]);
+                    hb[hb_n++].btn = pm[m].btn;
+                }
+        return;
+    }
     gfx_rect_grad(0, SCREEN_H - 42, SCREEN_W, 42, RGBA(0, 0, 0, 140), RGBA(0, 0, 0, 230));
     // a long row is made smaller to fit, rather than running off the right edge
     float total = 0;
@@ -217,7 +235,7 @@ static void help_bar(const char * const * items, int n)
         for (size_t m = 0; m < sizeof(map) / sizeof(map[0]); m++)
             if (strcmp(items[i], map[m].name) == 0) {
                 tap_btn(x0 - 8, SCREEN_H - 46, x - 10 * k - x0 + 8, 46, map[m].btn);
-                if (map[m].btn == BTN_CIRCLE && (touch_only || (touch_used && !game_pc_keys)) && screen != S_MAIN) {
+                if (map[m].btn == BTN_CIRCLE && (touch_only || (touch_used && !game_pc_keys)) && screen != S_MAIN && !portrait_menu) {
                     // back, where a thumb finds it: the top right corner
                     gfx_rect(SCREEN_W - 112, 0, 112, 34, RGBA(0, 0, 0, 190));
                     gfx_rect(SCREEN_W - 112, 32, 112, 2, RGBA(255, 200, 90, 220));
@@ -235,7 +253,7 @@ static void help_bar(const char * const * items, int n)
 // A menu on a phone held upright: the picture's list across the screen, bigger, and under it a thumb pad (a cross of
 // arrows on the left, OK and Back on the right) that presses as a finger lands and repeats while it's held: the rows
 // themselves are small to hit on a phone however big the picture gets
-static struct { float x, y, w, h; uint32_t btn; } nav[6];
+static struct { float x, y, w, h; uint32_t btn; } nav[20];
 static int nav_n;
 
 static void nav_arrow(float cx, float cy, float r, int dir, uint32_t c)
@@ -258,6 +276,26 @@ static void nav_arrow(float cx, float cy, float r, int dir, uint32_t c)
 
 static uint32_t nav_held;
 
+static void pad_button(float x, float y, float w, float h, const char * label, uint32_t btn, bool primary)
+{
+    bool on = nav_held == btn;
+    if (primary)
+        gfx_rect_grad(x, y, w, h, on ? RGBA(255, 190, 80, 255) : RGBA(236, 120, 30, 245), on ? RGBA(230, 140, 40, 255) : RGBA(170, 70, 15, 245));
+    else
+        gfx_rect_grad(x, y, w, h, on ? RGBA(120, 100, 90, 255) : RGBA(66, 56, 50, 240), on ? RGBA(100, 84, 76, 255) : RGBA(40, 34, 30, 240));
+    gfx_rect(x, y, w, 3, RGBA(255, 255, 255, primary ? 90 : 45));
+    char up[40];
+    size_t k = 0;
+    for (; label[k] && k + 1 < sizeof(up); k++)
+        up[k] = (char)(label[k] >= 'a' && label[k] <= 'z' ? label[k] - 32 : label[k]);
+    up[k] = 0;
+    float size = fminf(h * (primary ? 0.42f : 0.40f), 40);
+    font_draw_fit(res.title, up, x + w / 2, y + h / 2 - size * 0.55f, size, w - 16, primary ? RGBA(255, 246, 225, 255) : RGBA(235, 220, 200, 255), ALIGN_CENTER);
+    if (nav_n < 20) {
+        nav[nav_n].x = x; nav[nav_n].y = y; nav[nav_n].w = w; nav[nav_n].h = h; nav[nav_n++].btn = btn;
+    }
+}
+
 static void draw_menu_pad(bool show)
 {
     nav_n = 0;
@@ -265,43 +303,46 @@ static void draw_menu_pad(bool show)
     if (!show || below < 60)
         return;
     gfx_below_begin(below);
-    float ph = bw * 0.62f, top = below - ph - bw * 0.02f;
-    if (top < 0) {
-        ph += top;
-        top = 0;
+    gfx_rect_grad(bx, 0, bw, below, RGBA(24, 18, 14, 255), RGBA(10, 8, 8, 255));
+    gfx_rect(bx, 0, bw, 3, RGBA(255, 170, 60, 160));
+    // the menu's own actions (what its help bar names), big, a row of up to three under the picture
+    const char * ok_label = "OK", * back_label = "BACK";
+    int extra[12], ne = 0;
+    for (int i = 0; i < hb_n; i++) {
+        if (hb[i].btn == BTN_CROSS)
+            ok_label = hb[i].label;
+        else if (hb[i].btn == BTN_CIRCLE)
+            back_label = hb[i].label;
+        else
+            extra[ne++] = i;
     }
-    gfx_rect_grad(bx, top - 10, bw, below - top + 10, RGBA(0, 0, 0, 0), RGBA(20, 14, 10, 255));
-    // the cross: three cells across and down
-    float c = fminf(ph / 3.2f, bw * 0.52f / 3), cx = bx + bw * 0.05f + c * 1.5f, cy = top + ph / 2;
+    float m = bw * 0.03f, y = m * 1.5f;
+    float ah = fminf(bw * 0.14f, (below * 0.42f - m) / (ne > 3 ? 2 : 1) - m);
+    for (int i = 0; i < ne; i++) {
+        int row = i / 3, col = i % 3, in_row = ne - row * 3 > 3 ? 3 : ne - row * 3;
+        float w = (bw - m * (in_row + 1)) / in_row;
+        pad_button(bx + m + col * (w + m), y + row * (ah + m), w, ah, hb[extra[i]].label, hb[extra[i]].btn, false);
+    }
+    // the cross of arrows bottom left, OK (named for what it does) and BACK bottom right, where the thumbs are
+    float ph = fminf(bw * 0.62f, below - (ne ? (ne > 3 ? 2 : 1) * (ah + m) : 0) - m * 3), top = below - ph - m * 1.5f;
+    float c = fminf(ph / 3.1f, bw * 0.52f / 3), cx = bx + m + c * 1.5f, cy = top + ph / 2;
     static const int dirs[4] = {0, 1, 2, 3};
     static const uint32_t btns[4] = {BTN_UP, BTN_DOWN, BTN_LEFT, BTN_RIGHT};
     for (int k = 0; k < 4; k++) {
         float ox = dirs[k] == 2 ? -c : dirs[k] == 3 ? c : 0, oy = dirs[k] == 0 ? -c : dirs[k] == 1 ? c : 0;
-        float x = cx + ox - c / 2, y = cy + oy - c / 2;
+        float x = cx + ox - c / 2, yy = cy + oy - c / 2;
         bool on = nav_held == btns[k];
-        gfx_rect(x + 3, y + 3, c - 6, c - 6, on ? RGBA(255, 150, 40, 235) : RGBA(52, 44, 38, 235));
-        gfx_rect(x + 3, y + 3, c - 6, 4, RGBA(255, 255, 255, on ? 120 : 40));
+        gfx_rect(x + 3, yy + 3, c - 6, c - 6, on ? RGBA(255, 150, 40, 235) : RGBA(52, 44, 38, 235));
+        gfx_rect(x + 3, yy + 3, c - 6, 4, RGBA(255, 255, 255, on ? 120 : 40));
         nav_arrow(cx + ox, cy + oy, c * 0.24f, dirs[k], on ? RGBA(30, 20, 10, 255) : RGBA(240, 225, 200, 255));
-        nav[nav_n].x = x;
-        nav[nav_n].y = y;
-        nav[nav_n].w = c;
-        nav[nav_n].h = c;
-        nav[nav_n++].btn = btns[k];
+        if (nav_n < 20) {
+            nav[nav_n].x = x; nav[nav_n].y = yy; nav[nav_n].w = c; nav[nav_n].h = c; nav[nav_n++].btn = btns[k];
+        }
     }
     gfx_rect(cx - c / 2 + 3, cy - c / 2 + 3, c - 6, c - 6, RGBA(40, 34, 30, 235));
-    // OK, big, lower right under the thumb; Back above it
-    float rw = bw * 0.34f, rx = bx + bw * 0.95f - rw;
-    float okh = ph * 0.52f, oky = top + ph - okh, bkh = ph * 0.34f, bky = top;
-    bool ok_on = nav_held == BTN_CROSS, bk_on = nav_held == BTN_CIRCLE;
-    gfx_rect_grad(rx, oky, rw, okh, ok_on ? RGBA(255, 190, 80, 255) : RGBA(236, 120, 30, 245),
-                  ok_on ? RGBA(230, 140, 40, 255) : RGBA(170, 70, 15, 245));
-    gfx_rect(rx, oky, rw, 4, RGBA(255, 255, 255, 90));
-    font_draw_shadow(res.title, "OK", rx + rw / 2, oky + okh / 2 - okh * 0.22f, okh * 0.42f, RGBA(255, 246, 225, 255), ALIGN_CENTER);
-    gfx_rect(rx, bky, rw, bkh, bk_on ? RGBA(120, 100, 90, 255) : RGBA(52, 44, 38, 235));
-    gfx_rect(rx, bky, rw, 4, RGBA(255, 255, 255, 40));
-    font_draw_shadow(res.title, "BACK", rx + rw / 2, bky + bkh / 2 - bkh * 0.24f, bkh * 0.46f, RGBA(235, 220, 200, 255), ALIGN_CENTER);
-    nav[nav_n].x = rx; nav[nav_n].y = oky; nav[nav_n].w = rw; nav[nav_n].h = okh; nav[nav_n++].btn = BTN_CROSS;
-    nav[nav_n].x = rx; nav[nav_n].y = bky; nav[nav_n].w = rw; nav[nav_n].h = bkh; nav[nav_n++].btn = BTN_CIRCLE;
+    float rw = bw - (cx + c * 1.5f - bx) - m * 2.5f, rx = bx + bw - m - rw;
+    pad_button(rx, top + ph * 0.38f, rw, ph * 0.62f, ok_label, BTN_CROSS, true);
+    pad_button(rx, top, rw, ph * 0.32f, back_label, BTN_CIRCLE, false);
     gfx_below_end();
 }
 
@@ -7217,6 +7258,12 @@ int main(void)
         plat_song_keys(screen == S_PLAY);
         plat_key_frets(cfg.strum || cfg.touch_frets != 1 ? 0 : 1);
         game_touch_pads = touch_only;
+        {
+            float pbx, pbw;
+            hb_n = 0;
+            portrait_menu = touch_only && screen != S_PLAY && screen != S_PAUSE && screen != S_RESUME &&
+                            plat_menu_band(&pbx, &pbw) > 60;
+        }
 #if !defined(__vita__) && !defined(__ANDROID__)
         game_pc_keys = !touch_only;     // a PC played on its keyboard
 #endif   // the drawn pads are a phone's: a Vita's screen plays its cups as it always did

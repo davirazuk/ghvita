@@ -878,3 +878,7 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 - PC controllers (SDL GameController: pads and USB guitars): menus as a pad (A pick, B back); songs as a guitar (frets
   A B Y X LB, strum D-pad / left stick, Back or RB Star Power, Start pause, right stick whammy). Esc: back / pause.
   Mouse wheel scrolls lists.
+- Phone held upright, menus: the picture pinned to the top; under it the menu's own actions (its help bar's items) as
+  big buttons, then the arrows, BACK and the big button named for what it does (SELECT, PLAY, ROCK!).
+- Phone held upright, songs: a tighter crop (PORTRAIT_CROP 255) so the highway fills the width; the pads under their
+  own lanes (any layout); the rock meter and score in the picture's top left over the stage; the song's name by PAUSE.

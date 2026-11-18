@@ -4557,7 +4557,7 @@ static void pad_rect(int k, float * x0, float * x1, float * top, float * reach)
         *reach = SCREEN_H * 0.4f;
         return;
     }
-    if (cfg.touch_frets == 0 && plat_below() <= 0) {
+    if (plat_below() > 0 || (cfg.touch_frets == 0 && plat_below() <= 0)) {
         // one hand on its side: each lane's column stands under that lane where the highway meets its cups (the
         // middle way between neighbours), the outer two reaching on to the screen's edges: a gem falls into the column
         // that plays it
@@ -4565,8 +4565,9 @@ static void pad_rect(int k, float * x0, float * x1, float * top, float * reach)
         for (int l = 0; l < n; l++)
             project(lane_x(pad_lane(l)), 0, 0, &sx[l], &sy);
         float sp = n > 1 ? (sx[n - 1] - sx[0]) / (n - 1) : 150;
-        *x0 = k == 0 ? fmaxf(0, sx[0] - sp * 0.5f - 60) : (sx[k - 1] + sx[k]) / 2;
-        *x1 = k == n - 1 ? fminf(SCREEN_W, sx[n - 1] + sp * 0.5f + 60) : (sx[k] + sx[k + 1]) / 2;
+        float lo = plat_below() > 0 ? PORTRAIT_CROP : 0, hi = SCREEN_W - lo;    // held upright: the screen's edges
+        *x0 = k == 0 ? fmaxf(lo, sx[0] - sp * 0.5f - 60) : (sx[k - 1] + sx[k]) / 2;
+        *x1 = k == n - 1 ? fminf(hi, sx[n - 1] + sp * 0.5f + 60) : (sx[k] + sx[k + 1]) / 2;
         *top = SCREEN_H - 14;
         *reach = SCREEN_H * 0.4f;
         return;
@@ -6341,8 +6342,10 @@ static void draw_portrait_pads(float below)
         font_draw(res.ui, "STAR POWER", PORTRAIT_CROP + 110, top - 54, 26, WHITE, ALIGN_CENTER);
     }
     if (G.song) {
-        font_draw_fit(res.title, G.song->name, 640, top - 220, 40, 300, RGBA(255, 210, 90, 255), ALIGN_CENTER);
-        font_draw_fit(res.ui, G.song->artist, 640, top - 168, 24, 300, RGBA(220, 220, 220, 255), ALIGN_CENTER);
+        // the song's name left of the pause chip, in what's between the picture and the pads
+        float ny = fmaxf(4, top - 64 - 6);
+        font_draw_fit(res.title, G.song->name, PORTRAIT_CROP + 12, ny, 34, SCREEN_W - 2 * PORTRAIT_CROP - 190, RGBA(255, 210, 90, 255), ALIGN_LEFT);
+        font_draw_fit(res.ui, G.song->artist, PORTRAIT_CROP + 14, ny + 38, 20, SCREEN_W - 2 * PORTRAIT_CROP - 190, RGBA(220, 220, 220, 255), ALIGN_LEFT);
     }
     for (int k = 0; k < G.lanes; k++) {
         int l = pad_lane(k);
@@ -6516,8 +6519,9 @@ static void draw_hud(void)
             while (hud_y > 170 && hud_rail_x(hud_y + 70) < hud_x + need)
                 hud_y -= 10;
         }
-        const float bar_x = upright ? PORTRAIT_CROP + 24 : hud_x, bar_w = 188,
-                    bar_y = upright ? SCREEN_H + 150 : hud_y, bar_h = 36;  // the score bar's leather
+        // (held upright: in the picture's top left corner, over the stage behind the highway)
+        const float bar_x = upright ? PORTRAIT_CROP + 6 : hud_x, bar_w = 188,
+                    bar_y = upright ? 136 : hud_y, bar_h = 36;  // the score bar's leather
         const float cnt_w = 174, cnt_h = 32, cnt_y = bar_y + bar_h + 2;
         const float k = 0.73f, ks = k / 0.6f;                                // the dome's 256x256 texture
         const float dx = bar_x + bar_w / 2 - 128 * k, dy = bar_y + 6 - 172 * k;

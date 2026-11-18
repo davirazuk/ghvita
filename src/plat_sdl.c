@@ -76,6 +76,7 @@ void plat_view(int * x, int * y, int * w, int * h, int * full_w, int * full_h)
     if (win_h > win_w && !portrait_song) {
         // a menu held upright: the part of it that matters (its list) across the screen, bigger than the whole picture
         // would be, over the thumb pad
+        // the picture across the top (no gap over it), the rest of the screen the menu's buttons and the pad
         float pad_h = win_w * MENU_PAD;
         vw = (int)(win_w * SCREEN_W / menu_w);
         vh = vw * SCREEN_H / SCREEN_W;
@@ -85,7 +86,7 @@ void plat_view(int * x, int * y, int * w, int * h, int * full_w, int * full_h)
         }
         float shown = menu_w * vw / SCREEN_W;           // the focus's width on the screen
         *x = (int)((win_w - shown) / 2 - menu_x0 * vw / SCREEN_W);
-        *y = (int)(pad_h + (win_h - pad_h - vh) / 2);
+        *y = win_h - vh - (int)(win_w * 0.03f);         // GL's y is up from the bottom: at the top, under the status bar
         *w = vw;
         *h = vh;
         *full_w = win_w;
