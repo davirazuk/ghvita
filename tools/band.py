@@ -6,7 +6,7 @@
 # (standing 170x256 at 120 px/m, the drummer and kit 266x232 at 88 px/m: about the size they're drawn), 256-colour with alpha so a sheet loads fast.
 # band.txt lists the sheets; game.c's band_cell has the same numbers.
 # usage: tools/band.py <textures dir> <work dir> [member ...]    (needs a GL display: DISPLAY=:77)
-import glob, importlib.util, math, os, struct, subprocess, sys
+import glob, re, importlib.util, math, os, struct, subprocess, sys
 import numpy as np
 from PIL import Image
 
@@ -603,6 +603,29 @@ def find_tex(tex_dir, name):
     return None
 
 
+def open_tex(src):
+    # a texture as the band wears it. World Tour's dyed hair (name_<id>t<dye>.png, its undyed grey name_<id>.png beside
+    # it) came out of the dye nearly one flat colour: black hair a black slab with no strand in it, drawn unlit as the
+    # game draws the band it read as a flat jagged sheet. Dark dyed cut-out textures get the strands back from the grey
+    # one: its light and dark streaks laid over the dye, a sheen as the game's own lighting gave them
+    im = Image.open(src).convert('RGBA')
+    m = re.match(r'(.*_[0-9a-f]{8})t[0-9a-f]{5}\.png$', src)
+    if not m or not os.path.exists(m.group(1) + '.png'):
+        return im
+    a = np.asarray(im).astype(np.float32)
+    on = a[:, :, 3] > 128
+    if on.mean() < 0.05 or (~on).mean() < 0.05 or a[:, :, :3][on].mean() > 70:
+        return im                       # not a cut-out (hair cards are), or light enough to show its own strands
+    base = Image.open(m.group(1) + '.png').convert('RGBA')
+    if base.size != im.size:
+        base = base.resize(im.size, Image.LANCZOS)
+    L = np.asarray(base.convert('L')).astype(np.float32) / 255
+    Lm = L[on].mean() if on.any() else 0.5
+    rgb = a[:, :, :3] + ((L - Lm) * 110 + L * 22)[:, :, None]
+    a[:, :, :3] = np.clip(rgb, 0, 255)
+    return Image.fromarray(a.astype(np.uint8), 'RGBA')
+
+
 def thin(meshes, bones, budget, work, name, SMALL=400, PROP=0.85, HEAD=1.9, FLOOR=0.2):
     # Blender's Decimate on every mesh big enough to matter (it keeps texture places and bone weights through the
     # collapse); the small ones (sticks, the mic, cymbals, eyes) whole. A face keeps most of its triangles
@@ -699,7 +722,7 @@ def pack_atlas(parts, tex_dir, name, out, ATLAS=ATLAS, dens=1.0, tag='_atlas', P
     atlas = Image.new('RGBA', (ATLAS, AH), (0, 0, 0, 0))
     for k, (x, y, w, h) in place.items():
         src, nu, nv = k
-        im = Image.open(src).convert('RGBA')
+        im = open_tex(src)
         tw, th = max(1, w // nu), max(1, h // nv)
         tile = im.resize((tw, th), Image.LANCZOS)
         # the tiles, and a margin of the texture going on round them (what a wrap would have shown)
@@ -736,7 +759,7 @@ def pack_atlas(parts, tex_dir, name, out, ATLAS=ATLAS, dens=1.0, tag='_atlas', P
         tname = ''
         if src:
             tname = (name + ('f_' if dens < 1 else '_') + os.path.basename(src)[:-4])[-31:]
-            im = Image.open(src).convert('RGBA')
+            im = open_tex(src)
             k = max(im.width, im.height) / (ALONE or (128 if dens >= 1 else 32))
             if k > 1:
                 im = im.resize((max(1, int(im.width / k)), max(1, int(im.height / k))), Image.LANCZOS)
