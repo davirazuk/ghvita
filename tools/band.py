@@ -495,6 +495,48 @@ def place_fret_hand(rig):
     rig.set_world(pm, M)
 
 
+def hold_guitar(rig, N):
+    # the guitar as it's played, in every frame: its neck no steeper than NECK_TO (the loops lean the body back and the
+    # neck rose to the vertical) and its strings toward the audience. Turned about the body's bone with all on it (the
+    # hands' targets too, so the hands follow)
+    gi = N['bone_guitar_body']
+    G = rig.W[gi]
+    piv = G[:3, 3].copy()
+    R = np.eye(3)
+    z = G[:3, 2] / np.linalg.norm(G[:3, 2])
+    elev = math.degrees(math.asin(float(np.clip(z[1], -1, 1))))
+    if elev > NECK_TO:
+        axis = np.cross(z, np.array([0, 1.0, 0]))
+        if np.linalg.norm(axis) > 1e-6:
+            axis /= np.linalg.norm(axis)
+            a = -math.radians(elev - NECK_TO)
+            K = np.array([[0, -axis[2], axis[1]], [axis[2], 0, -axis[0]], [-axis[1], axis[0], 0]])
+            R1 = np.eye(3) + math.sin(a) * K + (1 - math.cos(a)) * K @ K
+            if (R1 @ z)[1] > z[1]:
+                R1 = R1.T
+            R = R1 @ R
+    z2 = R @ z
+    y = R @ G[:3, 1]
+    want = np.array([0, 0, -1.0]) - (np.array([0, 0, -1.0]) @ z2) * z2
+    if np.linalg.norm(want) > 1e-6:
+        want /= np.linalg.norm(want)
+        yp = y - (y @ z2) * z2
+        yp /= np.linalg.norm(yp)
+        face = float(yp @ want)
+        if face < FACE_MIN:
+            ang = math.acos(float(np.clip(face, -1, 1))) - math.acos(FACE_MIN)
+            sgn = 1.0 if float(np.cross(yp, want) @ z2) > 0 else -1.0
+            K = np.array([[0, -z2[2], z2[1]], [z2[2], 0, -z2[0]], [-z2[1], z2[0], 0]])
+            R = (np.eye(3) + math.sin(sgn * ang) * K + (1 - math.cos(sgn * ang)) * K @ K) @ R
+    if np.allclose(R, np.eye(3)):
+        return
+    T = np.eye(4)
+    T[:3, :3] = R
+    T[:3, 3] = piv - R @ piv
+    for k in rig.subtree(gi):
+        rig.W[k] = T @ rig.W[k]
+
+
 def guitar_hands(rig):
     # BandAnimator.Solve: elbows a little down, each palm exactly on its target, rotation included (the fret hand then
     # placed on the neck)
@@ -1125,6 +1167,7 @@ def bake(path, work, tex_dir, alt=False):
             wc.solve(rig, rest, role, (f - s0) / span * BEATS, g0)
         if g0 is not None and i < JUMP:
             face_front(rig, rest, N)        # a guitar player turned back toward the audience, as the singer is
+            hold_guitar(rig, N)
         if role == 'vocalist':
             straighten(rig, N)
             level_head(rig, N, rest)
@@ -1219,6 +1262,7 @@ def bake(path, work, tex_dir, alt=False):
                                                                              STRUM_K[0], chord, fret)))
                         wc.solve(rig, rest, role, (f - s0) / span * BEATS, g0)
                         face_front(rig, rest, N)
+                        hold_guitar(rig, N)
                         guitar_hands(rig)
                         all_[g, pi, ci] = np.stack([(m @ b[4])[:3, :] for m, b in zip(rig.W, bones)])
             spread = np.abs(all_ - all_[:, :1, :1]).max(axis=(0, 1, 2, 4, 5))
@@ -1236,6 +1280,7 @@ def bake(path, work, tex_dir, alt=False):
                 rig = wc.Rig(bones, pose_over(bones, pose, over))
                 wc.solve(rig, rest, role, 0, g0)
                 face_front(rig, rest, N)
+                hold_guitar(rig, N)
                 guitar_hands(rig)
                 press_fingers(rig, mask)
                 S = [m @ b[4] for m, b in zip(rig.W, bones)]
