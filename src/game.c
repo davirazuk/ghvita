@@ -4601,7 +4601,7 @@ static void pad_rect(int k, float * x0, float * x1, float * top, float * reach)
         *reach = SCREEN_H * 0.4f;
         return;
     }
-    if (cfg.touch_frets == 0 && plat_below() <= 0) {
+    if (cfg.touch_frets == 0) {
         // one hand on its side: each lane's column stands under that lane where the highway meets its cups (the
         // middle way between neighbours), the outer two reaching on to the screen's edges: a gem falls into the column
         // that plays it
@@ -4609,9 +4609,16 @@ static void pad_rect(int k, float * x0, float * x1, float * top, float * reach)
         for (int l = 0; l < n; l++)
             project(lane_x(pad_lane(l)), 0, 0, &sx[l], &sy);
         float sp = n > 1 ? (sx[n - 1] - sx[0]) / (n - 1) : 150;
+        // every pad the same width, centred under its lane, as wide as the screen lets five be side by side
         float lo = plat_below() > 0 ? PORTRAIT_CROP : 0, hi = SCREEN_W - lo;    // held upright: the screen's edges
-        *x0 = k == 0 ? fmaxf(lo, sx[0] - sp * 0.5f - 60) : (sx[k - 1] + sx[k]) / 2;
-        *x1 = k == n - 1 ? fminf(hi, sx[n - 1] + sp * 0.5f + 60) : (sx[k] + sx[k + 1]) / 2;
+        float w = fminf(fabsf(sp), (hi - lo) / n), mid = (sx[0] + sx[n - 1]) / 2;
+        float left = mid - w * n / 2;
+        if (left < lo)
+            left = lo;
+        if (left + w * n > hi)
+            left = hi - w * n;
+        *x0 = left + k * w;
+        *x1 = *x0 + w;
         *top = SCREEN_H - 14;
         *reach = SCREEN_H * 0.4f;
         return;
@@ -4663,13 +4670,21 @@ static int touch_lane_at(float x, float y)
                 return -1;
             if (open_bar() && y >= top && y < top + 60)
                 return LANE_OPEN;
+            // the pad under the finger, else the nearest (a finger just off one's edge, in the gap between hands)
+            int best = -1;
+            float bd = 1e9f;
             for (int k = 0; k < G.lanes; k++) {
                 float x0, x1, t0, r0;
                 pad_rect(k, &x0, &x1, &t0, &r0);
-                if (x >= x0 - 20 && x < x1 + 20)
+                if (x >= x0 && x < x1)
                     return pad_lane(k);
+                float d = x < x0 ? x0 - x : x - x1;
+                if (d < bd) {
+                    bd = d;
+                    best = k;
+                }
             }
-            return -1;
+            return best >= 0 && bd < 40 ? pad_lane(best) : -1;
         }
         // fingers: a column each, from the bottom up to 40% of the screen; the open note / the kick the highway's own
         // bottom edge under the cups is no place for: it's the left and right of the columns' line at the top

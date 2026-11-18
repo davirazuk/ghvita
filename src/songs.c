@@ -1029,7 +1029,7 @@ void config_load(void)
         else if (strcmp(k, "defaults2") == 0)
             defaults2 = n;
         else if (strcmp(k, "touch_hands") == 0)
-            cfg.touch_frets = n < 0 || n > 2 ? 0 : n;
+            cfg.touch_frets = n == 0 ? 0 : 1;           // (thumbs, 2, became two hands)
         else if (strcmp(k, "no_band") == 0)
             cfg.no_band = atoi(v) != 0;
         else if (strcmp(k, "band_pictures") == 0)

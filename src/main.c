@@ -214,6 +214,8 @@ static void help_bar(const char * const * items, int n)
             gfx_rect(x - 6, SCREEN_H - 38, tw + 22, 2, RGBA(255, 200, 90, 200));
             x += 5;
         } else if (game_pc_keys) {
+            if (!items[i + 1][0])
+                continue;               // (an action with no name: not shown)
             // a PC: the key that does it, on a keycap
             static const struct { const char * name, * key; } kk[] = {
                 {"btn_cross", "Z"}, {"btn_circle", "X"}, {"btn_square", "A"}, {"btn_triangle", "S"}, {"btn_l", "Q"},
@@ -610,6 +612,25 @@ static void menu_touch(void)
             }
     pressed |= b;
     repeat |= b;
+}
+
+// a button's picture where a screen names one: the Vita's own, a keycap on a PC, nothing on a phone. Its width
+static float btn_glyph(const char * name, float x, float y, float h)
+{
+    if (touch_only)
+        return 0;
+    if (game_pc_keys) {
+        static const struct { const char * name, * key; } kk[] = {
+            {"btn_cross", "Z"}, {"btn_circle", "X"}, {"btn_square", "A"}, {"btn_triangle", "S"}, {"btn_l", "Q"},
+            {"btn_r", "W"}, {"btn_start", "Enter"}, {"btn_select", "Bksp"}};
+        for (size_t m = 0; m < sizeof(kk) / sizeof(kk[0]); m++)
+            if (!strcmp(name, kk[m].name))
+                return ui_keycap(kk[m].key, x, y, h, 1);
+    }
+    const Sprite * b = atlas_get(res.hud, name);
+    float w = b->w * h / b->h;
+    gfx_sprite(b, x, y, w, h, WHITE);
+    return w;
 }
 
 static void banner(const char * text)
@@ -2390,7 +2411,11 @@ static void download_screen(void)
     {
         const Sprite * bl = atlas_get(res.hud, "btn_l"), * br = atlas_get(res.hud, "btn_r");
         float x = SCREEN_W - 24, wr = br->w * 28.0f / br->h, wl = bl->w * 28.0f / bl->h;
-        gfx_sprite(br, x - wr, 22, wr, 28, WHITE);
+        if (game_pc_keys)
+            wr = wl = 30;
+        if (touch_only)
+            wr = wl = 0;
+        btn_glyph("btn_r", x - wr, 22, 28);
         x -= wr + 12;
         for (int s = DL_SITES - 1; s >= 0; s--) {
             const char * name = s == DL_CHORUS ? "CHORUS ENCORE" : "RHYTHMVERSE";
@@ -2401,7 +2426,7 @@ static void download_screen(void)
                                                                     : RGBA(150, 145, 140, 255), ALIGN_RIGHT);
             x -= w + 24;
         }
-        gfx_sprite(bl, x - wl + 12, 22, wl, 28, WHITE);
+        btn_glyph("btn_l", x - wl + 12, 22, 28);
     }
     char t[200], status[200];
     dl_status(status, sizeof(status));
@@ -3523,9 +3548,11 @@ static void draw_select(const Song * s, bool loading)
         float lw = l->w * 20.0f / l->h, rw = r->w * 20.0f / r->h;
         uint32_t c = cfg.song_speed < 100 ? RGBA(255, 160, 90, 255) : cfg.song_speed > 100 ? RGBA(255, 225, 150, 255)
                                                                                         : RGBA(170, 168, 162, 255);
-        gfx_sprite(l, bx - lw - 8, 455, lw, 20, WHITE);
+        if (game_pc_keys)
+            lw = rw = 22;
+        btn_glyph("btn_l", bx - lw - 8, 455, 20);
         font_draw(res.ui, t, bx, 454, 18, c, ALIGN_LEFT);
-        gfx_sprite(r, bx + tw + 8, 455, rw, 20, WHITE);
+        btn_glyph("btn_r", bx + tw + 8, 455, 20);
     }
     if (setlist_at >= 0 && setlist_n > 1 && !tour_on) {
         char t2[48];
@@ -5470,7 +5497,7 @@ static void option_text(int i, char * name, char * value, size_t n)
             break;
         }
         strcpy(name, "Touch frets");
-        snprintf(value, n, "%s", cfg.touch_frets == 2 ? "Thumbs" : cfg.touch_frets == 1 ? "Two hands (A S | J K L)" : "One hand (A S D F G)");
+        snprintf(value, n, "%s", cfg.touch_frets == 1 ? "Two hands (A S | J K L)" : "One hand (A S D F G)");
         break;
     case O_FIVEPADS: strcpy(name, "Drum pads"); snprintf(value, n, "%s", cfg.five_pads ? "Five, as World Tour" : "As charted"); break;
     case O_SCREENS: strcpy(name, "Stage screens"); snprintf(value, n, "%s", cfg.stage_screens ? "On" : "Off"); break;
@@ -5609,7 +5636,7 @@ static void change_option(int i, int d)
         if (game_pc_keys)
             cfg.touch_frets = cfg.strum ? cfg.touch_frets : !(cfg.touch_frets == 1);     // the keyboard: two layouts
         else
-            cfg.touch_frets = (cfg.touch_frets + (d < 0 ? 2 : 1)) % 3;
+            cfg.touch_frets = !cfg.touch_frets;      // one hand or two (thumbs are gone: unplayable on hard songs)
         break;
     case O_STRUM: cfg.strum = !cfg.strum; break;
     case O_FIVEPADS: cfg.five_pads = !cfg.five_pads; break;
@@ -7120,7 +7147,8 @@ static void calibrate_screen(void)
     draw_background(res.bg_menu, RGBA(140, 140, 140, 255));
     banner("CALIBRATE");
     panel(110, 100, 740, 380);
-    font_draw(res.ui, "Press X on every click you hear.", SCREEN_W / 2, 130, 30, RGBA(240, 235, 225, 255),
+    font_draw(res.ui, touch_only ? "Tap the screen on every click you hear." : game_pc_keys ? "Press Z on every click you hear."
+              : "Press X on every click you hear.", SCREEN_W / 2, 130, 30, RGBA(240, 235, 225, 255),
               ALIGN_CENTER);
     // the beat as the game hears it: a lamp that flashes on each click and fades
     double ph = t < 1.0 ? 1 : fmod(t - 1.0, 0.5) / 0.5;

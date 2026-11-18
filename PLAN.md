@@ -902,3 +902,6 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 - Phone upright, songs: the rock meter and score drawn at 62% in the picture's top left (it covered the band), the
   start card trimmed to the part and venue inside the picture, the solo meter, popups, BOT/REPLAY/PRACTICE kept inside
   the screen's edges (gfx_2d_scale; upright_view / right_edge in draw_hud).
+- Touch: thumbs mode removed (unplayable on hard songs; saved "thumbs" becomes two hands); one-hand pads all the same
+  width, centred under the lanes, landscape and upright; held upright a touch takes the pad under it (the overlap
+  margin gave the pad to its left: orange read as blue). PC: L/R glyphs as keycaps, calibrate says Z, no empty keycaps.
