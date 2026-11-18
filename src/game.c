@@ -1446,7 +1446,9 @@ static CineCam cine_cam(double beat)
     float side = G.cine_side;
     float t = (float)G.t, rad = 3.14159265f / 180;
     CineCam c;
-    c.ppm = SCREEN_H / (cs->vis0 + (cs->vis1 - cs->vis0) * u) * (1 + 0.012f * G.band_loud);
+    // the singer's face shot a little wider: arms up and the head thrown about, the tight one lost the head
+    float widen = G.cine_who == 1 && G.cine_shot == CS_FACE ? 1.3f : 1;
+    c.ppm = SCREEN_H / ((cs->vis0 + (cs->vis1 - cs->vis0) * u) * widen) * (1 + 0.012f * G.band_loud);
 #ifndef __vita__
     if (getenv("GHV_VIS"))             // tests: this many metres fill the screen's height (a look at the hands)
         c.ppm = SCREEN_H / (float)atof(getenv("GHV_VIS"));
@@ -1464,7 +1466,7 @@ static CineCam cine_cam(double beat)
         sx = 0.5f - side * 0.06f;
     float kick = cfg.flashes < 2 ? G.kick : 0;
     c.cx = SCREEN_W * sx + sinf(t * 0.83f) * 3 + sinf(t * 61) * 7 * kick;
-    float sy = G.cine_who == 1 && cs->anchor == 1 ? 0.36f : cs->sy;      // (the singer's: the head a third down)
+    float sy = G.cine_who == 1 && cs->anchor == 1 ? 0.36f : G.cine_who == 1 && G.cine_shot == CS_FACE ? 0.36f : cs->sy;      // (the singer's: the head a third down)
     c.cy = SCREEN_H * sy + sinf(t * 0.71f + 2) * 2 + sinf(t * 47 + 2) * 5 * kick;
     return c;
 }

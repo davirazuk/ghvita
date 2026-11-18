@@ -77,6 +77,7 @@ def blended(clip, f, end):
 # the hips until the head is within SING_LEAN of over them; the hair, the hats and what hangs on the chest are bones of
 # the pelvis's in these models (Bone_ACC_*), so they're turned with it or they'd stay behind in the air
 SING_LEAN = 12.0
+NECK_MAX, NECK_TO = 32.0, 28.0     # a guitar's neck above the horizontal, at most, and where a steeper one goes
 STAND_AHEAD = 0.42       # the mic stand this far in front of the singer (toward the audience, -z)
 
 
@@ -904,7 +905,22 @@ def bake(path, work, tex_dir, alt=False):
     g0 = None
     if role in ('guitarist', 'bassist'):
         gi = N['bone_guitar_body']
-        g0 = (np.linalg.inv(M0[N['bone_pelvis']]) @ M0[gi], np.linalg.inv(M0[N['bone_chest']]) @ M0[gi])
+        G = M0[gi].copy()
+        # the guitar held as it's played: some loops' first frame has the neck reared up toward the face (it's kept
+        # at that angle to the body all loop). A neck steeper than NECK_MAX is brought down to NECK_TO
+        z = G[:3, 2] / np.linalg.norm(G[:3, 2])
+        elev = math.degrees(math.asin(float(np.clip(z[1], -1, 1))))
+        if elev > NECK_MAX:
+            axis = np.cross(z, np.array([0, 1.0, 0]))
+            axis /= np.linalg.norm(axis)
+            a = -math.radians(elev - NECK_TO)
+            K = np.array([[0, -axis[2], axis[1]], [axis[2], 0, -axis[0]], [-axis[1], axis[0], 0]])
+            R = np.eye(3) + math.sin(a) * K + (1 - math.cos(a)) * K @ K
+            if (R @ z)[1] > z[1]:
+                R = R.T                     # (the other way round: down, not up)
+            G[:3, :3] = R @ G[:3, :3]
+        print(name, 'neck %.0f deg' % elev, '-> %d' % NECK_TO if elev > NECK_MAX else '')
+        g0 = (np.linalg.inv(M0[N['bone_pelvis']]) @ G, np.linalg.inv(M0[N['bone_chest']]) @ G)
     anims = load_hands(tex_dir, sex_of(tex_dir, name)) if g0 is not None else None
     frames, centre, rises, stand_y, skins = [], [], [], 0.0, []
     nframes = (SING if role == 'vocalist' else FRAMES) if alt else V_FRAMES

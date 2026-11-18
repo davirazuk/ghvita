@@ -882,3 +882,5 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   big buttons, then the arrows, BACK and the big button named for what it does (SELECT, PLAY, ROCK!).
 - Phone held upright, songs: a tighter crop (PORTRAIT_CROP 255) so the highway fills the width; the pads under their
   own lanes (any layout); the rock meter and score in the picture's top left over the stage; the song's name by PAUSE.
+- Guitars and basses: the bake brings a neck steeper than 32 degrees down to 28 (bassist_3's stood at 79, most at
+  35-46: a bass held like a flagpole). The singer's face shot is 30% wider so the head stays in it.
