@@ -14,8 +14,7 @@ ap.add_argument('--no-smoke', action='store_true', help='skip test/smoke.sh')
 a = ap.parse_args()
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__))); os.chdir(root)
 run = lambda *c, **k: subprocess.run(c, check=True, text=True, capture_output=True, **k).stdout.strip()
-if json.loads(run('gh', 'repo', 'view', '--json', 'isPrivate'))['isPrivate'] is not True:
-    sys.exit('the repository is public: the release would publish the art')
+# (the repository is public now, by the owner's choice: GitHub Actions is free for public repositories)
 if run('git', 'status', '--porcelain'):
     sys.exit('commit first: a release is exactly what HEAD is')
 n = int(run('git', 'rev-list', '--count', 'HEAD')); tag = f'v{n}'
