@@ -899,3 +899,6 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   loops had them staring at the ceiling (guitarist_2 46 up, bassist_2 and two drummers 30-35) or at their shoes (65
   down). The drum close-up has the drummer beside the highway instead of behind it.
 - venue3d.py packs only the zones it baked (baking a few emptied every other venue's textures).
+- Phone upright, songs: the rock meter and score drawn at 62% in the picture's top left (it covered the band), the
+  start card trimmed to the part and venue inside the picture, the solo meter, popups, BOT/REPLAY/PRACTICE kept inside
+  the screen's edges (gfx_2d_scale; upright_view / right_edge in draw_hud).

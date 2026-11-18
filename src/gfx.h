@@ -55,6 +55,7 @@ void gfx_end(void);
 void gfx_2d(void);
 void gfx_clip(float x, float y, float w, float h);   // drawing kept to this part of the picture
 void gfx_clip_off(void);
+void gfx_2d_scale(float x, float y, float s);   // what's drawn next scaled about (x, y)
 // column-major 4x4 matrices
 void gfx_3d(const float * proj, const float * view);
 void gfx_blend(int mode);

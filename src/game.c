@@ -6565,7 +6565,9 @@ static void draw_hud(void)
         }
         // (held upright: in the picture's top left corner, over the stage behind the highway)
         const float bar_x = upright ? PORTRAIT_CROP + 6 : hud_x, bar_w = 188,
-                    bar_y = upright ? 136 : hud_y, bar_h = 36;  // the score bar's leather
+                    bar_y = upright ? 150 : hud_y, bar_h = 36;  // the score bar's leather
+        if (upright)
+            gfx_2d_scale(PORTRAIT_CROP + 2, 0, 0.62f);    // (the picture's corner is small held upright)
         const float cnt_w = 174, cnt_h = 32, cnt_y = bar_y + bar_h + 2;
         const float k = 0.73f, ks = k / 0.6f;                                // the dome's 256x256 texture
         const float dx = bar_x + bar_w / 2 - 128 * k, dy = bar_y + 6 - 172 * k;
@@ -6711,8 +6713,23 @@ static void draw_hud(void)
             gfx_rect(SCREEN_W * f - 2, 0, 4, 7, RGBA(255, 250, 230, 240));
         }
     }
+    // held upright only the picture's middle shows: what goes by its sides goes by the screen's
+    const bool upright_view = plat_below() > 0;
+    const float right_edge = upright_view ? SCREEN_W - PORTRAIT_CROP : SCREEN_W;
     // the song's card at the start
-    if (G.t < 4.5 && !G.sing) {
+    if (G.t < 4.5 && !G.sing && upright_view) {
+        // held upright the song's name is under the picture already: the card is the part and the venue, small
+        float a = G.t < 3.5 ? 1 : (float)(4.5 - G.t);
+        a = a > 1 ? 1 : a;
+        char t[96];
+        if (G.venue_title)
+            snprintf(t, sizeof(t), "%s  %s   at %s", part_name(G.part_id), diff_name(G.diff), G.venue_title);
+        else
+            snprintf(t, sizeof(t), "%s  %s", part_name(G.part_id), diff_name(G.diff));
+        float w = SCREEN_W - 2 * PORTRAIT_CROP;
+        gfx_rect(PORTRAIT_CROP, 232, w, 34, RGBA(0, 0, 0, (int)(170 * a)));
+        font_draw_fit(res.ui, t, SCREEN_W / 2, 238, 20, w - 16, with_alpha(RGBA(230, 230, 230, 255), a), ALIGN_CENTER);
+    } else if (G.t < 4.5 && !G.sing) {
         // the song's card slides in from the left, the cover beside the name, and fades out as the notes arrive
         float a = G.t < 3.5 ? 1 : (float)(4.5 - G.t);
         if (a > 1)
@@ -6749,8 +6766,8 @@ static void draw_hud(void)
     if (G.popup[0] && G.t - G.popup_t < 2.0) {
         float a = (float)(G.t - G.popup_t);
         float alpha = a < 1.5f ? 1 : (2.0f - a) / 0.5f;
-        float sz = 44 + (a < 0.15f ? (0.15f - a) * 80 : 0);
-        font_draw_shadow(res.title, G.popup, SCREEN_W / 2, 150, sz, with_alpha(RGBA(255, 225, 120, 255), alpha),
+        float sz = (44 + (a < 0.15f ? (0.15f - a) * 80 : 0)) * (upright_view ? 0.72f : 1);
+        font_draw_shadow(res.title, G.popup, SCREEN_W / 2, upright_view ? 200 : 150, sz, with_alpha(RGBA(255, 225, 120, 255), alpha),
                          ALIGN_CENTER);
     }
     // a solo in progress
@@ -6770,20 +6787,21 @@ static void draw_hud(void)
             int pct = judged ? G.solo_hit[k] * 100 / judged : 100;
             char t[32];
             snprintf(t, sizeof(t), "SOLO! %d%%", pct > 100 ? 100 : pct);
-            font_draw_shadow(res.title, t, SCREEN_W / 2 + 230, 210, 40, RGBA(255, 120, 60, 255), ALIGN_CENTER);
+            font_draw_shadow(res.title, t, upright_view ? SCREEN_W / 2 : SCREEN_W / 2 + 230, upright_view ? 250 : 210,
+                             upright_view ? 30 : 40, RGBA(255, 120, 60, 255), ALIGN_CENTER);
         }
     }
     if (G.autoplay)
-        font_draw_shadow(res.ui, "BOT", SCREEN_W - 70, 12, 24, RGBA(255, 255, 255, 200), ALIGN_LEFT);
+        font_draw_shadow(res.ui, "BOT", right_edge - 70, 12, 24, RGBA(255, 255, 255, 200), ALIGN_LEFT);
     if (G.replaying && !G.autoplay)
-        font_draw_shadow(res.ui, "REPLAY", SCREEN_W - 16, G.sing ? 76 : 12, 24, RGBA(255, 120, 110, 230), ALIGN_RIGHT);
+        font_draw_shadow(res.ui, "REPLAY", right_edge - 16, G.sing ? 76 : 12, 24, RGBA(255, 120, 110, 230), ALIGN_RIGHT);
     if (practice.on) {
         char t[32];
         if (practice.ramp && (int)(practice.speed * 100 + 0.5f) < practice.target)
             snprintf(t, sizeof(t), "PRACTICE  %d%% > %d%%", (int)(practice.speed * 100 + 0.5f), practice.target);
         else
             snprintf(t, sizeof(t), "PRACTICE  %d%%", (int)(practice.speed * 100 + 0.5f));
-        font_draw_shadow(res.ui, t, SCREEN_W - 16, 44, 22, RGBA(255, 225, 150, 255), ALIGN_RIGHT);
+        font_draw_shadow(res.ui, t, right_edge - 16, 44, 22, RGBA(255, 225, 150, 255), ALIGN_RIGHT);
         // and where in the song you are, by the chart's section ("verse_1" reads "Verse 1")
         char sec[48];
         game_section_now(sec, sizeof(sec));

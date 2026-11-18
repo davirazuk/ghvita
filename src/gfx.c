@@ -704,6 +704,17 @@ void gfx_clip(float x, float y, float w, float h)
     glScissor(sx, sy, sw, sh);
 }
 
+// what's drawn next, scaled by s about (x, y) (gfx_2d puts it back)
+void gfx_2d_scale(float x, float y, float s)
+{
+    gfx_flush();
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+    glTranslatef(x, y, 0);
+    glScalef(s, s, 1);
+    glTranslatef(-x, -y, 0);
+}
+
 void gfx_clip_off(void)
 {
     gfx_flush();
