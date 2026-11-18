@@ -921,3 +921,6 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
   at the eye).
 - Strum mode as Clone Hero: every overstrum breaks the streak and drops the meter; a strum within 80 ms of a note
   played on its fret (hammer-on, pull-off, tap) is forgiven.
+- Band 18-20: guitars held right in every frame (hold_guitar: neck at most 28 degrees, strings to the audience, the hand
+  targets riding along); drum hits a frame a cell round the landing (no wind-up past the face); hair meshes (on the
+  head's accessory bones) never thinned.

@@ -607,12 +607,16 @@ def thin(meshes, bones, budget, work, name, SMALL=400, PROP=0.85, HEAD=1.9, FLOO
     # Blender's Decimate on every mesh big enough to matter (it keeps texture places and bone weights through the
     # collapse); the small ones (sticks, the mic, cymbals, eyes) whole. A face keeps most of its triangles
     total = sum(len(T) for _, _, T in meshes)
-    head, prop = [], []
+    head, prop, hairy = [], [], []
     for tex, V, T in meshes:
         w = np.zeros(len(bones))
         np.add.at(w, np.asarray(V['j']).ravel(), np.asarray(V['w']).ravel())
         hw = sum(w[i] for i, b in enumerate(bones) if any(k in b[0].lower() for k in HEAD_WORDS))
         head.append(hw > 0.6 * max(w.sum(), 1e-9))
+        # hair (its strands hang on the head's accessory bones): never thinned, a collapse turned its strands to
+        # flat jagged sheets
+        aw = sum(w[i] for i, b in enumerate(bones) if 'acc_head' in b[0].lower() or 'hair' in b[0].lower())
+        hairy.append(aw > 0.5 * max(w.sum(), 1e-9) or 'hair' in (tex or '').lower())
         # the kit, a guitar, the mic and its stand: flat and thin things a collapse eats (a cymbal goes to nothing)
         pw = sum(w[i] for i, b in enumerate(bones) if any(k in b[0].lower() for k in ('control_root', 'guitar', 'mic_')))
         prop.append(pw > 0.4 * max(w.sum(), 1e-9))
@@ -622,7 +626,7 @@ def thin(meshes, bones, budget, work, name, SMALL=400, PROP=0.85, HEAD=1.9, FLOO
     ratio = min(1.0, max(budget - small - kept, rest * FLOOR) / max(rest, 1))
     arrs = {'count': len(meshes)}
     for i, (tex, V, T) in enumerate(meshes):
-        r = 1.0 if len(T) <= SMALL else PROP if prop[i] else min(1.0, ratio * HEAD) if head[i] else ratio * 0.9
+        r = 1.0 if len(T) <= SMALL or hairy[i] else PROP if prop[i] else min(1.0, ratio * HEAD) if head[i] else ratio * 0.9
         arrs.update({'p%d' % i: np.asarray(V['p'], np.float32), 'uv%d' % i: np.asarray(V['uv'], np.float32),
                      'j%d' % i: np.asarray(V['j'], np.int32), 'w%d' % i: np.asarray(V['w'], np.float32),
                      'a%d' % i: np.asarray(V['a'], np.float32), 't%d' % i: np.asarray(T, np.int32), 'r%d' % i: r})
