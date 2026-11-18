@@ -568,8 +568,13 @@ void gfx_begin(float r, float g, float b)
     glClear(GL_COLOR_BUFFER_BIT);
 #else
     // a window or a phone's screen of any shape: black all over, then the picture as big as fits, in the middle
-    int vx, vy, vw, vh, fw, fh;
+    int vx, vy, vw, vh, fw, fh, ps[4];
     plat_view(&vx, &vy, &vw, &vh, &fw, &fh);
+    bool pass = plat_pass_scissor(ps);      // a second view of a menu: only its own stretch of the screen
+    if (pass) {
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(ps[0], ps[1], ps[2], ps[3]);
+    }
     glViewport(0, 0, fw, fh);
     glClearColor(0, 0, 0, 1);
     glClear(GL_COLOR_BUFFER_BIT);
@@ -577,9 +582,12 @@ void gfx_begin(float r, float g, float b)
     if (r > 0 || g > 0 || b > 0) {
         glEnable(GL_SCISSOR_TEST);
         glScissor(vx, vy, vw, vh);
+        if (pass)
+            glScissor(ps[0], ps[1], ps[2], ps[3]);
         glClearColor(r, g, b, 1);
         glClear(GL_COLOR_BUFFER_BIT);
-        glDisable(GL_SCISSOR_TEST);
+        if (!pass)
+            glDisable(GL_SCISSOR_TEST);
     }
 #endif
 }
@@ -680,13 +688,32 @@ void gfx_clip(float x, float y, float w, float h)
     plat_view(&vx, &vy, &vw, &vh, &fw, &fh);
 #endif
     glEnable(GL_SCISSOR_TEST);
-    glScissor(vx + (int)(x * vw / SCREEN_W), vy + (int)((SCREEN_H - y - h) * vh / SCREEN_H), (int)(w * vw / SCREEN_W + 1),
-              (int)(h * vh / SCREEN_H + 1));
+    int sx = vx + (int)(x * vw / SCREEN_W), sy = vy + (int)((SCREEN_H - y - h) * vh / SCREEN_H);
+    int sw = (int)(w * vw / SCREEN_W + 1), sh = (int)(h * vh / SCREEN_H + 1);
+#ifndef __vita__
+    int ps[4];
+    if (plat_pass_scissor(ps)) {
+        // within the view's own stretch as well
+        int x1 = sx + sw < ps[0] + ps[2] ? sx + sw : ps[0] + ps[2], y1 = sy + sh < ps[1] + ps[3] ? sy + sh : ps[1] + ps[3];
+        sx = sx > ps[0] ? sx : ps[0];
+        sy = sy > ps[1] ? sy : ps[1];
+        sw = x1 > sx ? x1 - sx : 0;
+        sh = y1 > sy ? y1 - sy : 0;
+    }
+#endif
+    glScissor(sx, sy, sw, sh);
 }
 
 void gfx_clip_off(void)
 {
     gfx_flush();
+#ifndef __vita__
+    int ps[4];
+    if (plat_pass_scissor(ps)) {
+        glScissor(ps[0], ps[1], ps[2], ps[3]);
+        return;
+    }
+#endif
     glDisable(GL_SCISSOR_TEST);
 }
 

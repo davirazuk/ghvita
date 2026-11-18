@@ -49,6 +49,13 @@ void plat_portrait_song(bool on);    // a song's own portrait layout (on) or a m
 // the thumb pad; and where that leaves things: the picture's units shown across, and the strip under it (0: not upright)
 void plat_menu_focus(float x0, float w);
 float plat_menu_band(float * x0, float * w);
+float plat_menu_pad(void);           // the pad's band at the bottom, in those units
+// the rest of a menu's picture (its panel) under the list, drawn as a second pass of the screen; pad_extra: the menu's
+// own buttons' rows over the pad, in parts of the width
+void plat_menu_focus2(float x0, float w, float pad_extra);
+void plat_menu_pass(int pass);
+bool plat_menu_second(void);
+bool plat_pass_scissor(int sc[4]);
 #define PORTRAIT_CROP 300       // held upright, this much of each side of the picture is off the screen (a song: the highway fills the width, the picture tall)
 #define PORTRAIT_UNDER 560      // and this much under it (in its units) for the song's name and the pads
 // a frame not drawn (30 fps): its time passes as if it were shown, nothing new goes on the screen

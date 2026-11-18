@@ -593,6 +593,34 @@ void plat_menu_focus(float x0, float w)
     (void)w;
 }
 
+float plat_menu_pad(void)
+{
+    return 0;
+}
+
+void plat_menu_focus2(float x0, float w, float pad_extra)
+{
+    (void)x0;
+    (void)w;
+    (void)pad_extra;
+}
+
+void plat_menu_pass(int pass)
+{
+    (void)pass;
+}
+
+bool plat_menu_second(void)
+{
+    return false;
+}
+
+bool plat_pass_scissor(int sc[4])
+{
+    (void)sc;
+    return false;
+}
+
 float plat_menu_band(float * x0, float * w)
 {
     *x0 = 0;

@@ -65,8 +65,12 @@ static int tapped_key = -1;     // this frame's tapped key (the keyboard's), -1 
 static bool list_scrolls, list_scrolls_last, touch_dragging;
 static float touch_scroll;
 
+static bool tap_frozen;         // a second drawing of the same screen (a menu held upright): its taps are in already
+
 static void tap_add(float x, float y, float w, float h, int kind, int val)
 {
+    if (tap_frozen)
+        return;
     if (tap_item_count < 96) {
         tap_items[tap_item_count].x = x;
         tap_items[tap_item_count].y = y;
@@ -289,7 +293,7 @@ static void pad_button(float x, float y, float w, float h, const char * label, u
     for (; label[k] && k + 1 < sizeof(up); k++)
         up[k] = (char)(label[k] >= 'a' && label[k] <= 'z' ? label[k] - 32 : label[k]);
     up[k] = 0;
-    float size = fminf(h * (primary ? 0.42f : 0.40f), 40);
+    float size = fminf(h * (primary ? 0.42f : 0.56f), 40);
     font_draw_fit(res.title, up, x + w / 2, y + h / 2 - size * 0.55f, size, w - 16, primary ? RGBA(255, 246, 225, 255) : RGBA(235, 220, 200, 255), ALIGN_CENTER);
     if (nav_n < 20) {
         nav[nav_n].x = x; nav[nav_n].y = y; nav[nav_n].w = w; nav[nav_n].h = h; nav[nav_n++].btn = btn;
@@ -303,8 +307,9 @@ static void draw_menu_pad(bool show)
     if (!show || below < 60)
         return;
     gfx_below_begin(below);
-    gfx_rect_grad(bx, 0, bw, below, RGBA(24, 18, 14, 255), RGBA(10, 8, 8, 255));
-    gfx_rect(bx, 0, bw, 3, RGBA(255, 170, 60, 160));
+    float band = fminf(plat_menu_pad(), below), top0 = below - band;      // the pad's own band, at the bottom
+    gfx_rect_grad(bx, top0, bw, band, RGBA(24, 18, 14, 255), RGBA(10, 8, 8, 255));
+    gfx_rect(bx, top0, bw, 3, RGBA(255, 170, 60, 160));
     // the menu's own actions (what its help bar names), big, a row of up to three under the picture
     const char * ok_label = "OK", * back_label = "BACK";
     int extra[12], ne = 0;
@@ -316,15 +321,16 @@ static void draw_menu_pad(bool show)
         else
             extra[ne++] = i;
     }
-    float m = bw * 0.03f, y = m * 1.5f;
-    float ah = fminf(bw * 0.11f, (below * 0.36f - m) / (ne > 3 ? 2 : 1) - m);
+    float m = bw * 0.025f, y = top0 + m * 1.5f;
+    float ah = bw * 0.1f - m;
     for (int i = 0; i < ne; i++) {
         int row = i / 3, col = i % 3, in_row = ne - row * 3 > 3 ? 3 : ne - row * 3;
         float w = (bw - m * (in_row + 1)) / in_row;
         pad_button(bx + m + col * (w + m), y + row * (ah + m), w, ah, hb[extra[i]].label, hb[extra[i]].btn, false);
     }
     // the cross of arrows bottom left, OK (named for what it does) and BACK bottom right, where the thumbs are
-    float ph = fminf(bw * 0.62f, below - (ne ? (ne > 3 ? 2 : 1) * (ah + m) : 0) - m * 3), top = below - ph - m * 1.5f;
+    int rows = (ne + 2) / 3;
+    float ph = below - (y + rows * (ah + m)) - m * 1.5f, top = below - ph - m;
     float c = fminf(ph / 3.1f, bw * 0.52f / 3), cx = bx + m + c * 1.5f, cy = top + ph / 2;
     static const int dirs[4] = {0, 1, 2, 3};
     static const uint32_t btns[4] = {BTN_UP, BTN_DOWN, BTN_LEFT, BTN_RIGHT};
@@ -350,6 +356,9 @@ static void draw_menu_pad(bool show)
 // picture's height worth across (the whole picture when there's no list, or it has a keyboard up)
 static void menu_focus(bool snap)
 {
+    // held upright: the part with the list across the top (as big as the phone's width lets it be), the rest of the
+    // screen (its panel: the song's details, the player's card) drawn again under it, and the pad at the bottom.
+    // Nothing is cut off; a screen with no list, or a keyboard up, shows whole
     float x0 = 1e9f, x1 = -1e9f;
     bool keys = false;
     for (int i = 0; i < tap_item_count; i++) {
@@ -360,20 +369,35 @@ static void menu_focus(bool snap)
         x0 = fminf(x0, tap_items[i].x);
         x1 = fmaxf(x1, tap_items[i].x + tap_items[i].w);
     }
-    float want_x = 0, want_w = SCREEN_W;
-    if (false && !keys && x1 > x0) {        // (zoomed in, the screens' other parts were cut off: all of it shows)
-        want_w = fmaxf(x1 - x0 + 8, 470);
-        want_x = (x0 + x1) / 2 - want_w / 2;
-        if (want_w > SCREEN_W * 0.9f) {
-            want_w = SCREEN_W;
-            want_x = 0;
+    float want_x = 0, want_w = SCREEN_W, sec_x = 0, sec_w = 0;
+    if (!keys && x1 > x0) {
+        // a side too narrow to be worth a view of its own stays with the list (an options page's title, its edge)
+        float a0 = x0 < 230 ? 0 : x0 - 10, a1 = x1 > SCREEN_W - 230 ? SCREEN_W : x1 + 10;
+        if (a1 - a0 < 470)
+            a1 = fminf(SCREEN_W, a0 + 470);
+        if (a1 - a0 < SCREEN_W * 0.88f) {
+            want_x = a0;
+            want_w = a1 - a0;
+            if (SCREEN_W - a1 >= a0) {
+                sec_x = a1;
+                sec_w = SCREEN_W - a1;
+            } else {
+                sec_x = 0;
+                sec_w = a0;
+            }
         }
     }
-    static float fx = 0, fw = SCREEN_W;
-    float k = snap ? 1 : 0.18f;
+    int extra = 0;
+    for (int i = 0; i < hb_n; i++)
+        extra += hb[i].btn != BTN_CROSS && hb[i].btn != BTN_CIRCLE;
+    static float fx = 0, fw = SCREEN_W, gx = 0, gw = 0;
+    float k = snap ? 1 : 0.25f;
     fx += (want_x - fx) * k;
     fw += (want_w - fw) * k;
+    gx += (sec_x - gx) * k;
+    gw += (sec_w - gw) * k;
     plat_menu_focus(fx, fw);
+    plat_menu_focus2(gx, gw, extra ? 0.1f * ((extra + 2) / 3) : 0);
 }
 
 static void menu_touch(void)
@@ -7155,6 +7179,35 @@ static void scan_progress(int found, const char * converting)
     res_loading(1, t);
 }
 
+static void run_screen(void)
+{
+    switch (screen) {
+    case S_TITLE: title_screen(); break;
+    case S_MAIN: main_menu(); break;
+    case S_TOUR: tour_screen(); break;
+    case S_SONGS: song_list(); break;
+    case S_SELECT: select_screen(); break;
+    case S_PRACTICE: practice_screen(); break;
+    case S_CAREER: career_screen(); break;
+    case S_PLAYERS: players_screen(); break;
+    case S_PLAYER_EDIT: player_edit_screen(); break;
+    case S_FACEOFF: faceoff_screen(); break;
+    case S_GIGDONE: gigdone_screen(); break;
+    case S_NEWS: news_screen(); break;
+    case S_ROCKERS: rockers_screen(); break;
+    case S_PLAY: play_screen(); break;
+    case S_PAUSE: pause_screen(); break;
+    case S_RESUME: resume_screen(); break;
+    case S_RESULTS: results_screen(); break;
+    case S_REPLAYS: replays_screen(); break;
+    case S_OPTIONS: options_screen(); break;
+    case S_CALIBRATE: calibrate_screen(); break;
+    case S_EMPTY: empty_screen(); break;
+    case S_DOWNLOAD: download_screen(); break;
+    case S_UPDATE: update_screen(); break;
+    }
+}
+
 #ifdef __ANDROID__
 #include <SDL.h>                // SDL's Java side calls SDL_main
 int main(int argc, char * argv[])
@@ -7268,35 +7321,33 @@ int main(void)
         game_pc_keys = !touch_only;     // a PC played on its keyboard
 #endif   // the drawn pads are a phone's: a Vita's screen plays its cups as it always did
         int drawn = screen;
-        switch (screen) {
-        case S_TITLE: title_screen(); break;
-        case S_MAIN: main_menu(); break;
-        case S_TOUR: tour_screen(); break;
-        case S_SONGS: song_list(); break;
-        case S_SELECT: select_screen(); break;
-        case S_PRACTICE: practice_screen(); break;
-        case S_CAREER: career_screen(); break;
-        case S_PLAYERS: players_screen(); break;
-        case S_PLAYER_EDIT: player_edit_screen(); break;
-        case S_FACEOFF: faceoff_screen(); break;
-        case S_GIGDONE: gigdone_screen(); break;
-        case S_NEWS: news_screen(); break;
-        case S_ROCKERS: rockers_screen(); break;
-        case S_PLAY: play_screen(); break;
-        case S_PAUSE: pause_screen(); break;
-        case S_RESUME: resume_screen(); break;
-        case S_RESULTS: results_screen(); break;
-        case S_REPLAYS: replays_screen(); break;
-        case S_OPTIONS: options_screen(); break;
-        case S_CALIBRATE: calibrate_screen(); break;
-        case S_EMPTY: empty_screen(); break;
-        case S_DOWNLOAD: download_screen(); break;
-        case S_UPDATE: update_screen(); break;
+        plat_menu_pass(0);
+        run_screen();
+        if (portrait_menu && drawn == screen) {
+            // held upright: the menu's panel drawn again under its list (its second view), nothing pressed this time
+            menu_focus(screen_frames < 2);
+            if (plat_menu_second()) {
+                int keep_taps = tap_item_count, keep_hb = hb_n;
+                uint32_t kp = pressed, kr = repeat;
+                pressed = repeat = 0;
+                tapped_key = -1;
+                tap_frozen = true;
+                plat_menu_pass(1);
+                run_screen();
+                plat_menu_pass(0);
+                gfx_clip_off();             // its scissor off: the pad and the next frame draw anywhere
+                tap_frozen = false;
+                tap_item_count = keep_taps;
+                hb_n = keep_hb;
+                pressed = kp;
+                repeat = kr;
+            }
         }
         {
             // a phone held upright: the menu's list brought in close, the thumb pad under it
             bool song = screen == S_PLAY || screen == S_PAUSE || screen == S_RESUME;
-            menu_focus(drawn != screen || screen_frames < 2);
+            if (!portrait_menu)
+                menu_focus(true);
             draw_menu_pad(touch_only && !song && drawn == screen);
         }
         // a menu comes in out of black, quickly, rather than cutting (not the song and its pause: those stay instant)

@@ -67,28 +67,89 @@ void plat_song_keys(bool on)
 {
     song_keys = on;
 }
-static float menu_x0, menu_w = SCREEN_W;    // plat_menu_focus
-#define MENU_PAD 0.72f          // a menu held upright: the thumb pad under the picture, this much of the width tall
+static float menu_x0, menu_w = SCREEN_W;    // plat_menu_focus: the part with the list, across the top
+static float sec_x0, sec_w;                 // and the rest of the screen (its panel), under it: 0 wide, none
+static int menu_pass;                       // which of the two is being drawn
+#define MENU_PAD 0.40f          // a menu held upright: the pad at the bottom, this much of the width tall (its buttons more)
+static float menu_pad_extra;    // the menu's own buttons over the pad, in the width's parts
+
+// a menu held upright: where each of its two views goes (pass 0 the list's part, 1 the panel's), and the scissor
+// that keeps a view to its own stretch of the screen
+static bool menu_views(int pass, int * x, int * y, int * w, int * h, int sc[4])
+{
+    float top = win_w * 0.09f, gap = win_w * 0.02f, pad_h = win_w * (MENU_PAD + menu_pad_extra);
+    float vwA = win_w * SCREEN_W / menu_w, vhA = vwA * SCREEN_H / SCREEN_W;
+    if (vhA > win_h - top - pad_h) {
+        vhA = win_h - top - pad_h;
+        vwA = vhA * SCREEN_W / SCREEN_H;
+    }
+    float shownA = menu_w * vwA / SCREEN_W;
+    if (pass == 0) {
+        *w = (int)vwA;
+        *h = (int)vhA;
+        *x = (int)((win_w - shownA) / 2 - menu_x0 * vwA / SCREEN_W);
+        *y = (int)(win_h - top - vhA);
+        sc[0] = (int)((win_w - shownA) / 2);
+        sc[1] = *y;
+        sc[2] = (int)shownA + 1;
+        sc[3] = *h + 1;
+        return true;
+    }
+    float avail = win_h - top - vhA - gap * 2 - pad_h;
+    if (sec_w < 60 || avail < win_w * 0.15f)
+        return false;
+    // the panel's height without the title strip over it and the help bar's place under it (the pad has those)
+    const float y0 = 64, y1 = 504;
+    float k = fminf(win_w * 0.98f / sec_w, avail / (y1 - y0));       // pixels a unit
+    float shownB = sec_w * k, bandB = (y1 - y0) * k;
+    *w = (int)(SCREEN_W * k);
+    *h = (int)(SCREEN_H * k);
+    *x = (int)((win_w - shownB) / 2 - sec_x0 * k);
+    float band_y = win_h - top - vhA - gap - bandB;                 // GL's way up: the band's bottom
+    *y = (int)(band_y - (SCREEN_H - y1) * k);
+    sc[0] = (int)((win_w - shownB) / 2);
+    sc[1] = (int)band_y;
+    sc[2] = (int)shownB + 1;
+    sc[3] = (int)bandB + 1;
+    return true;
+}
+
+void plat_menu_focus2(float x0, float w, float pad_extra)
+{
+    sec_x0 = x0;
+    sec_w = w;
+    menu_pad_extra = pad_extra;
+}
+
+void plat_menu_pass(int pass)
+{
+    menu_pass = pass;
+}
+
+bool plat_menu_second(void)
+{
+    int x, y, w, h, sc[4];
+    return win_h > win_w && !portrait_song && menu_views(1, &x, &y, &w, &h, sc);
+}
+
+// the scissor a view keeps to (a menu held upright, its second view): false, none
+bool plat_pass_scissor(int sc[4])
+{
+    if (!(win_h > win_w && !portrait_song) || menu_pass == 0)
+        return false;
+    int x, y, w, h;
+    return menu_views(menu_pass, &x, &y, &w, &h, sc);
+}
 
 void plat_view(int * x, int * y, int * w, int * h, int * full_w, int * full_h)
 {
     int vw = win_w, vh = win_w * SCREEN_H / SCREEN_W;
     if (win_h > win_w && !portrait_song) {
-        // a menu held upright: the part of it that matters (its list) across the screen, bigger than the whole picture
-        // would be, over the thumb pad
-        // the picture across the top (no gap over it), the rest of the screen the menu's buttons and the pad
-        float pad_h = win_w * MENU_PAD;
-        vw = (int)(win_w * SCREEN_W / menu_w);
-        vh = vw * SCREEN_H / SCREEN_W;
-        if (vh > win_h - pad_h) {
-            vh = (int)(win_h - pad_h);
-            vw = vh * SCREEN_W / SCREEN_H;
-        }
-        float shown = menu_w * vw / SCREEN_W;           // the focus's width on the screen
-        *x = (int)((win_w - shown) / 2 - menu_x0 * vw / SCREEN_W);
-        *y = win_h - vh - (int)(win_w * 0.09f);         // GL's y is up from the bottom: near the top, clear of the status bar and camera
-        *w = vw;
-        *h = vh;
+        // a menu held upright: its list's part across the top, bigger than the whole picture would be; under it the
+        // rest of the screen (its panel), as big as the room leaves; at the bottom the pad
+        int sc[4];
+        if (!menu_views(menu_pass, x, y, w, h, sc))
+            menu_views(0, x, y, w, h, sc);
         *full_w = win_w;
         *full_h = win_h;
         return;
@@ -137,11 +198,19 @@ float plat_menu_band(float * x0, float * w)
     *w = SCREEN_W;
     if (win_h <= win_w || win_w <= 0 || portrait_song)
         return 0;
-    int x, y, vw, vh, fw, fh;
-    plat_view(&x, &y, &vw, &vh, &fw, &fh);
+    int x, y, vw, vh, sc[4];
+    menu_views(0, &x, &y, &vw, &vh, sc);
     *x0 = -(float)x * SCREEN_W / vw;
     *w = (float)win_w * SCREEN_W / vw;
     return (float)y * SCREEN_W / vw;
+}
+
+// the pad's band at the bottom of the screen, in the list view's units (a menu held upright)
+float plat_menu_pad(void)
+{
+    int x, y, vw, vh, sc[4];
+    menu_views(0, &x, &y, &vw, &vh, sc);
+    return win_w * (MENU_PAD + menu_pad_extra) * SCREEN_W / vw;
 }
 
 // the screen under the picture in the game's units (its 960 across): 0 on its side, or in a menu
@@ -158,7 +227,17 @@ float plat_below(void)
 static void to_screen(float nx, float ny, float * sx, float * sy)
 {
     int x, y, w, h, fw, fh;
+    int keep = menu_pass;
+    menu_pass = 0;
+    {
+        int bx, by, bw, bh, sc[4];
+        float px = nx * win_w, py = win_h - ny * win_h;     // GL's way up
+        if (win_h > win_w && !portrait_song && menu_views(1, &bx, &by, &bw, &bh, sc) &&
+            px >= sc[0] && px < sc[0] + sc[2] && py >= sc[1] && py < sc[1] + sc[3])
+            menu_pass = 1;
+    }
     plat_view(&x, &y, &w, &h, &fw, &fh);
+    menu_pass = keep;
     // (plat_view's y counts up from the bottom, as GL's viewport does; a finger's from the top)
     *sx = (nx * fw - x) * SCREEN_W / (w > 0 ? w : 1);
     *sy = (ny * fh - (fh - y - h)) * SCREEN_H / (h > 0 ? h : 1);

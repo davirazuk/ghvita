@@ -890,3 +890,8 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 - Venues: the bake leaves out smoke and fog cards (grey, soft-edged textures) and plain white / colourless bright
   textures (tinted by a material colour the export hasn't, or light shafts): they stood in shots as white and lavender
   sheets (Cairo, Dublin, Donington...). Test hooks: GHV_V3ONLY="a b" draws only those venue parts, GHV_V3LOG names them.
+- Phone menus held upright, a second pass: the list's part of the screen across the top as big as the width allows,
+  the rest of the screen (its panel: the song's details, the player's card, the venue's set list) drawn again under
+  it as big as the room leaves (run_screen twice, plat_menu_pass, the second view's own scissor; taps there map by it),
+  and a compact pad at the bottom (the menu's own actions over the arrows, BACK and the named OK). A side too narrow
+  for a view stays with the list.
