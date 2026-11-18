@@ -1022,7 +1022,7 @@ def bake(path, work, tex_dir, alt=False):
                                                                  GROOVE_SHAPE, STRUM_K[i % STRUMS if i < JUMP else 0])))
         else:
             rig = wc.Rig(bones, wc.pose(bones, pose, 0))
-        if role == 'drummer' and i < JUMP:
+        if role == 'drummer' and i < JUMP and not os.environ.get('NOSWING'):
             for side, pad in STRIKES[i // HIT].items():
                 swing_stick(rig, side, pad, HIT_W[i % HIT], HIT_RAISE[i % HIT])
         if role != 'drummer' or 'bone_ik_hand_slave_l' in N:
@@ -1042,6 +1042,10 @@ def bake(path, work, tex_dir, alt=False):
                 M[:3, :3] = rig.W[tg][:3, :3]
                 rig.set_world(pm, M)
         level_gaze(rig, N)
+        if os.environ.get('STICKLOG') and role == 'drummer' and i < JUMP:
+            for sd, sb in (('l', 'bone_guitar_body'), ('r', 'BONE_GUITAR_FRET_POS')):
+                if sb in N:
+                    print('stick', i, sd, 'palm-butt %.3f' % np.linalg.norm(rig.W[N['bone_palm_' + sd]][:3, 3] - rig.W[N[sb]][:3, 3]))
         if os.environ.get('GAZELOG'):
             P = lambda n: rig.W[N[n]][:3, 3]
             print('gaze', i, np.round(P('Bone_Brow_Mid') - P('Bone_Lip_Lower_Mid'), 3), np.round((P('Bone_Eye_L') + P('Bone_Eye_R')) / 2 - P('bone_head'), 3))
