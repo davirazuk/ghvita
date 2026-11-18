@@ -56,7 +56,7 @@ void plat_menu_focus2(float x0, float w, float pad_extra);
 void plat_menu_pass(int pass);
 bool plat_menu_second(void);
 bool plat_pass_scissor(int sc[4]);
-#define PORTRAIT_CROP 300       // held upright, this much of each side of the picture is off the screen (a song: the highway fills the width, the picture tall)
+#define PORTRAIT_CROP 270       // held upright, this much of each side of the picture is off the screen (a song: the highway fills the width; room under it for big pads)
 #define PORTRAIT_UNDER 560      // and this much under it (in its units) for the song's name and the pads
 // a frame not drawn (30 fps): its time passes as if it were shown, nothing new goes on the screen
 void plat_skip_frame(void);

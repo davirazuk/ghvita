@@ -4577,7 +4577,7 @@ static int pad_lane(int k)
 
 // the k-th pad from the left, by the Touch frets setting: where it's drawn (x0..x1, from top to the screen's bottom)
 // and how high up the screen a finger still counts for it (reach)
-#define PORTRAIT_BAND (fminf(300.0f, plat_below() - 90))   // a phone held upright: the pads' band at the bottom, in game units (what the strip under the picture leaves)
+#define PORTRAIT_BAND (plat_below() - 84)   // the strip under the picture but the song's name and pause   // a phone held upright: the pads' band at the bottom, in game units (what the strip under the picture leaves)
 #define PAD_H 52.0f            // the pads drawn: a strip under the cups (the columns over them take taps too)
 #define OPEN_H 22.0f            // the open bar: the top of the pads' strip, the pads under it
 static void pad_rect(int k, float * x0, float * x1, float * top, float * reach)
@@ -4604,8 +4604,12 @@ static void pad_rect(int k, float * x0, float * x1, float * top, float * reach)
     // as the keyboard is played: one hand on A S D F G (five side by side), or two hands on A S and J K L (green and red
     // for the left, yellow, blue, orange for the right, a hand's gap between). Four lanes (drums): two and two
     // (held upright, thumbs play on the strip under the picture as one hand would)
-    const float w = cfg.touch_frets == 1 ? fminf(150, (vis - 30) / (n + 0.7f)) : fminf(150, (vis - 30) / n);
-    const float gap = cfg.touch_frets == 1 ? fminf(150, w * (vis >= 900 ? 1 : 0.7f)) : 0;
+    // (held upright: the pads fill the screen's width, a hand's gap kept small)
+    const bool up = plat_below() > 0;
+    const float w = up ? (cfg.touch_frets == 1 ? (vis - 8) / (n + 0.5f) : (vis - 8) / n)
+                       : cfg.touch_frets == 1 ? fminf(150, (vis - 30) / (n + 0.7f)) : fminf(150, (vis - 30) / n);
+    const float gap = up ? (cfg.touch_frets == 1 ? w * 0.5f : 0)
+                         : cfg.touch_frets == 1 ? fminf(150, w * (vis >= 900 ? 1 : 0.7f)) : 0;
     float x;
     if (cfg.touch_frets == 1) {
         int left = n == 5 ? 2 : n / 2;
