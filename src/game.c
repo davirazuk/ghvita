@@ -2738,7 +2738,7 @@ static void setup_camera(void)
     memcpy(eye_v, eyes[cfg.camera], sizeof(eye_v));
     const float * eye = eye_v;
     float fov = fovs[cfg.camera];
-    G.camera_phone = game_touch_pads && plat_below() <= 0 && cfg.camera == 0 && cfg.touch_frets != 2;
+    G.camera_phone = false;         // (the phone's own nearer camera: back to World Tour's, as it played best)
     G.camera_tall = plat_below() > 0;
     if (G.camera_tall) {
         // a phone held upright: only the picture's middle shows, tall: further back and higher, all five lanes across
@@ -4597,28 +4597,6 @@ static void pad_rect(int k, float * x0, float * x1, float * top, float * reach)
             *x0 = SCREEN_W - side + (k - left) * side / right;
             *x1 = SCREEN_W - side + (k - left + 1) * side / right;
         }
-        *top = SCREEN_H - 14;
-        *reach = SCREEN_H * 0.4f;
-        return;
-    }
-    if (cfg.touch_frets == 0) {
-        // one hand on its side: each lane's column stands under that lane where the highway meets its cups (the
-        // middle way between neighbours), the outer two reaching on to the screen's edges: a gem falls into the column
-        // that plays it
-        float sx[6], sy;
-        for (int l = 0; l < n; l++)
-            project(lane_x(pad_lane(l)), 0, 0, &sx[l], &sy);
-        float sp = n > 1 ? (sx[n - 1] - sx[0]) / (n - 1) : 150;
-        // every pad the same width, centred under its lane, as wide as the screen lets five be side by side
-        float lo = plat_below() > 0 ? PORTRAIT_CROP : 0, hi = SCREEN_W - lo;    // held upright: the screen's edges
-        float w = fminf(fabsf(sp), (hi - lo) / n), mid = (sx[0] + sx[n - 1]) / 2;
-        float left = mid - w * n / 2;
-        if (left < lo)
-            left = lo;
-        if (left + w * n > hi)
-            left = hi - w * n;
-        *x0 = left + k * w;
-        *x1 = *x0 + w;
         *top = SCREEN_H - 14;
         *reach = SCREEN_H * 0.4f;
         return;
@@ -6860,7 +6838,7 @@ void game_draw(void)
     if (getenv("GHV_SPFX"))
         G.sp_active = true;             // to look at Star Power without playing up to it
 #endif
-    if (G.camera != cfg.camera || G.camera_tall != (plat_below() > 0) || G.camera_phone != (game_touch_pads && plat_below() <= 0 && cfg.camera == 0 && cfg.touch_frets != 2))
+    if (G.camera != cfg.camera || G.camera_tall != (plat_below() > 0) || false)
         setup_camera();         // changed from the pause menu, or the phone turned
     // the frame rate (the frames drawn), and how many updates this frame covers: what moves by the frame moves this much
     G.fps_frames++;

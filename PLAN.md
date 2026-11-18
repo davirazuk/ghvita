@@ -905,3 +905,5 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 - Touch: thumbs mode removed (unplayable on hard songs; saved "thumbs" becomes two hands); one-hand pads all the same
   width, centred under the lanes, landscape and upright; held upright a touch takes the pad under it (the overlap
   margin gave the pad to its left: orange read as blue). PC: L/R glyphs as keycaps, calibrate says Z, no empty keycaps.
+- Phone one hand: back to the original layout (five equal pads side by side in the middle, World Tour's camera): the
+  lane-aligned pads and the phone's nearer camera played worse.
