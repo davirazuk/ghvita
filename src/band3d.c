@@ -944,6 +944,12 @@ Venue3D * venue3d_load(const char * zone)
                 p->tex = tex_load(path, flags);
             }
         }
+        if (!p->tex)
+            plat_log("venue3d: %s part %d has no texture (%.32s)", zone, (int)(p - v->parts), tex);
+#ifndef __vita__
+        else if (getenv("GHV_V3LOG"))
+            plat_log("venue3d: %s part %d %.32s, %d tris", zone, (int)(p - v->parts), tex, p->tc);
+#endif
     }
     free(d);
     free(td);
@@ -983,8 +989,15 @@ void venue3d_draw(Venue3D * v, const Band3DDraw * cam, const float tint[3])
     }
     float mv[16], CW[3][3];
     camera(cam, false, mv, CW);
+    int lo = 0, hi = 1 << 30;
+#ifndef __vita__
+    if (getenv("GHV_V3ONLY"))           // tests: only these parts ("a b"), to find one
+        sscanf(getenv("GHV_V3ONLY"), "%d %d", &lo, &hi);
+#endif
     for (int i = 0; i < v->nparts; i++) {
         const V3Part * p = &v->parts[i];
+        if (i < lo || i > hi)
+            continue;
         gfx_mesh_xf(mv, p->tex, p->xyz, p->uv, 8, p->col, p->idx, p->tc * 3);
     }
 }

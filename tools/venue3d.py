@@ -34,6 +34,23 @@ def texture_kind(path, cache={}):
             return cache[path]
         a = px[:, :, 3] / 255
         mid = ((a > 0.15) & (a < 0.85)).mean()
+        # smoke and fog cards: grey or white with soft edges. Drawn as cut-outs they stood in the shot as flat lavender
+        # sheets with stepped edges
+        a64 = np.asarray(Image.open(path).convert('RGBA').resize((64, 64))).astype(np.float32)
+        aa = a64[:, :, 3] / 255
+        some = (aa > 0.3)
+        grey = some.any() and float((a64[:, :, :3].max(2) - a64[:, :, :3].min(2))[some].mean()) < 12
+        fuzzy = ((aa > 0.05) & (aa < 0.95)).mean() / max(float((aa > 0.05).mean()), 1e-6)
+        if grey and fuzzy > 0.3 and (aa < 0.95).mean() > 0.2:
+            cache[path] = 'soft'
+            return cache[path]
+        # plain white or near-white grey with no colour: a texture the game tints with a material colour (that colour
+        # isn't in the export), or a light shaft's streaks. As they are they stood in the shot as bright white sheets
+        rgb64 = a64[:, :, :3]
+        lum, chroma = float(rgb64.mean()), float((rgb64.max(2) - rgb64.min(2)).mean())
+        if chroma < 5 and lum > 190:
+            cache[path] = 'soft'
+            return cache[path]
         cache[path] = 'opaque' if (a > 0.85).mean() > 0.97 else 'soft' if mid > 0.3 or (a > 0.5).mean() < 0.12 else 'cutout'
     return cache[path]
 

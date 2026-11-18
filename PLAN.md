@@ -887,3 +887,6 @@ Clocks: a song loads onto eco clocks and a real late frame sends it to full. Cha
 - Phone upright, songs: a taller picture (PORTRAIT_CROP 300: the middle 360 of 960 across, ~70% of the screen's
   height) with its own camera (camera_tall: higher and further back) so all five lanes fill the width and the highway
   runs up most of the screen; the pads' band takes what's left under it (PORTRAIT_BAND). Controls unchanged.
+- Venues: the bake leaves out smoke and fog cards (grey, soft-edged textures) and plain white / colourless bright
+  textures (tinted by a material colour the export hasn't, or light shafts): they stood in shots as white and lavender
+  sheets (Cairo, Dublin, Donington...). Test hooks: GHV_V3ONLY="a b" draws only those venue parts, GHV_V3LOG names them.
