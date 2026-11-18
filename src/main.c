@@ -362,7 +362,7 @@ static void menu_focus(bool snap)
     }
     float want_x = 0, want_w = SCREEN_W;
     if (!keys && x1 > x0) {
-        want_w = fmaxf(x1 - x0 + 24, 560);     // as close as the list allows: bigger on a phone
+        want_w = fmaxf(x1 - x0 + 8, 470);      // as close as the list allows: bigger on a phone
         want_x = (x0 + x1) / 2 - want_w / 2;
         if (want_w > SCREEN_W * 0.9f) {
             want_w = SCREEN_W;
