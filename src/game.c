@@ -4092,6 +4092,18 @@ static bool press_note(int lane)
             break;
         if (G.state[i] != PENDING || nt < G.t - win_late(i) || !(n->frets & bit) || (G.got[i] & bit))
             continue;
+        // no mashing, as Guitar Hero has it: a fret down above the note's highest one (a chord's too) and it isn't
+        // played; frets below may rest where they are. All five held at once plays only orange
+        if (!G.drums && !(n->frets & FRET_OPEN)) {
+            uint32_t ringing = 0;           // (a sustain still ringing above isn't a mash)
+            for (int k = 0; k < MAX_SUS; k++)
+                if (G.sus[k].note >= 0)
+                    ringing |= G.sus[k].frets & 0x1f;
+            uint32_t nf = n->frets & 0x1f, down = (G.held | (1u << lane)) & 0x1f & ~(ringing & ~nf);
+            int top = 31 - __builtin_clz(nf);
+            if (down >> (top + 1))
+                return false;
+        }
         // on a fast run a hit nearer the next gem on this pad is that gem: the one skipped goes as the miss it was, not
         // one further down the run, and the flame and the sound land on what was played
         if (!G.got[i] && G.t - nt > NEXT_LATE) {
