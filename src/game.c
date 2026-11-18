@@ -2791,7 +2791,8 @@ static void setup_camera(void)
 #define SPAM_HOLD 0.2                   // a tremolo goes on while its frets were hit this recently
 #define SPAM_AFTER 0.3                  // hits this soon after a tremolo are still the tremolo
 #define EARLY_GRACE 0.18                // a press this soon before its lane's note is that note, mistimed
-#define SLIP_RUN 1.0                    // one stray press is a finger slipping, a second this soon is mashing
+#define SLIP_RUN 1.0
+#define STRUM_LENIENCY 0.08                // strum mode: a strum this soon after a note played on its fret isn't an overstrum                    // one stray press is a finger slipping, a second this soon is mashing
 
 // songs converted before the kick had the open bit keep it in bit 7, and their charts are gone
 static uint8_t drum_frets(const Note * n)
@@ -4165,6 +4166,8 @@ static void press_lane(int lane)
 // stray strum; between strums a fret pressed plays only a hammer-on (the streak alive) or a tapped note. Strums: a
 // keyboard's arrow up and down, Down or Cross (the open note's buttons, so it's a strum with nothing held), a finger
 // landing above the touch pads
+static double fret_play_t = -100;   // the last note played on its fret alone (strum mode's leniency)
+
 static uint32_t strum_presses(const Pad * pad, uint32_t pressed, uint32_t lanes, uint32_t * held, bool tap)
 {
     static uint8_t strum_was;
@@ -4206,8 +4209,22 @@ static uint32_t strum_presses(const Pad * pad, uint32_t pressed, uint32_t lanes,
             want_pressed = nf;
         break;
     }
+    if (want_pressed)
+        fret_play_t = G.t;
     if (strum) {
-        overhit();
+        // an overstrum, as Clone Hero has it: the streak's gone and the meter drops, every time. Except a strum just
+        // after a note played on its fret (a hammer-on, a pull-off, a tap: the hand strums along anyway), which CH
+        // forgives too
+        if (G.t - fret_play_t < STRUM_LENIENCY)
+            return 0;
+        if (!cfg.no_miss_sound)
+            sound_play(res.snd[SND_OVERSTRUM1 + rand() % 4], 0.5f, false);
+        G.overhits++;
+        G.streak = 0;
+        rock_change(-0.02f);
+        G.miss_flash = 0.7f;
+        G.rate_kind = 3;                // shown as a miss
+        G.rate_t = G.t;
         return 0;
     }
     return want_pressed;
@@ -4243,7 +4260,8 @@ static void pull_off(void)
         uint32_t free = down & ~(ringing & ~(uint32_t)n->frets);
         if ((free & n->frets) != n->frets || __builtin_clz(free) != __builtin_clz((uint32_t)n->frets))
             return;
-        hit_note(i);
+        fret_play_t = G.t;
+    hit_note(i);
         double off = G.t - nt;
         G.hit_log[G.hit_log_n++ % HIT_LOG] = (float)off;
         G.off_sum += off;
@@ -4342,6 +4360,7 @@ static void anchored_note(void)
     for (int l = 0; l < 5; l++)
         if ((n->frets & (1 << l)) && prev->frets == n->frets && G.press_t[l] <= prev->time / 1e6 + WINDOW * 0.5)
             return;
+    fret_play_t = G.t;
     hit_note(i);
 }
 
