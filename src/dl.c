@@ -78,9 +78,25 @@ typedef struct { char slug[48], label[64]; } GenrePair;
 static GenrePair genres[96];
 static volatile int genre_n = -2;         // -2 not asked, -1 being asked, 0 the site had nothing, N got them
 
+// every filter off to begin with: zeroed, the genre, the instrument and the difficulty read as the first of each
+// (Guitar, Expert), and every search had quietly asked for Expert guitar charts only (most of the sites' charts
+// went missing, and Chorus found nothing at all for "artist song")
+static bool filt_ready;
+static void filt_init(void)
+{
+    if (filt_ready)
+        return;
+    for (int i = 0; i < DL_SITES; i++) {
+        memset(&filt[i], 0, sizeof(filt[i]));
+        filt[i].genre = filt[i].instrument = filt[i].difficulty = -1;
+    }
+    filt_ready = true;
+}
+
 void dl_get_filter(int site, DlFilter * f)
 {
     pthread_mutex_lock(&filt_mutex);
+    filt_init();
     *f = filt[site];
     pthread_mutex_unlock(&filt_mutex);
 }
@@ -88,6 +104,7 @@ void dl_get_filter(int site, DlFilter * f)
 void dl_set_filter(int site, const DlFilter * f)
 {
     pthread_mutex_lock(&filt_mutex);
+    filt_init();
     filt[site] = *f;
     pthread_mutex_unlock(&filt_mutex);
 }
