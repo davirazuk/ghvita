@@ -528,13 +528,58 @@ def hold_guitar(rig, N):
             sgn = 1.0 if float(np.cross(yp, want) @ z2) > 0 else -1.0
             K = np.array([[0, -z2[2], z2[1]], [z2[2], 0, -z2[0]], [-z2[1], z2[0], 0]])
             R = (np.eye(3) + math.sin(sgn * ang) * K + (1 - math.cos(sgn * ang)) * K @ K) @ R
-    if np.allclose(R, np.eye(3)):
+    # and where it hangs: at the hips, out in front of this player's own belly. One bassist's loop held the bass up
+    # at his chest like a violin (23 cm over the hips, where everyone else's is 4 to 8 cm under them); a big-bellied one
+    # with a belt buckle the size of a plate had it inside him (the loop he shares puts it 18 cm out)
+    pel = rig.W[N['bone_pelvis']][:3, 3]
+    up, fwd = piv[1] - pel[1], -(piv[2] - pel[2])
+    move = np.zeros(3)
+    if up > GUITAR_UP_MAX:
+        move[1] -= up - GUITAR_UP_TO
+        if fwd > BELLY[0] + GUITAR_CLEAR + 0.06:
+            move[2] += fwd - (BELLY[0] + GUITAR_CLEAR + 0.03)      # (toward the body: the audience is -z)
+    if fwd < BELLY[0] + GUITAR_CLEAR:
+        move[2] -= BELLY[0] + GUITAR_CLEAR - fwd
+    if os.environ.get('GUITARLOG'):
+        print('guitar at pelvis+ up %.3f fwd %.3f side %.3f elev %d move %s belly %.3f' % (up, fwd, piv[0] - pel[0], elev, np.round(move, 3), BELLY[0]))
+    if np.allclose(R, np.eye(3)) and not move.any():
         return
     T = np.eye(4)
     T[:3, :3] = R
-    T[:3, 3] = piv - R @ piv
+    T[:3, 3] = piv - R @ piv + move
     for k in rig.subtree(gi):
         rig.W[k] = T @ rig.W[k]
+
+
+GUITAR_UP_MAX, GUITAR_UP_TO = 0.02, -0.04   # the body's bone over the hips by more than this: brought down to this
+GUITAR_CLEAR = 0.075                        # the body's bone this far in front of the belly (half the guitar's depth and a gap)
+BELLY = [0.11]                              # this member's belly (and belt) in front of the hips, metres: set by bake()
+
+
+def belly_depth(bones, meshes, N):
+    # how far this member's front sticks out in front of the hips, at the height a guitar hangs: the skin's furthest
+    # point forward there, not counting the guitar, the arms or the hands
+    rest = wc.rest_model(bones)
+    P = lambda n: rest[N[n]][:3, 3]
+    pel = P('bone_pelvis')
+    front = P('Bone_Lip_Lower_Mid') - P('bone_head') if 'Bone_Lip_Lower_Mid' in N else np.array([0, 0, 1.0])
+    front[1] = 0
+    front /= max(np.linalg.norm(front), 1e-9)
+    side = np.cross(np.array([0, 1.0, 0]), front)
+    skip = [i for i, b in enumerate(bones) if any(k in b[0].lower() for k in ('guitar', 'string', 'arm', 'bicep', 'hand', 'palm', 'finger', 'thumb', 'wrist', 'mic', 'stick'))]
+    best = 0.0
+    for tex, V, T in meshes:
+        j, w = np.asarray(V['j']), np.asarray(V['w'], np.float32)
+        off = np.isin(j, skip)
+        on = (w * ~off).sum(1) > 0.8 * np.maximum(w.sum(1), 1e-9)
+        p = np.asarray(V['p'], np.float32)[on] - pel
+        if not len(p):
+            continue
+        h, lat, fw = p[:, 1], p @ side, p @ front
+        sel = (h > -0.12) & (h < 0.22) & (np.abs(lat) < 0.17)
+        if sel.any():
+            best = max(best, float(np.percentile(fw[sel], 99)))
+    return best
 
 
 def guitar_hands(rig):
@@ -1008,6 +1053,9 @@ def bake(path, work, tex_dir, alt=False):
         meshes = flipped
     N = {b[0]: i for i, b in enumerate(bones)}
     rest = wc.rest_model(bones)
+    if role in ('guitarist', 'bassist'):
+        BELLY[0] = belly_depth(bones, meshes, N)
+        print(name, 'belly %.3f m in front of the hips' % BELLY[0])
     clip = pick_clip(clips, role)
     if alt:
         byname0 = {c[0]: c for c in clips}
