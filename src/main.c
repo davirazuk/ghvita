@@ -357,6 +357,8 @@ static void draw_menu_pad(bool show)
 // what of the picture a menu held upright shows: its list's rows and a little round them, at least most of the
 // picture's height worth across (the whole picture when there's no list, or it has a keyboard up)
 static bool menu_alone;     // set by a screen for this frame: held upright, its list only (no panel under it)
+static float menu_want0, menu_want1;    // set by a screen for this frame: held upright, this stretch across shown big
+                                        // (as a list's rows would have it, without making it tappable)
 
 static void menu_focus(bool snap)
 {
@@ -372,6 +374,11 @@ static void menu_focus(bool snap)
             continue;
         x0 = fminf(x0, tap_items[i].x);
         x1 = fmaxf(x1, tap_items[i].x + tap_items[i].w);
+    }
+    if (menu_want1 > menu_want0) {
+        x0 = menu_want0;
+        x1 = menu_want1;
+        menu_want0 = menu_want1 = 0;
     }
     float want_x = 0, want_w = SCREEN_W, sec_x = 0, sec_w = 0;
     if (!keys && x1 > x0) {
@@ -4895,6 +4902,9 @@ static void results_screen(void)
         rows[2].label = "Best run of phrases";
         nrows = 3;
     }
+    // held upright: the stats big across the top, the cover and the part under them
+    menu_want0 = 320;
+    menu_want1 = 880;
     for (int i = 0; i < nrows; i++) {
         float y = 200 + i * 31;
         font_draw_shadow(res.ui, rows[i].label, 330, y, 28, RGBA(220, 210, 200, 255), ALIGN_LEFT);
@@ -7285,6 +7295,8 @@ int main(void)
         {
             float pbx, pbw;
             hb_n = 0;
+            menu_alone = false;         // (each screen says these again as it draws)
+            menu_want0 = menu_want1 = 0;
             portrait_menu = touch_only && screen != S_PLAY && screen != S_PAUSE && screen != S_RESUME &&
                             plat_menu_band(&pbx, &pbw) > 60;
         }
