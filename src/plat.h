@@ -45,6 +45,7 @@ void plat_view(int * x, int * y, int * w, int * h, int * full_w, int * full_h);
 // comes in with y past SCREEN_H
 float plat_below(void);
 void plat_portrait_song(bool on);    // a song's own portrait layout (on) or a menu's (the whole picture)
+void plat_portrait_full(bool on);    // held upright in a song: the whole picture's width across the top (the vocals)
 // a menu held upright: the stretch of the picture worth seeing (x0 and width, in its 960), shown as big as fits over
 // the thumb pad; and where that leaves things: the picture's units shown across, and the strip under it (0: not upright)
 void plat_menu_focus(float x0, float w);

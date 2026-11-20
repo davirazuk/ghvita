@@ -582,6 +582,11 @@ float plat_below(void)
     return 0;
 }
 
+void plat_portrait_full(bool on)
+{
+    (void)on;
+}
+
 void plat_portrait_song(bool on)
 {
     (void)on;

@@ -37,6 +37,7 @@ typedef struct {
 enum { GAME_PLAYING, GAME_DONE, GAME_FAILED, GAME_PAUSE };
 
 bool game_start(Song * song, int part, int diff);
+bool game_vocal_part(void);                      // the part being played is the vocals
 // the venue the next songs play in (the tour's), NULL to leave it to the options
 void game_force_venue(const char * zone);
 // the frets are played on the screen: five wide pads along its bottom, drawn and taken as lanes (main.c sets it once

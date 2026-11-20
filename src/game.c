@@ -3244,6 +3244,11 @@ static void reset_play(void)
     G.crowd_voice = sound_play(res.snd[G.crowd_mood], cfg.crowd_vol * 0.03f, true);
 }
 
+bool game_vocal_part(void)
+{
+    return G.vocal;
+}
+
 bool game_start(Song * song, int part, int diff)
 {
     free_song();               // (the last song's doubled notes go back as charted in there)
@@ -6616,6 +6621,30 @@ static void draw_hud(void)
         gfx_rect_grad(0, 0, SCREEN_W, plat_below(), RGBA(14, 12, 22, 255), RGBA(4, 4, 8, 255));
         gfx_below_end();
     }
+    if (plat_below() > 0 && G.vocal && !G.view_mode) {
+        // a vocal song held upright: the whole picture across the top; under it the song, the score and a pause
+        // button big enough for a thumb (the picture's own corner chip is tiny up there)
+        float below = plat_below();
+        gfx_below_begin(below);
+        gfx_rect_grad(0, 0, SCREEN_W, below, RGBA(14, 12, 22, 255), RGBA(4, 4, 8, 255));
+        if (G.paused) {                 // (paused, the picture's middle is zoomed for the menu: the strip stays dark)
+            gfx_below_end();
+            goto vocal_strip_done;
+        }
+        gfx_rect(SCREEN_W - 250, 40, 220, 110, RGBA(255, 255, 255, 34));
+        font_draw(res.title, "PAUSE", SCREEN_W - 140, 70, 44, RGBA(240, 240, 240, 235), ALIGN_CENTER);
+        if (G.song) {
+            font_draw_fit(res.title, G.song->name, 30, 40, 60, SCREEN_W - 320, RGBA(255, 210, 90, 255), ALIGN_LEFT);
+            font_draw_fit(res.ui, G.song->artist, 32, 110, 34, SCREEN_W - 320, RGBA(220, 220, 220, 255), ALIGN_LEFT);
+        }
+        char sc[32];
+        snprintf(sc, sizeof(sc), "%ld", (long)G.shown_score);
+        font_draw_shadow(res.title, sc, SCREEN_W / 2, 190, 70, RGBA(255, 236, 190, 255), ALIGN_CENTER);
+        vox_big_lyrics(G.t, 360, 64);           // the words big where a thumb would have been
+        font_draw(res.ui, "Sing into the mic", SCREEN_W / 2, below - 90, 30, RGBA(170, 170, 190, 200), ALIGN_CENTER);
+        gfx_below_end();
+    }
+vocal_strip_done:
     gfx_2d();
     gfx_blend(BLEND_ALPHA);
     float t = (float)G.t;

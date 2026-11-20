@@ -19,6 +19,7 @@ int vox_phrases(void);
 bool vox_update(double t, float * grade, float * points);
 bool vox_sung_now(void);                   // a note is being sung right (singing starts Star Power with it)
 void vox_draw(double t);
+void vox_big_lyrics(double t, float y, float size);  // the line now and the next, big, from y down
 // the worst the mic has been: false when it couldn't be opened
 bool vox_mic_ok(void);
 // the pitch detector alone (for the tests): MIDI note of 1024 samples at 16 kHz, -1 none

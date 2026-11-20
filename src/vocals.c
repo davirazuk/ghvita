@@ -643,6 +643,25 @@ void vox_lyrics(double t)
         draw_lyrics(&V.phrases[cur + 1], -1, 32, 15, false);
 }
 
+// the words big, for the strip under the picture on a phone held upright: the line now and the next one
+void vox_big_lyrics(double t, float y, float size)
+{
+    if (!V.phrase_count || !V.notes)
+        return;
+    int ms = (int)(t * 1000), cur = -1;
+    for (int p = 0; p < V.phrase_count; p++)
+        if (ms < V.phrases[p].end + 500) {
+            cur = p;
+            break;
+        }
+    if (cur < 0)
+        return;
+    gfx_blend(BLEND_ALPHA);
+    draw_lyrics(&V.phrases[cur], ms, y, size, ms >= V.phrases[cur].start - 1500);
+    if (cur + 1 < V.phrase_count)
+        draw_lyrics(&V.phrases[cur + 1], -1, y + size * 1.5f, size * 0.66f, false);
+}
+
 void vox_draw(double t)
 {
     if (!V.phrase_count)

@@ -55,6 +55,7 @@ static char shot_dir[512] = ".";
 // brought back into those 960x544
 static int win_w = SCREEN_W, win_h = SCREEN_H;
 static bool portrait_song;      // plat_portrait_song
+static bool portrait_full;      // plat_portrait_full: no side cut, the picture at the top (a vocal song)
 static bool song_keys;          // plat_song_keys
 static int key_layout;          // plat_key_frets
 
@@ -154,6 +155,16 @@ void plat_view(int * x, int * y, int * w, int * h, int * full_w, int * full_h)
         *full_h = win_h;
         return;
     }
+    if (win_h > win_w && portrait_song && portrait_full) {
+        // a vocal song held upright: all of the picture's width (the notes come from its right edge), at the top
+        *x = 0;
+        *y = win_h - vh;
+        *w = vw;
+        *h = vh;
+        *full_w = win_w;
+        *full_h = win_h;
+        return;
+    }
     if (win_h > win_w && portrait_song) {
         // held upright in a song: the picture's middle (PORTRAIT_CROP off each side) as wide as the screen, bigger
         vw = win_w * SCREEN_W / (SCREEN_W - 2 * PORTRAIT_CROP);
@@ -184,6 +195,11 @@ void plat_view(int * x, int * y, int * w, int * h, int * full_w, int * full_h)
 void plat_portrait_song(bool on)
 {
     portrait_song = on;
+}
+
+void plat_portrait_full(bool on)
+{
+    portrait_full = on;
 }
 
 void plat_menu_focus(float x0, float w)

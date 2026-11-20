@@ -614,6 +614,8 @@ static void menu_touch(void)
     if (playing) {
         if (sy < 84 && sx > SCREEN_W - 150)
             b = BTN_START;
+        else if (plat_below() > 0 && game_vocal_part() && sy > SCREEN_H + 20 && sy < SCREEN_H + 170 && sx > SCREEN_W - 270)
+            b = BTN_START;              // a vocal song held upright: the pause button under the picture
         else if (sy < 84 && sx < 150)
             b = BTN_SELECT;
         else if (plat_below() > 0 && sy > SCREEN_H + plat_below() - 300 - 70 && sy < SCREEN_H + plat_below() - 300 &&
@@ -7309,6 +7311,7 @@ int main(void)
         update_repeat();
         menu_touch();
         plat_portrait_song(screen == S_PLAY || screen == S_PAUSE || screen == S_RESUME);
+        plat_portrait_full((screen == S_PLAY || screen == S_RESUME) && game_vocal_part());     // (paused: the menu zoomed, in reach)
         plat_song_keys(screen == S_PLAY);
         plat_key_frets(cfg.strum || cfg.touch_frets != 1 ? 0 : 1);
         game_touch_pads = touch_only;
