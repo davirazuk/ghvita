@@ -5,7 +5,7 @@ name: Release
 
 on:
   push:
-    branches: ['**']
+    branches: [main]         # (a working branch's pushes built too, and its release bumped main's out of the queue)
   workflow_dispatch:
     inputs:
       notes:
