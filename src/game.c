@@ -534,7 +534,7 @@ enum { CS_MEDIUM, CS_HERO, CS_FACE, CS_NECK, CS_DRUMS, CS_LINE, CS_WAIST, CS_COU
 static const CineShot cine_shots[CS_COUNT] = {
     [CS_MEDIUM] = {1, 0.02f, 1.50f, 1.34f, 26, 12, -7, -5, 4.0f, 0.25f, 0.42f},     // chest up, beside the board
     [CS_HERO] = {2, 0.0f, 2.30f, 2.05f, 38, 24, -20, -16, 2.6f, 0.21f, 0.50f},       // from the floor, legs long
-    [CS_FACE] = {0, -0.03f, 1.02f, 0.92f, 34, 18, -8, -5, 3.4f, 0.50f, 0.24f},       // the face over the top of the board
+    [CS_FACE] = {0, 0.07f, 1.02f, 0.92f, 34, 18, -8, -5, 3.4f, 0.50f, 0.30f},       // the face over the top of the board
     [CS_NECK] = {1, -0.06f, 1.50f, 1.32f, -30, -18, -2, 2, 2.8f, 0.23f, 0.46f},     // from the neck's side, the fret hand near
     [CS_DRUMS] = {0, -0.12f, 1.9f, 1.7f, 22, 10, 22, 16, 4.2f, 0.31f, 0.40f},         // the drummer's face over his kit, beside the highway
     [CS_LINE] = {2, 0.25f, 5.0f, 4.5f, 10, -6, -8, -6, 8.0f, 0.50f, 0.27f},          // the whole band strung across
@@ -2538,6 +2538,10 @@ static void draw_band(double beat)
                     band3d_anchor(m3, &d3, head ? 0 : cs->anchor, at);
                     at[1] += head ? -0.12f : cs->up;
 #ifndef __vita__
+                    float off[3];
+                    if (getenv("GHV_AIM") && sscanf(getenv("GHV_AIM"), "%f %f %f", &off[0], &off[1], &off[2]) == 3)
+                        for (int c = 0; c < 3; c++)     // tests: the aim moved this far on them (metres, their own axes)
+                            at[c] += off[c];
                     if (getenv("GHV_AIMLOG"))
                         fprintf(stderr, "aim r%d shot %d head %d at %.2f %.2f %.2f cy %.0f\n", r, G.cine_shot, head, at[0], at[1], at[2], cc.cy);
 #endif
