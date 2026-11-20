@@ -175,6 +175,7 @@ static void update_repeat(void)
 
 // a menu held upright on a phone: the help bar's actions become the pad's buttons (hb), the bar itself not drawn
 static bool portrait_menu;
+static float menu_seen_x;    // held upright: where the part of the picture on the screen starts (0: all of it)
 static struct { char label[32]; uint32_t btn; } hb[12];
 static int hb_n;
 
@@ -381,12 +382,26 @@ static void menu_focus(bool snap)
         menu_want0 = menu_want1 = 0;
     }
     float want_x = 0, want_w = SCREEN_W, sec_x = 0, sec_w = 0;
-    if (!keys && x1 > x0) {
-        // a side too narrow to be worth a view of its own stays with the list (an options page's title, its edge)
-        float a0 = x0 < 230 ? 0 : x0 - 10, a1 = x1 > SCREEN_W - 230 ? SCREEN_W : x1 + 10;
+    if (keys) {
+        // a keyboard up: its keys as big as they'll go (the whole picture had them 30 pixels wide), the line typed
+        // over them in the same stretch
+        float k0 = 1e9f, k1 = -1e9f;
+        for (int i = 0; i < tap_item_count; i++)
+            if (tap_items[i].kind == TAP_KEY) {
+                k0 = fminf(k0, tap_items[i].x);
+                k1 = fmaxf(k1, tap_items[i].x + tap_items[i].w);
+            }
+        if (k1 > k0) {
+            want_x = fmaxf(0, k0 - 14);
+            want_w = fminf(SCREEN_W, k1 + 14) - want_x;
+        }
+    } else if (x1 > x0) {
+        // just the list and a margin (an options page's wide rows shown as big as they'll go: the whole picture had
+        // them at half size); a side too narrow to be worth a view of its own isn't shown under it
+        float a0 = fmaxf(0, x0 - 12), a1 = fminf(SCREEN_W, x1 + 12);
         if (a1 - a0 < 470)
             a1 = fminf(SCREEN_W, a0 + 470);
-        if (a1 - a0 < SCREEN_W * 0.88f) {
+        if (a1 - a0 < SCREEN_W * 0.92f) {
             want_x = a0;
             want_w = a1 - a0;
             if (SCREEN_W - a1 >= a0) {
@@ -396,6 +411,8 @@ static void menu_focus(bool snap)
                 sec_x = 0;
                 sec_w = a0;
             }
+            if (sec_w < 200)
+                sec_x = sec_w = 0;
         }
     }
     if (menu_alone)
@@ -412,6 +429,7 @@ static void menu_focus(bool snap)
     gw += (sec_w - gw) * k;
     plat_menu_focus(fx, fw);
     plat_menu_focus2(gx, gw, extra ? 0.1f * ((extra + 2) / 3) : 0);
+    menu_seen_x = fx;
 }
 
 static void menu_touch(void)
@@ -647,8 +665,10 @@ static float btn_glyph(const char * name, float x, float y, float h)
 
 static void banner(const char * text)
 {
-    gfx_sprite(atlas_get(res.hud, "generic_title_bg"), -40, 4, 540, 90, WHITE);
-    font_draw_shadow(res.title, text, 30, 16, 52, RGBA(255, 236, 200, 255), ALIGN_LEFT);
+    // (held upright, at the left of what's on the screen: an options page's title was cut to "NS")
+    float x = portrait_menu ? menu_seen_x : 0;
+    gfx_sprite(atlas_get(res.hud, "generic_title_bg"), x - 40, 4, 540, 90, WHITE);
+    font_draw_shadow(res.title, text, x + 30, 16, 52, RGBA(255, 236, 200, 255), ALIGN_LEFT);
 }
 
 // a song's best rank from its best accuracy (S+ needs the full combo as well), coloured like the results'
