@@ -597,9 +597,11 @@ static void band_wander(double beat)
     for (int r = 2; r < 4; r++) {
         BandPart * b = &G.band_part[r];
         uint32_t h = ((uint32_t)(beat / 16) + 1) * 2654435761u * (r * 2 + 1);
-        float want = beat > 0 ? ((h >> 16 & 255) / 255.0f - 0.5f) * 1.3f : 0;
+        float want = beat > 0 ? ((h >> 16 & 255) / 255.0f - 0.5f) * 0.9f : 0;
         float step = want - b->walk;
-        float speed = 0.018f * G.fstep;
+        // a slow drift over a couple of seconds, eased in and out (they don't step: a body width in half a second was
+        // a slide across the stage, the "jumping around")
+        float speed = (0.003f + 0.006f * fminf(fabsf(step) / 0.3f, 1)) * G.fstep;
         b->walk += step > speed ? speed : step < -speed ? -speed : step;
         float out = band_soloing(r) ? 1 : 0;
         b->front += (out - b->front) * ease(0.06f);
