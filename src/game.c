@@ -1430,7 +1430,8 @@ static void cine_direct(double beat, bool solo)
     if (shot == G.cine_shot && who == G.cine_who && shot >= 0 && slot != G.cine_slot && !solo)
         shot = shot == CS_MEDIUM ? CS_WAIST : CS_MEDIUM;        // never the same shot twice running
     G.cine_slot = slot;
-    float side = who == 2 ? 1 : who == 3 ? -1 : (slot & 1) ? 1 : -1;
+    // (the drummer from the side he looks to, his hi-hat's: from the other, some had their hair and horns to the lens)
+    float side = who == 2 ? 1 : who == 3 ? -1 : who == 0 ? -1 : (slot & 1) ? 1 : -1;
     if (shot >= 0 && G.venue3d) {
         // the venue's really there: a camera with an amp or a wall between it and them tries the other side, then a
         // plainer shot, then gives the cut to the whole stage
@@ -1846,6 +1847,8 @@ static void draw_stage(void)
         G.cine_shot = cs >= CS_COUNT ? -1 : cs;
         G.cine_who = cw & 3;
         G.cine_side = cw == 2 ? 1 : -1;
+        if (getenv("GHV_SIDE"))         // tests: the camera on this side of them (1 or -1)
+            G.cine_side = (float)atof(getenv("GHV_SIDE"));
     }
 #endif
     if (G.cine_shot >= 0)
