@@ -695,6 +695,10 @@ def thin(meshes, bones, budget, work, name, SMALL=400, PROP=0.85, HEAD=1.9, FLOO
     arrs = {'count': len(meshes)}
     for i, (tex, V, T) in enumerate(meshes):
         r = 1.0 if len(T) <= SMALL or hairy[i] else PROP if prop[i] else min(1.0, ratio * HEAD) if head[i] else ratio * 0.9
+        # the hands' skin kept out of the collapse (fingers went to mittens): how much of each vertex is a hand's
+        hb = [k for k, b in enumerate(bones) if any(w_ in b[0].lower() for w_ in ('bone_hand_', 'palm', 'thumb'))]
+        keep = (np.asarray(V['w'], np.float32) * np.isin(np.asarray(V['j']), hb)).sum(1)
+        arrs['k%d' % i] = keep.astype(np.float32)
         arrs.update({'p%d' % i: np.asarray(V['p'], np.float32), 'uv%d' % i: np.asarray(V['uv'], np.float32),
                      'j%d' % i: np.asarray(V['j'], np.int32), 'w%d' % i: np.asarray(V['w'], np.float32),
                      'a%d' % i: np.asarray(V['a'], np.float32), 't%d' % i: np.asarray(T, np.int32), 'r%d' % i: r})

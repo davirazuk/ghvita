@@ -45,6 +45,16 @@ for i in range(int(d['count'])):
         mod = ob.modifiers.new('d', 'DECIMATE')
         mod.ratio = ratio
         mod.use_collapse_triangulate = True
+        # the hands protected (band.py: k, each vertex's share of a hand): the collapse takes the rest
+        K = d['k%d' % i] if ('k%d' % i) in d.files else None
+        if K is not None and float(K.max()) > 0.05:
+            gk = ob.vertex_groups.new(name='K')
+            for v in range(len(P)):
+                if K[v] > 0.05:
+                    gk.add([v], float(min(K[v], 1.0)), 'REPLACE')
+            mod.vertex_group = 'K'
+            mod.invert_vertex_group = True
+            mod.vertex_group_factor = 1000.0
     ev = ob.evaluated_get(bpy.context.evaluated_depsgraph_get())
     m2 = ev.to_mesh()
     m2.calc_loop_triangles()
@@ -69,6 +79,8 @@ for i in range(int(d['count'])):
                     nm = names[g.group]
                     if nm == 'A':
                         alpha = g.weight
+                    elif nm == 'K':
+                        continue            # (the hands' protection, not a bone)
                     elif g.weight > 0:
                         ws.append((g.weight, int(nm)))
                 ws.sort(reverse=True)
