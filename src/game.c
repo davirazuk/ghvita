@@ -68,6 +68,7 @@ typedef struct {
     double held;
     double hit_t, last_hit;             // the next stroke, the last
     int hit_frets, last_frets, cell;
+    float cell_frac;                    // how far on from cell to the next frame (the drummer, blended)
     float mic;                  // the singer's: 0 down, 1 at the mouth
     float pulse;
     bool was;
@@ -2058,8 +2059,13 @@ static int band_groove_cell(const BandPart * b, double phase, bool playing, bool
     return step * 3 + strum;
 }
 
+// the drummer's place in a stroke, as band_cell has it but in between its frames: the row's frame and how far on to
+// the next one (the 3D drummer blends the two: stepping 8 frames a stroke looked choppy)
+static float band_cell_frac;
+
 static int band_cell(int r, const BandPart * b, double beat)
 {
+    band_cell_frac = 0;
     bool drums = r == 0;
     int cols = drums ? 8 : 6, land = drums ? 3 : 2;
     double hit = beat - floor(beat);
@@ -2074,12 +2080,14 @@ static int band_cell(int r, const BandPart * b, double beat)
     double lead = fmin(b->hit_t - b->last_hit, drums ? 0.12 : 0.09);
     if (now > b->hit_t - lead) {
         int row = drums ? band_strike(b->hit_frets) : band_shape(b->hit_frets);
-        double k = 1 - (b->hit_t - now) / lead;
-        return row * cols + (int)(land * (k > 1 ? 1 : k));
+        double k = 1 - (b->hit_t - now) / lead, at = land * (k > 1 ? 1 : k);
+        band_cell_frac = (float)(at - floor(at));
+        return row * cols + (int)at;
     }
     int row = drums ? band_strike(b->last_frets) : band_shape(b->last_frets);
-    double since = fmin((G.t - b->last_hit) / (drums ? 0.16 : 0.15), 1);
-    return row * cols + land + (int)((cols - 1 - land) * since + 0.5);
+    double since = fmin((G.t - b->last_hit) / (drums ? 0.16 : 0.15), 1), at = (cols - 1 - land) * since;
+    band_cell_frac = (float)(at - floor(at));
+    return row * cols + land + (int)at;
 }
 
 // what a member of the band is playing right now, from their own part of the chart. Plays on through a short rest
@@ -2289,8 +2297,10 @@ static void draw_band(double beat)
 #endif
         if (r >= 2)
             bp->cell = band_groove_cell(bp, phase, playing, r == me);
-        else if (playing && r != 1)
+        else if (playing && r != 1) {
             bp->cell = band_cell(r, bp, beat);
+            bp->cell_frac = band_cell_frac;
+        }
         int f = bp->cell;
         stage_point(&m[0], &m[1]);
         m[2] *= G.cam_z;
@@ -2436,6 +2446,10 @@ static void draw_band(double beat)
             }
             bool alt3 = wild_now && band3d_frames(m3, true) > 0;
             d3.fa = d3.fb = f;
+            if (r == 0 && f < 48 && f == bp->cell && f % 8 < 7) {
+                d3.fb = f + 1;                  // the stroke between its frames
+                d3.wb = bp->cell_frac;
+            }
             if (r >= 2 && jump_f < 0 && f < 48) {
                 // the strum hand: a stroke for every note, begun a moment early so it crosses the strings on it. Notes
                 // close together are picked down, up, down; a lone one is a down stroke that rings there and comes back
