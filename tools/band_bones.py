@@ -120,7 +120,7 @@ def mend(path):
     if h > at:
         hb, hn = struct.unpack('<ii', d[h + 4:h + 12])
         bones = [int(x) for x in struct.unpack('<%di' % hn, bytes(d[h + 12:h + 12 + hn * 4]))]
-        tail = bytes(d[h + 12 + hn * 4:h + 12 + hn * 4 + 24])
+        tail = bytes(d[h + 12 + hn * 4:])        # (its joint and axis, and the blocks after it: the eyelids')
         grew = True
         while grew:
             grew = False

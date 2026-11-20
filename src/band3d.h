@@ -40,6 +40,7 @@ typedef struct {
     bool far;                   // small on the screen: the far body will do
     float mouth;                // the mouth this open, 0..1 (the singer singing)
     float nod;                  // the head nodded this far down (radians: the music's beat)
+    float blink;                // the eyes this far shut, 0..1
     Band3DHands hands;          // the guitar's fret hand, driven by the chart (ga < 0: as the frames have it)
     double stamp;               // band3d_draw's own: when this was asked for (seconds)
 } Band3DDraw;

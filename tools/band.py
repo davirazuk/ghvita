@@ -1034,6 +1034,37 @@ def export3d(name, meshes, skins, c, alt, tex_dir, layers, bones, work):
             if len(moved) <= 160:
                 o.write(b'HED1' + struct.pack('<ii', head, len(moved)) + np.array(moved, '<i4').tobytes() +
                         np.r_[hj, haxis].astype('<f4').tobytes())
+                # the upper eyelids, for the game to blink them: each one's bone, how far it turns down to shut (85%
+                # of the eye's opening in its middle, measured off the lids' own skin), the eye's centre and the axis
+                # that brings the lid down, at rest (a face whose lids can't be measured doesn't blink)
+                lids = []
+                for sd in 'lr':
+                    ub, lb, eb = 'bone_eyelid_upper_' + sd, 'bone_eyelid_lower_' + sd, 'bone_eye_' + sd
+                    if not all(k in low for k in (ub, lb, eb)):
+                        continue
+                    eye = pos(low[eb])
+                    U, L = [], []
+                    for t, V, T in meshes:
+                        jj, ww, pp = np.asarray(V['j']), np.asarray(V['w']), np.asarray(V['p'])
+                        U += list(pp[(ww * (jj == low[ub])).sum(1) > 0.5])
+                        L += list(pp[(ww * (jj == low[lb])).sum(1) > 0.5])
+                    U, L = np.array(U), np.array(L)
+                    if not len(U) or not len(L):
+                        continue
+                    cu, cl = U[np.abs(U[:, 0] - eye[0]) < 0.006], L[np.abs(L[:, 0] - eye[0]) < 0.006]
+                    if not len(cu) or not len(cl):
+                        continue
+                    u, l = cu[cu[:, 1].argmin()] - eye, cl[cl[:, 1].argmax()] - eye
+                    gap = math.atan2(u[1], abs(u[2])) - math.atan2(l[1], abs(l[2]))
+                    if not math.radians(10) < gap < math.radians(90):
+                        continue
+                    lax = axis.copy()
+                    K = np.array([[0, -lax[2], lax[1]], [lax[2], 0, -lax[0]], [-lax[1], lax[0], 0]])
+                    R = np.eye(3) + math.sin(0.2) * K + (1 - math.cos(0.2)) * K @ K
+                    if (R @ u)[1] > u[1]:
+                        lax = -lax              # (the lid went up)
+                    lids.append(struct.pack('<if', low[ub], 0.85 * gap) + np.r_[eye, lax].astype('<f4').tobytes())
+                o.write(b'LID1' + struct.pack('<i', len(lids)) + b''.join(lids))
     print(name, '3d', sum(len(r) for _, r, _, _ in recs), 'verts', sum(len(t) for _, _, t, _ in recs), 'tris (from', total,
           ')', len(recs), 'parts', len(lb), 'hand bones', os.path.getsize(os.path.join(out, name + '.b3d')) // 1024, 'KB')
 

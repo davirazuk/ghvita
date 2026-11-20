@@ -2387,6 +2387,26 @@ static void draw_band(double beat)
             // World Tour's model, posed by the same frames the sheet has, two of them blended so it moves smoothly
             Band3DDraw d3 = {0};
             d3.hands.ga = -1;
+            {
+                // a blink every 2 to 6 seconds, each member on their own clock, shut and open in a sixth of a second
+                static double blink_at[4];
+                static uint32_t blink_seed = 0x9e3779b9u;
+                if (G.t < blink_at[r] - 10 || blink_at[r] == 0) {
+                    blink_seed = blink_seed * 1664525u + 1013904223u;
+                    blink_at[r] = G.t + 0.5 + (blink_seed >> 8) % 4000 / 1000.0;
+                }
+                float in = (float)(G.t - blink_at[r]);
+                if (in >= 0 && in < 0.16f)
+                    d3.blink = sinf(in / 0.16f * pi);
+#ifndef __vita__
+                if (getenv("GHV_BLINK"))        // tests: the eyes held this far shut
+                    d3.blink = (float)atof(getenv("GHV_BLINK"));
+#endif
+                else if (in >= 0.16f) {
+                    blink_seed = blink_seed * 1664525u + 1013904223u;
+                    blink_at[r] = G.t + 2 + (blink_seed >> 8) % 4000 / 1000.0;
+                }
+            }
             if (jump_f < 0) {
                 // the head nods to the music: down on every beat, up through the off-beat, harder as the song gets
                 // loud and the crowd comes round; the guitars most, the drummer a little less, the singer a touch

@@ -75,6 +75,9 @@ struct Band3D {
     int head, nhead;            // the head, for its nod: its bone, the bones it carries (hair and hats too), joint and axis
     int32_t head_bones[160];
     float head_at[6];
+    int nlid;                   // the upper eyelids, for a blink: each one's bone, how far it shuts, the eye's centre and axis
+    int32_t lid_bone[2];
+    float lid_shut[2], lid_at[2][6];
     int palm, nfing;
     int32_t * fing;
     float * fing_pose;          // 16 x nfing x 12
@@ -331,6 +334,22 @@ Band3D * band3d_load(const char * name, int hue)
                             for (int i = 0; i < m->nhead; i++)
                                 if (m->head_bones[i] < 0 || m->head_bones[i] >= m->nbones)
                                     m->nhead = 0;
+                            // the eyelids' block after the head's
+                            long la = ha + 12 + hh[1] * 4 + 24;
+                            int32_t ln;
+                            if (la + 8 <= size && memcmp(d + la, "LID1", 4) == 0) {
+                                memcpy(&ln, d + la + 4, 4);
+                                if (ln >= 0 && ln <= 2 && la + 8 + ln * 32 <= size) {
+                                    for (int i = 0; i < ln; i++) {
+                                        memcpy(&m->lid_bone[i], d + la + 8 + i * 32, 4);
+                                        memcpy(&m->lid_shut[i], d + la + 12 + i * 32, 4);
+                                        memcpy(m->lid_at[i], d + la + 16 + i * 32, 24);
+                                        if (m->lid_bone[i] < 0 || m->lid_bone[i] >= m->nbones)
+                                            ln = 0;
+                                    }
+                                    m->nlid = ln;
+                                }
+                            }
                         }
                     }
                 }
@@ -622,6 +641,8 @@ static void pose_model(Band3D * m, const Band3DDraw * d, int buf, Scratch * sc)
     }
     if (m->njaw && d->mouth > 0.01f)       // the mouth open by d->mouth: the jaw turned about its joint
         turn_bones(M, m->jaw, m->jaw_at, m->jaw_bones, m->njaw, d->mouth * 0.32f);
+    for (int i = 0; i < m->nlid && d->blink > 0.01f && m->nhead; i++)   // a blink: each upper lid down over its eye
+        turn_bones(M, m->head, m->lid_at[i], &m->lid_bone[i], 1, d->blink * m->lid_shut[i]);
     if (m->nhead && fabsf(d->nod) > 1e-4f)  // the head nodding to the music (the jaw, the hair and hats with it)
         turn_bones(M, m->head, m->head_at, m->head_bones, m->nhead, d->nod);
     {
