@@ -1242,7 +1242,8 @@ def bake(path, work, tex_dir, alt=False):
             wc.solve(rig, rest, role, (f - s0) / span * BEATS, g0)
         if g0 is not None and i < JUMP:
             face_front(rig, rest, N)        # a guitar player turned back toward the audience, as the singer is
-            hold_guitar(rig, N)
+        if g0 is not None:
+            hold_guitar(rig, N)             # (the Star Power jump too: one bassist's flipped his bass upright mid-air)
         if role == 'vocalist':
             straighten(rig, N)
             level_head(rig, N, rest)
