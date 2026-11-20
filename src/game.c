@@ -6634,7 +6634,11 @@ static void draw_hud(void)
             snprintf(t2, sizeof(t2), "PERFECT x%d", G.perfect_run);
         else
             snprintf(t2, sizeof(t2), "%s", rn[G.rate_kind]);
-        font_draw_shadow(res.title, t2, sx, (sy < 500 ? sy : 500) - age * 16, 25 * pop, with_alpha(rc[G.rate_kind], clamp01((0.5f - age) / 0.2f)),
+        // (over the key names while they're up under the frets at the start: there it goes above the strikeline)
+        float ry = (sy < 500 ? sy : 500) - age * 16;
+        if (G.t < 4.5 && !G.vocal && !game_touch_pads)
+            ry -= 58;
+        font_draw_shadow(res.title, t2, sx, ry, 25 * pop, with_alpha(rc[G.rate_kind], clamp01((0.5f - age) / 0.2f)),
                          ALIGN_CENTER);
     }
     {
