@@ -72,6 +72,9 @@ struct Band3D {
     int jaw, njaw;              // the jaw (the singer's mouth): its bone, the bones it carries, its joint and axis at rest
     int32_t jaw_bones[64];
     float jaw_at[6];
+    int head, nhead;            // the head, for its nod: its bone, the bones it carries (hair and hats too), joint and axis
+    int32_t head_bones[160];
+    float head_at[6];
     int palm, nfing;
     int32_t * fing;
     float * fing_pose;          // 16 x nfing x 12
@@ -315,6 +318,21 @@ Band3D * band3d_load(const char * name, int hue)
                     for (int i = 0; i < m->njaw; i++)
                         if (m->jaw_bones[i] < 0 || m->jaw_bones[i] >= m->nbones)
                             m->njaw = 0;
+                    // the head's block after the jaw's
+                    long ha = ja + 12 + jh[1] * 4 + 24;
+                    int32_t hh[2];
+                    if (ha + 12 <= size && memcmp(d + ha, "HED1", 4) == 0) {
+                        memcpy(hh, d + ha + 4, 8);
+                        if (hh[0] >= 0 && hh[0] < m->nbones && hh[1] > 0 && hh[1] <= 160 && ha + 12 + hh[1] * 4 + 24 <= size) {
+                            m->head = hh[0];
+                            m->nhead = hh[1];
+                            memcpy(m->head_bones, d + ha + 12, (size_t)hh[1] * 4);
+                            memcpy(m->head_at, d + ha + 12 + hh[1] * 4, 24);
+                            for (int i = 0; i < m->nhead; i++)
+                                if (m->head_bones[i] < 0 || m->head_bones[i] >= m->nbones)
+                                    m->nhead = 0;
+                        }
+                    }
                 }
             }
         }
@@ -501,6 +519,37 @@ static void camera(const Band3DDraw * d, bool model, float mv[16], float CW[3][3
     mv[15] = w0;
 }
 
+// bones turned by ang about a joint and axis given at rest, carried to where the frame has the bone they're on (the
+// jaw opening, the head nodding)
+static void turn_bones(float (*M)[12], int on, const float at[6], const int32_t * bones, int n, float ang)
+{
+    const float * J = M[on];
+    float p[3], a[3], al = 0;
+    for (int r = 0; r < 3; r++) {
+        p[r] = J[r * 4] * at[0] + J[r * 4 + 1] * at[1] + J[r * 4 + 2] * at[2] + J[r * 4 + 3];
+        a[r] = J[r * 4] * at[3] + J[r * 4 + 1] * at[4] + J[r * 4 + 2] * at[5];
+        al += a[r] * a[r];
+    }
+    al = sqrtf(al);
+    if (al < 1e-6f)
+        return;
+    for (int r = 0; r < 3; r++)
+        a[r] /= al;
+    float c = cosf(ang), sn = sinf(ang), t = 1 - c;
+    float R[3][3] = {{c + a[0] * a[0] * t, a[0] * a[1] * t - a[2] * sn, a[0] * a[2] * t + a[1] * sn},
+                     {a[1] * a[0] * t + a[2] * sn, c + a[1] * a[1] * t, a[1] * a[2] * t - a[0] * sn},
+                     {a[2] * a[0] * t - a[1] * sn, a[2] * a[1] * t + a[0] * sn, c + a[2] * a[2] * t}};
+    for (int k = 0; k < n; k++) {
+        float * o = M[bones[k]], q[12];
+        for (int r = 0; r < 3; r++) {
+            for (int cc = 0; cc < 4; cc++)
+                q[r * 4 + cc] = R[r][0] * o[cc] + R[r][1] * o[4 + cc] + R[r][2] * o[8 + cc];
+            q[r * 4 + 3] += p[r] - (R[r][0] * p[0] + R[r][1] * p[1] + R[r][2] * p[2]);
+        }
+        memcpy(o, q, sizeof(q));
+    }
+}
+
 typedef struct {
     float M[256][12], LS[256][12];
     uint8_t layered[256];
@@ -571,34 +620,10 @@ static void pose_model(Band3D * m, const Band3DDraw * d, int buf, Scratch * sc)
             }
         }
     }
-    if (m->njaw && d->mouth > 0.01f) {
-        // the mouth open by d->mouth: the jaw's bones turned about its joint, where the frame has carried it
-        const float * J = M[m->jaw];
-        float p[3], a[3], al = 0;
-        for (int r = 0; r < 3; r++) {
-            p[r] = J[r * 4] * m->jaw_at[0] + J[r * 4 + 1] * m->jaw_at[1] + J[r * 4 + 2] * m->jaw_at[2] + J[r * 4 + 3];
-            a[r] = J[r * 4] * m->jaw_at[3] + J[r * 4 + 1] * m->jaw_at[4] + J[r * 4 + 2] * m->jaw_at[5];
-            al += a[r] * a[r];
-        }
-        al = sqrtf(al);
-        if (al > 1e-6f) {
-            for (int r = 0; r < 3; r++)
-                a[r] /= al;
-            float ang = d->mouth * 0.32f, c = cosf(ang), sn = sinf(ang), t = 1 - c;
-            float R[3][3] = {{c + a[0] * a[0] * t, a[0] * a[1] * t - a[2] * sn, a[0] * a[2] * t + a[1] * sn},
-                             {a[1] * a[0] * t + a[2] * sn, c + a[1] * a[1] * t, a[1] * a[2] * t - a[0] * sn},
-                             {a[2] * a[0] * t - a[1] * sn, a[2] * a[1] * t + a[0] * sn, c + a[2] * a[2] * t}};
-            for (int k = 0; k < m->njaw; k++) {
-                float * o = M[m->jaw_bones[k]], q[12];
-                for (int r = 0; r < 3; r++) {
-                    for (int cc = 0; cc < 4; cc++)
-                        q[r * 4 + cc] = R[r][0] * o[cc] + R[r][1] * o[4 + cc] + R[r][2] * o[8 + cc];
-                    q[r * 4 + 3] += p[r] - (R[r][0] * p[0] + R[r][1] * p[1] + R[r][2] * p[2]);
-                }
-                memcpy(o, q, sizeof(q));
-            }
-        }
-    }
+    if (m->njaw && d->mouth > 0.01f)       // the mouth open by d->mouth: the jaw turned about its joint
+        turn_bones(M, m->jaw, m->jaw_at, m->jaw_bones, m->njaw, d->mouth * 0.32f);
+    if (m->nhead && fabsf(d->nod) > 1e-4f)  // the head nodding to the music (the jaw, the hair and hats with it)
+        turn_bones(M, m->head, m->head_at, m->head_bones, m->nhead, d->nod);
     {
         // eased: every bone half way to its new place each frame (about 30 ms behind: a strike still lands), and where
         // they stand on the floor much more slowly, so a loop that starts somewhere else is walked to, not jumped to

@@ -149,49 +149,6 @@ def level_gaze(rig, N):
         rig.W[k] = T @ rig.W[k]
 
 
-NOD_DEG = 14.0          # a guitar player's head nods this far down on every beat (and back up between)
-
-
-NOD_SING = 7.0          # the singer's, smaller (the mic follows the mouth: it's placed after)
-
-
-def nod(rig, N, beat, deg=None):
-    # the head bobbing to the music, as GH's guitarists do: chin down on the beat, up through the off-beat. The groove's
-    # 16 steps are locked to the song's beat in the game (game.c band_groove_cell), so this lands on the song's beat.
-    # Turned about the head's joint round the line between the eyes, the hair and hats (pelvis bones) with it
-    need = ('Bone_Brow_Mid', 'Bone_Lip_Lower_Mid', 'Bone_Eye_L', 'Bone_Eye_R', 'bone_head')
-    if not all(n in N for n in need):
-        return
-    P = lambda n: rig.W[N[n]][:3, 3]
-    up = P('Bone_Brow_Mid') - P('Bone_Lip_Lower_Mid')
-    lr = P('Bone_Eye_L') - P('Bone_Eye_R')
-    if np.linalg.norm(up) < 1e-6 or np.linalg.norm(lr) < 1e-6:
-        return
-    fwd = np.cross(lr, up)
-    if fwd @ ((P('Bone_Eye_L') + P('Bone_Eye_R')) / 2 - P('bone_head')) < 0:
-        fwd = -fwd
-    fwd /= np.linalg.norm(fwd)
-    k = (0.5 + 0.5 * math.cos(2 * math.pi * beat)) ** 1.5
-    a = math.radians((NOD_DEG if deg is None else deg) * k)
-    if a < 1e-4:
-        return
-    axis = lr / np.linalg.norm(lr)
-    K = np.array([[0, -axis[2], axis[1]], [axis[2], 0, -axis[0]], [-axis[1], axis[0], 0]])
-    R = np.eye(3) + math.sin(a) * K + (1 - math.cos(a)) * K @ K
-    if (R @ fwd)[1] > fwd[1]:
-        R = R.T                     # chin down, not up
-    piv = P('bone_head').copy()
-    T = np.eye(4)
-    T[:3, :3] = R
-    T[:3, 3] = piv - R @ piv
-    moved = set(rig.subtree(N['bone_head']))
-    for name, i in N.items():
-        if name.lower().startswith('bone_acc_head'):
-            moved.update(rig.subtree(i))
-    for k2 in moved:
-        rig.W[k2] = T @ rig.W[k2]
-
-
 HEAD_TILT = 25.0        # the head against the chest, at most (a head thrown right back read as a broken neck)
 
 
@@ -1061,6 +1018,22 @@ def export3d(name, meshes, skins, c, alt, tex_dir, layers, bones, work):
                 axis = -axis                # (turned the other way, the chin went up)
             o.write(b'JAW1' + struct.pack('<ii', jaw, len(moved)) + np.array(moved, '<i4').tobytes() +
                     np.r_[joint, axis].astype('<f4').tobytes())
+            # the head, for the game to nod it on the beat (band3d.c): its bone, every bone it carries (the face, the
+            # jaw, and the hair and hats, which hang on the pelvis in these models), its joint and the axis that drops
+            # the chin, at rest
+            head = low['bone_head']
+            moved = [i for i, b in enumerate(bones) if under(i, head) or
+                     any(under(i, low[a]) for a in low if a.startswith('bone_acc_head'))]
+            hj = pos(head)
+            haxis = axis.copy()
+            hchin = chin - hj
+            K = np.array([[0, -haxis[2], haxis[1]], [haxis[2], 0, -haxis[0]], [-haxis[1], haxis[0], 0]])
+            R = np.eye(3) + math.sin(0.2) * K + (1 - math.cos(0.2)) * K @ K
+            if (R @ hchin)[1] > hchin[1]:
+                haxis = -haxis
+            if len(moved) <= 160:
+                o.write(b'HED1' + struct.pack('<ii', head, len(moved)) + np.array(moved, '<i4').tobytes() +
+                        np.r_[hj, haxis].astype('<f4').tobytes())
     print(name, '3d', sum(len(r) for _, r, _, _ in recs), 'verts', sum(len(t) for _, _, t, _ in recs), 'tris (from', total,
           ')', len(recs), 'parts', len(lb), 'hand bones', os.path.getsize(os.path.join(out, name + '.b3d')) // 1024, 'KB')
 
@@ -1292,9 +1265,6 @@ def bake(path, work, tex_dir, alt=False):
             level_head(rig, N, rest)
             face_front(rig, rest, N)
             level_gaze(rig, N)              # (the head where it'll be before the mic goes to its mouth)
-            if i < JUMP and not os.environ.get('NONOD'):
-                # the singing frames are 8 a beat, the mic-down ones 4 (game.c: phase * 32, phase * 16)
-                nod(rig, N, i / 8 if i < REST else (i - REST) / 4, NOD_SING)
             hold_mic(rig, i < REST)
         if g0 is not None:
             guitar_hands(rig)
@@ -1307,8 +1277,6 @@ def bake(path, work, tex_dir, alt=False):
                 rig.set_world(pm, M)
         if role != 'vocalist':
             level_gaze(rig, N)
-        if g0 is not None and i < JUMP and not os.environ.get('NONOD'):
-            nod(rig, N, (i // STRUMS) * BEATS / GROOVE)
         if os.environ.get('FACELOG') and g0 is not None and i % 6 == 0:
             G = rig.W[N['bone_guitar_body']]
             print('face', i, 'board.audience %.2f' % -G[2, 1], 'neck', np.round(G[:3, 2], 2))

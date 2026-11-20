@@ -2387,6 +2387,16 @@ static void draw_band(double beat)
             // World Tour's model, posed by the same frames the sheet has, two of them blended so it moves smoothly
             Band3DDraw d3 = {0};
             d3.hands.ga = -1;
+            if (jump_f < 0) {
+                // the head nods to the music: down on every beat, up through the off-beat, harder as the song gets
+                // loud and the crowd comes round; the guitars most, the drummer a little less, the singer a touch
+                // (the mic stays at the mouth), half as much while their part rests
+                double bt = beat * speed;
+                float k = powf(0.5f + 0.5f * cosf((float)(bt - floor(bt)) * 2 * pi), 1.5f);
+                float deg = r >= 2 ? 13 : r == 0 ? 9 : bp->mic > 0.5f ? 2.5f : 5;
+                deg *= (0.45f + 0.55f * G.band_loud) * fminf(mood, 1.3f) * (playing ? 1 : 0.5f);
+                d3.nod = k * deg * pi / 180;
+            }
             if (r == 1 && bp->mic > 0.3f && jump_f < 0) {
                 // the singer's mouth: open on the sung notes (a syllable's start wide, then held a little open),
                 // shut between them; with no chart for them, in time with the beat while the mic's up

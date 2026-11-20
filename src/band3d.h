@@ -39,6 +39,7 @@ typedef struct {
     float rim[3], rim_k;        // the backlight's colour and how strong
     bool far;                   // small on the screen: the far body will do
     float mouth;                // the mouth this open, 0..1 (the singer singing)
+    float nod;                  // the head nodded this far down (radians: the music's beat)
     Band3DHands hands;          // the guitar's fret hand, driven by the chart (ga < 0: as the frames have it)
     double stamp;               // band3d_draw's own: when this was asked for (seconds)
 } Band3DDraw;

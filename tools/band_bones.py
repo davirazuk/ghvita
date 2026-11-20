@@ -114,6 +114,22 @@ def mend(path):
     if not to:
         return {}
     d[at:at + nf * nb * 48] = M.astype('<f4').tobytes()
+    # the head's block (band.py HED1, the bones the game turns as it nods): a bone fixed to the head here goes with it
+    # (a beard, a hat's brim left behind tore the face open as the head went down)
+    h = d.rfind(b'HED1')
+    if h > at:
+        hb, hn = struct.unpack('<ii', d[h + 4:h + 12])
+        bones = [int(x) for x in struct.unpack('<%di' % hn, bytes(d[h + 12:h + 12 + hn * 4]))]
+        tail = bytes(d[h + 12 + hn * 4:h + 12 + hn * 4 + 24])
+        grew = True
+        while grew:
+            grew = False
+            for b in range(nb):
+                if b not in bones and any(np.abs(M[:, b] - M[:, q]).max() < 1e-6 for q in bones if moves[q] or q == hb):
+                    bones.append(b)
+                    grew = True
+        if len(bones) > hn and len(bones) <= 160:
+            d = bytearray(bytes(d[:h]) + b'HED1' + struct.pack('<ii', hb, len(bones)) + np.array(bones, '<i4').tobytes() + tail)
     open(path, 'wb').write(d)
     alt = os.path.join(os.path.dirname(path), 'alt', os.path.basename(path)[:-4] + '.b3a')
     if os.path.exists(alt):
