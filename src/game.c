@@ -2995,8 +2995,11 @@ static void find_tremolos(void)
     plat_log("tremolos: %d lanes", G.roll_count);
 }
 
+static void battle_undouble(void);
+
 static void free_song(void)
 {
+    battle_undouble();          // the doubled notes back as charted, while the chart they're in is still there
     free(G.roll);
     G.roll = NULL;
     free(G.roll_mate);
@@ -3022,6 +3025,7 @@ static void free_song(void)
     free(G.solo);
     free(G.solo_hit);
     G.chart = NULL;
+    G.part = NULL;              // (it pointed into the chart: a later song start read the freed one)
     G.state = G.got = NULL;
     G.phrase = NULL;
     G.phrase_ok = NULL;
@@ -3189,8 +3193,7 @@ static void reset_play(void)
 
 bool game_start(Song * song, int part, int diff)
 {
-    battle_undouble();         // the last song's doubled notes, back before its chart goes
-    free_song();
+    free_song();               // (the last song's doubled notes go back as charted in there)
     char path[400];
     res_wait_sounds();
     snprintf(path, sizeof(path), "%s/notes.vhc", song->folder);
@@ -3218,6 +3221,7 @@ bool game_start(Song * song, int part, int diff)
     if (!G.part || (G.part->note_count == 0 && !G.vocal)) {
         chart_free(G.chart);
         G.chart = NULL;
+        G.part = NULL;
         return false;
     }
     G.lanes = LANES;

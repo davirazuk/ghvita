@@ -994,7 +994,7 @@ static bool fetch_page(int site, const char * query, int page, DlHit ** out, int
 {
     char * body = NULL;
     size_t len = 0;
-    int status;
+    int status = 0;
     *out = NULL;
     *n = 0;
     *total = 0;
