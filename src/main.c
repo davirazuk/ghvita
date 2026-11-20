@@ -175,7 +175,7 @@ static void update_repeat(void)
 
 // a menu held upright on a phone: the help bar's actions become the pad's buttons (hb), the bar itself not drawn
 static bool portrait_menu;
-static float menu_seen_x;    // held upright: where the part of the picture on the screen starts (0: all of it)
+static float menu_seen_x, menu_seen_w = SCREEN_W;    // held upright: the part of the picture on the screen (x, width)
 static struct { char label[32]; uint32_t btn; } hb[12];
 static int hb_n;
 
@@ -430,6 +430,7 @@ static void menu_focus(bool snap)
     plat_menu_focus(fx, fw);
     plat_menu_focus2(gx, gw, extra ? 0.1f * ((extra + 2) / 3) : 0);
     menu_seen_x = fx;
+    menu_seen_w = fw;
 }
 
 static void menu_touch(void)
@@ -1890,6 +1891,10 @@ static void dl_panel_draw(void)
 {
     gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(6, 6, 10, 246));
     panel(110, 48, 740, 452);
+    // held upright: the panel shown whole (its names and their values together; the list's place cut it in two)
+    menu_want0 = 110;
+    menu_want1 = 850;
+    menu_alone = true;
     font_draw_shadow(res.ui, "SEARCH FILTERS", SCREEN_W / 2, 66, 28, RGBA(255, 230, 150, 255), ALIGN_CENTER);
     DlFilter f;
     dl_get_filter(dl_site, &f);
@@ -1918,6 +1923,9 @@ static void dl_picker_draw(void)
 {
     gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(6, 6, 10, 246));
     panel(130, 64, 700, 340);
+    menu_want0 = 130;
+    menu_want1 = 830;
+    menu_alone = true;
     font_draw_shadow(res.ui, pick_kind ? "ARTISTS" : "CHARTERS", SCREEN_W / 2, 82, 28, RGBA(255, 230, 150, 255),
                      ALIGN_CENTER);
     char t[160];
@@ -2452,21 +2460,23 @@ static void download_screen(void)
     // the two sites, L and R between them
     {
         const Sprite * bl = atlas_get(res.hud, "btn_l"), * br = atlas_get(res.hud, "btn_r");
-        float x = SCREEN_W - 24, wr = br->w * 28.0f / br->h, wl = bl->w * 28.0f / bl->h;
+        // (held upright, at the right of what's on the screen: they were cut to "CHOR")
+        float x = (portrait_menu ? menu_seen_x + menu_seen_w : SCREEN_W) - 24, wr = br->w * 28.0f / br->h, wl = bl->w * 28.0f / bl->h;
         if (game_pc_keys)
             wr = wl = 30;
         if (touch_only)
             wr = wl = 0;
         btn_glyph("btn_r", x - wr, 22, 28);
         x -= wr + 12;
+        float ts = portrait_menu ? 20 : 26, ty = portrait_menu ? 99 : 22;     // (upright: on the line under the title, clear of it)
         for (int s = DL_SITES - 1; s >= 0; s--) {
             const char * name = s == DL_CHORUS ? "CHORUS ENCORE" : "RHYTHMVERSE";
-            float w = font_width(res.ui, name, 26);
+            float w = font_width(res.ui, name, ts);
             if (s == dl_site)
-                gfx_rect(x - w - 6, 52, w + 12, 4, RGBA(255, 200, 90, 255));
-            font_draw_shadow(res.ui, name, x, 22, 26, s == dl_site ? RGBA(255, 230, 150, 255)
+                gfx_rect(x - w - 6, ty + ts + 4, w + 12, 4, RGBA(255, 200, 90, 255));
+            font_draw_shadow(res.ui, name, x, ty, ts, s == dl_site ? RGBA(255, 230, 150, 255)
                                                                     : RGBA(150, 145, 140, 255), ALIGN_RIGHT);
-            x -= w + 24;
+            x -= w + (portrait_menu ? 14 : 24);
         }
         btn_glyph("btn_l", x - wl + 12, 22, 28);
     }
