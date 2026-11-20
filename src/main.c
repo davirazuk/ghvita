@@ -356,6 +356,8 @@ static void draw_menu_pad(bool show)
 
 // what of the picture a menu held upright shows: its list's rows and a little round them, at least most of the
 // picture's height worth across (the whole picture when there's no list, or it has a keyboard up)
+static bool menu_alone;     // set by a screen for this frame: held upright, its list only (no panel under it)
+
 static void menu_focus(bool snap)
 {
     // held upright: the part with the list across the top (as big as the phone's width lets it be), the rest of the
@@ -389,6 +391,9 @@ static void menu_focus(bool snap)
             }
         }
     }
+    if (menu_alone)
+        sec_x = sec_w = 0;
+    menu_alone = false;
     int extra = 0;
     for (int i = 0; i < hb_n; i++)
         extra += hb[i].btn != BTN_CROSS && hb[i].btn != BTN_CIRCLE;
@@ -850,7 +855,15 @@ static void title_screen(void)
     res_title_art();
     float a = 0.8f + 0.2f * sinf((float)now_s * 4);   // breathes, never fades out
     gfx_rect_grad(0, 420, SCREEN_W, 90, RGBA(0, 0, 0, 0), RGBA(0, 0, 0, 210));
-    font_draw_shadow(res.title, touch_only ? "TAP TO ROCK" : game_pc_keys ? "PRESS ENTER TO ROCK" : "PRESS X TO ROCK", SCREEN_W * 0.74f, 452, 46, fade_alpha(RGBA(255, 220, 120, 255), a),
+    // a phone held upright: the logo's half of the picture, as big as the width lets it be, the words under the logo
+    float bx, bw;
+    bool upright = touch_only && plat_menu_band(&bx, &bw) > 0;
+    if (upright) {
+        tap_item(20, 20, 490, 500, 0);
+        menu_alone = true;
+    }
+    font_draw_shadow(res.title, touch_only ? "TAP TO ROCK" : game_pc_keys ? "PRESS ENTER TO ROCK" : "PRESS X TO ROCK",
+                     upright ? 255 : SCREEN_W * 0.74f, upright ? 498 : 452, upright ? 40 : 46, fade_alpha(RGBA(255, 220, 120, 255), a),
                      ALIGN_CENTER);
     gfx_end();
 }
@@ -6950,129 +6963,59 @@ static void rockers_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
-        "Downloads no longer drag a song down: a finished download waits for the song to end before it's unpacked and converted (that work beside a song made the game stutter, and songs it skipped converting played badly), and a download under way slows while you play.",
-        "The venue is real behind the band: World Tour's own stages as 3D models - amps, walls, banners, the floor they stand on - seen through the same camera as the close shots, in place of the blurred picture.",
-        "The camera checks its view: a shot with an amp or a wall between it and the player tries the other side, then another shot.",
-        "The band stands on each venue's own marks in the close shots, the drummer on his riser behind them.",
-        "ROCKERS on the main menu: pick each member of the band and turn their clothes round the colour wheel, with whoever you're choosing playing in front of you.",
-        "Fixed on the Vita: the 3D band lagged the camera - after every cut it stood in the wrong place for a moment, and it shook as the camera moved. The camera is the GPU's now, never a frame behind.",
-        "The band is lighter on the Vita: a quarter of the triangles when they're small (the whole stage, the band in a line), and their shadows no longer draw them twice.",
-        "Close shots have a stage under them: the venue's floor running off into the dark, a shadow under each member.",
-        "The band is filmed the way Guitar Hero films it: the camera cuts every bar or two between close shots of the members - a face over the top of the board, chest up beside it, from the floor, along the guitar's neck, the kit from above, the whole band in a line - and the venue's whole stage now and then.",
-        "The guitarist's and bassist's fret hand plays the notes: down by the nut for green, up by the body for orange, one finger for a note, a barre for a chord.",
-        "A solo keeps the camera on you; Star Power cuts to you from the floor; the count-in has the whole band.",
-        "The 3D band redone: twice the detail, their real faces and clothes (most had come out as flat colour), lit by a white spot with the show's colour on their edges.",
-        "Options > Stage, Band camera: Close-ups or Whole stage (the band on the venue's picture, as before).",
-        "With the 3D band on, the old band pictures are no longer loaded: tens of megabytes of memory back.",
-        "The band is real 3D: World Tour's own models playing World Tour's moves, in place of the flat pictures.",
-        "Options > Stage, Band look: 3D models or Pictures. If the game runs slower with the 3D band, pick Pictures.",
-        "Singing with the Vita's speakers on: the mic heard the song too, and the replay played that copy back as a muddy echo. Now the game keeps what the speakers played and takes it back out of your singing after the song (a few seconds).",
-        "Replay START menu, Your singing: Off, 50%, 75%, 100%, 150% or 200% (it's remembered), instead of just on or off.",
-        "Fixed: on the Vita your singing wasn't being lined up with the beat in replays.",
-        "Your singing's voice in replays: Natural, Studio, Big hall or Hard tune (snapped to the notes). Change it live from the replay's START menu, or Options > Sound.",
-        "Replays have a clean view (START > View): the stage and the lyrics, or the stage alone, no highway or meters. Good for recording.",
-        "Replays: every song you finish is kept. START on the results screen watches it, played back exactly as you played it.",
-        "SELECT in the song list, Replays of this song: your last and your best run of each part, to watch again or delete.",
-        "Your singing is kept with the replay (Sing along or the Vocals part) and mixed into the song: lined up with the beat, cleaned up, gently tuned to the notes and given a little reverb.",
-        "In a replay, START: the song's own vocals full, low under yours, or off; your singing on or off; or save your singing as a WAV in the recordings folder.",
-        "Options > Game, Keep my singing in replays: turn it off and the mic is never kept.",
-        "Pick your band: Options > Stage has Singer, Guitarist, Bassist and Drummer, each a different one every song or the one you choose (with their picture).",
-        "Close-ups as World Tour cuts them: the camera pushes right in on the guitarist or bassist, head to waist, the stage dark behind them, tighter in a solo.",
-        "The singer, guitarists and bassists are drawn at 1.5 times the detail, sharp in the close-ups.",
-        "Your band member plays what you play: a missed note isn't strummed, a sustain is held, and your whammy shakes their guitar.",
-        "The band has two sets of moves now: World Tour's everyday groove in verses, and each member's wilder loop (lunges, arms up) in choruses, solos, Star Power and the outro.",
-        "The band's pictures take a quarter of the memory they did (kept in 256 colours on the Vita).",
-        "The band leaps into the air when a chorus slams in and the crowd is with you (once every 20 s at most), not only on Star Power.",
-        "Streak lamps: the gold chain runs past the top bulb again (every bulb sits on it), and stops at the bottom one.",
-        "SELECT in the song list, Find outdated songs: checks every downloaded song against its site and updates the ones missing a part (drums, vocals...), with an old chart or old audio. Scores kept.",
-        "The guitarist and bassist do World Tour's own Star Power jump: a crouch and a big leap, guitars in hand.",
-        "The drummer clicks the sticks over the kit through the count-in and after the last chord, and idles while their part rests.",
-        "A real crowd: World Tour's own people stand in front of the stage, backlit, bored, nodding, cheering or going wild with the song.",
-        "The singer has World Tour's own moves between lines, and leaps into the air when Star Power kicks in.",
-        "The band is lit by the show: heads and shoulders catch the stage lights, every member has a rim of the light's colour.",
-        "Close camera shots no longer cut the band's heads off. Streak lamps: the gold chain no longer pokes out past the bulbs.",
-        "Fixed: Note motion 24 fps (Flash) works again - the notes and the board step on Flash's clock.",
-        "Streak lamps tuned to World Tour footage: a slim gold chain along the rail, small bulbs with a soft white-hot glow.",
-        "Streak lamps are real 3D now, as in World Tour: glass bulbs on a twisted gold bar along the rail, lit by the stage.",
-        "Streak lamps: a chunky gold seat on the rail with small glowing bulb tips, as World Tour has them.",
-        "Left HUD: bigger chrome-rimmed ROCK dome, paler score digits, bar sized to match.",
-        "Left HUD laid out as World Tour's: the ROCK dome on the score bar, the note streak counter under it.",
-        "Streak lamps redone with World Tour's own small bulbs on its gold seat, tight against the rail.",
-        "Songs whose charter gave no difficulty get one estimated from the chart (paler bars in the song list).",
-        "Pause menu: the song progress sits under the patch, and the last hit rating no longer hangs over it.",
-        "Streak lamps redone like World Tour's: short domes end to end on a gold strip flush against the rail.",
-        "Hit ratings (PERFECT, GREAT...) now show just under the strikeline, never over a note on its way in.",
-        "Bass at x6 gets a real nixie tube in the score amp, like x2 to x4, instead of a plain number.",
-        "The multiplier lamps lie along the highway's rail in its own perspective, with the x4 plate at the end of the row.",
-        "The downloader keeps its folder tidy: old search covers (they had piled up past 100 MB) and dead download folders go.",
-        "Flash mode is now just its engine: GAME, Engine: Guitar Flash plays by Flash's rules on the normal highway.",
-        "GAME, Note motion: 24 fps steps the notes like Guitar Flash, at 30 or 60 fps. The flat Flash look is gone.",
-        "The venue lights follow the song's own light show (Rock Band charts): verses, choruses, strobes, blackouts, silhouettes.",
-        "Songs without a light show get one from their sections: verses cool, choruses slam in, builds strobe, bridges go dark.",
-        "The guitarist and bassist really move now: they rock through GH's own groove animation, in time with the song.",
-        "World Tour's HUD as in the game: the ROCK dome on the score amp, your multiplier a glowing nixie tube (blue in Star Power).",
-        "Star Power works like GH's: turning it on lifts the rock meter, and while it lasts hits fill it twice as fast, misses cost half.",
-        "Flash's notes are chunkier, with a lit rim.",
-        "Flash note style redrawn flat and 2D: a tall narrow highway, starry night board, bold outlined candy notes and rings.",
-        "Flash's rock and Star Power meters now stand beside the highway; its fire and tails are outlined bold.",
-        "Smoother scrolling: the song clock no longer judders with the audio buffers.",
-        "Flash note style now plays like Guitar Flash: its timing per difficulty, chords note by note, frets held below a note count.",
-        "In Flash, a press that takes no note is an error (it breaks your streak). Its meter, x4 multiplier and timed Star Power too.",
-        "Flash's notes move like Flash's: 24 steps a second, speeding up as they fall, and a lower, closer camera. Smooth in GRAPHICS.",
-        "GAME, Flash note style plays: Like Guitar Flash or Like World Tour. New timing window: Guitar Hero 3 (116 early, 100 late).",
-        "Late hits are capped at half the way to the next note, as in GH: a fast run no longer eats the next note early.",
-        "Fixed 30 fps: it still drew 60 frames a second. Now it really draws 30 (and reads the buttons 60 times a second).",
-        "Downloaded songs sound clean now: their audio was resampled badly (gritty cymbals and voices) and MP3s ran 25 ms late.",
-        "Songs you downloaded before: SELECT in the song list, Find outdated songs. They download again, scores kept.",
-        "Fixed downloads sometimes running twice at once and spoiling each other's files.",
-        "Flash looks more like Guitar Flash: white-topped pucks, ring targets, black lane lines, big fire, its own camera.",
-        "Every hit is rated PERFECT, GREAT or GOOD. Results show your accuracy and a rank, S+ to D; the song list keeps your best.",
-        "Tighter, fairer timing: Normal window 85 ms (was 95), new Pro 55 ms, and a chord's keys have to land together.",
-        "More GRAPHICS options: HUD style, background (venue / cover art / dark), hit ratings, highway length.",
-        "New modifiers in GAME: Sudden death (one miss ends it) and Hard rock meter. Seven new achievements to chase.",
-        "Venues have 4 camera angles from the real 3D stages: the camera cuts on sections, solos and Star Power.",
-        "New GRAPHICS tab: 60 or 30 fps (buttons still read at 60), venue camera, note style, Full/Balanced/Battery.",
-        "Battles get GH3's attacks: Broken String (tap the fret 5x), Double Notes, Whammy and Amp Overload.",
-        "Holding a fret, its lane's light now comes out of the cup instead of from the bottom edge of the highway.",
-        "Streak lamps fixed: full-size gold bulbs on the rail again (the last builds shrank them to dots), domes tipped up-right.",
-        "Fixed: a RhythmVerse search that had to be asked twice leaked its first answer's memory.",
-        "GET READY: L and R change the song speed right there.",
-        "The stage lights flash white on the drummer's crash cymbals, from the song's drum chart.",
-        "Main menu: the time and the Vita's battery, top right.",
-        "Fixed: the daily song changed at midnight UTC instead of the Vita's own midnight.",
-        "Pause: the section and how far through the song you are sit on their own plate, readable over the highway.",
-        "Options > Game > Song speed, 50% to 150%: shown on the HUD. A run below 100% isn't saved.",
-        "Achievements: Speed Demon (finish a song at 125% speed) and Ludicrous (4 stars at 150%).",
-        "Fixed: a practice run was saved as a score, so a slowed whole-song practice could earn the gold medal.",
-        "Earlier: Star Power spin and sparks, lasers, camera reveal, practice metronome.",
+        "The band nods to the music: guitarists and bassists dip their heads on every beat, the singer a little too.",
+        "Basses and guitars hang at the hips, out in front of each player: one bassist held his bass at his chest like a violin, another's was inside his belt buckle. The Star Power jump keeps the guitar in their hands too.",
+        "Song downloads find everything the sites have: the search had quietly kept only charts with an Expert guitar part, and Chorus found nothing for an artist and a song name together (\"metallica one\").",
+        "Dark dyed hair shows its strands instead of a flat black slab, and the drummer's close-up looks down over his cymbals at his face.",
+        "Fixed a crash: starting a song after another (Practice especially) could read the last song's chart after it was gone.",
+        "No more mashing: holding a fret above a note's highest one stops it counting, as in Guitar Hero.",
+        "Strum mode plays like Clone Hero: every note wants a strum except taps, and hammer-ons after a hit note; every extra strum breaks your streak.",
+        "Singers hold the mic at the mouth and their mouths move with the words. Guitars are held right-handed, across the body, strings to the crowd.",
+        "Phones: 32-bit phones work too. Updates also come from the game's own build branch, so every device keeps updating.",
+        "Phones held upright: the menus show their list big across the top, the songs big pads across the bottom.",
+        "Windows and Linux (AppImage) versions: full screen (F11 or Alt+Enter for a window), keyboard, controllers and USB guitars, and they update themselves.",
+        "Big notes and two-hand touch are the defaults on phones.",
     };
     int n = (int)(sizeof(lines) / sizeof(lines[0]));
     gfx_begin(0, 0, 0);
     gfx_2d();
     draw_background(res.bg_menu, WHITE);
-    banner("WHAT'S NEW IN THIS BUILD");
-    panel(150, 96, 660, 400);
-    // each item on up to two lines
+    // a phone held upright shows the middle of the picture big: the panel narrow enough to be that middle, the title
+    // over it, nothing under it
+    float band_x, band_w;
+    bool upright = plat_menu_band(&band_x, &band_w) > 0;
+    if (upright) {
+        font_draw_shadow(res.title, "WHAT'S NEW", SCREEN_W / 2, 22, 52, RGBA(255, 236, 200, 255), ALIGN_CENTER);
+        menu_alone = true;
+    } else
+        banner("WHAT'S NEW IN THIS BUILD");
+    float px = upright ? 245 : 150, pw = upright ? 470 : 660, tx = px + 20, tw = pw - 40;
+    panel(px, 96, pw, 400);
+    // the panel's rows, for the upright phone's view (it shows them big) and a finger dragging them up and down
+    for (float ry = 100; ry < 480; ry += 38)
+        tap_item(px, ry, pw, 36, 0);
     // up and down scroll it when it runs past the panel
-    static float scroll;
+    static float scroll, bottom = 114;
     if (repeat & BTN_DOWN)
-        scroll += 40;
+        scroll += 38;
     if (repeat & BTN_UP)
-        scroll -= 40;
-    scroll = scroll < 0 ? 0 : scroll > 600 ? 600 : scroll;
-    float y = 114 - scroll, bottom = 114;
+        scroll -= 38;
+    float most = bottom - 470 > 0 ? bottom - 470 : 0;
+    scroll = scroll < 0 ? 0 : scroll > most ? most : scroll;
+    float y = 114 - scroll;
+    gfx_clip(px, 100, pw, 388);         // (the last item ran down into "continue")
     for (int i = 0; i < n; i++) {
-        float h = 0;
-        if (y > 100 && y < 470)
-            h = draw_wrapped(lines[i], 170, y, 18, 620, 4, RGBA(230, 230, 235, 255));
+        float h;
+        if (y > -200 && y < 490)
+            h = draw_wrapped(lines[i], tx, y, 18, tw, 6, RGBA(230, 230, 235, 255));
         else
-            h = 60;
+            h = 18 * 3;
         y += h + 11;
-        bottom = y + scroll;
     }
-    if (scroll > bottom - 470)
-        scroll = bottom - 470 > 0 ? bottom - 470 : 0;
-    font_draw_shadow(res.ui, "X  continue", SCREEN_W / 2, 498, 20, RGBA(180, 220, 255, 255), ALIGN_CENTER);
+    gfx_clip_off();
+    bottom = y + scroll;
+    if (!upright)                       // (upright, the pad's OK under it says it)
+        font_draw_shadow(res.ui, "X  continue", SCREEN_W / 2, 504, 20, RGBA(180, 220, 255, 255), ALIGN_CENTER);
     draw_toast();
     gfx_end();
     if (pressed & (BTN_CROSS | BTN_CIRCLE)) {
