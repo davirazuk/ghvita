@@ -1039,35 +1039,57 @@ def export3d(name, meshes, skins, c, alt, tex_dir, layers, bones, work):
                 # that brings the lid down, at rest (a face whose lids can't be measured doesn't blink)
                 lids = []
                 for sd in 'lr':
-                    ub, lb, eb = 'bone_eyelid_upper_' + sd, 'bone_eyelid_lower_' + sd, 'bone_eye_' + sd
-                    if not all(k in low for k in (ub, lb, eb)):
+                    if not all(k in low for k in ('bone_eyelid_upper_' + sd, 'bone_eyelid_lower_' + sd, 'bone_eye_' + sd)):
                         continue
-                    eye = pos(low[eb])
-                    U, L = [], []
-                    for t, V, T in meshes:
-                        jj, ww, pp = np.asarray(V['j']), np.asarray(V['w']), np.asarray(V['p'])
-                        U += list(pp[(ww * (jj == low[ub])).sum(1) > 0.5])
-                        L += list(pp[(ww * (jj == low[lb])).sum(1) > 0.5])
-                    U, L = np.array(U), np.array(L)
-                    if not len(U) or not len(L):
+                    gap, u = lid_gap(bones, meshes, low, sd)
+                    if gap is None or gap < 15:
                         continue
-                    cu, cl = U[np.abs(U[:, 0] - eye[0]) < 0.006], L[np.abs(L[:, 0] - eye[0]) < 0.006]
-                    if not len(cu) or not len(cl):
-                        continue
-                    u, l = cu[cu[:, 1].argmin()] - eye, cl[cl[:, 1].argmax()] - eye
-                    gap = math.atan2(u[1], abs(u[2])) - math.atan2(l[1], abs(l[2]))
-                    if not math.radians(10) < gap < math.radians(90):
-                        continue
+                    gap = min(gap, 80)
+                    eye = pos(low['bone_eye_' + sd])
                     lax = axis.copy()
                     K = np.array([[0, -lax[2], lax[1]], [lax[2], 0, -lax[0]], [-lax[1], lax[0], 0]])
                     R = np.eye(3) + math.sin(0.2) * K + (1 - math.cos(0.2)) * K @ K
                     if (R @ u)[1] > u[1]:
                         lax = -lax              # (the lid went up)
-                    lids.append(struct.pack('<if', low[ub], 0.85 * gap) + np.r_[eye, lax].astype('<f4').tobytes())
+                    lids.append(struct.pack('<if', low['bone_eyelid_upper_' + sd], math.radians(0.85 * gap)) +
+                                np.r_[eye, lax].astype('<f4').tobytes())
                 o.write(b'LID1' + struct.pack('<i', len(lids)) + b''.join(lids))
     print(name, '3d', sum(len(r) for _, r, _, _ in recs), 'verts', sum(len(t) for _, _, t, _ in recs), 'tris (from', total,
           ')', len(recs), 'parts', len(lb), 'hand bones', os.path.getsize(os.path.join(out, name + '.b3d')) // 1024, 'KB')
 
+
+def lid_gap(bones, meshes, low, sd):
+    # how far an upper eyelid turns down to meet the lower one (degrees, about the eye's centre), and the upper lid's
+    # edge from the eye. Both edges measured in the eye's middle (6 mm either side: wider took in the eye's corners,
+    # which curve down): the upper lid's skin where it's mostly the lid's, the lower lid's where it's most the lid's
+    # (some faces weight their lower lids at half). A lower lid that can't be found or sits oddly: 40 degrees down
+    pos = lambda n: np.linalg.inv(bones[low[n]][4])[:3, 3]
+    eye = pos('bone_eye_' + sd)
+
+    def lid(bn, thr):
+        P, W = [], []
+        for t, V, T in meshes:
+            j, w, p = np.asarray(V['j']), np.asarray(V['w']), np.asarray(V['p'])
+            ww = (w * (j == low[bn])).sum(1)
+            P += list(p[ww > 0])
+            W += list(ww[ww > 0])
+        P, W = np.array(P), np.array(W)
+        return P[W >= thr * W.max()] if len(W) else P
+    U = lid('bone_eyelid_upper_' + sd, 0.5)
+    cu = U[np.abs(U[:, 0] - eye[0]) < 0.006] if len(U) else U
+    if not len(cu):
+        return None, None
+    u = cu[cu[:, 1].argmin()] - eye
+    au = math.degrees(math.atan2(u[1], abs(u[2])))
+    L = lid('bone_eyelid_lower_' + sd, 0.9)
+    cl = L[np.abs(L[:, 0] - eye[0]) < 0.006] if len(L) else L
+    al = -40.0
+    if len(cl):
+        l = cl[cl[:, 1].argmax()] - eye
+        a = math.degrees(math.atan2(l[1], abs(l[2])))
+        if -70 <= a <= -5:
+            al = a
+    return au - al, u
 
 def guitar_swing(bones, c, N, start, sp):
     # how far the guitar turns against the chest over a loop, in degrees (the worst frame against the first)
