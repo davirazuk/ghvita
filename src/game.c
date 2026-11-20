@@ -6645,6 +6645,11 @@ static void draw_hud(void)
         gfx_below_end();
     }
 vocal_strip_done:
+    if (G.vocal && game_touch_pads && plat_below() <= 0 && !G.view_mode && !G.paused) {
+        // a vocal song on a phone on its side: the pause chip, under the notes' strip (its corner is the strip's)
+        gfx_rect(SCREEN_W - 104, 76, 96, 42, RGBA(0, 0, 0, 140));
+        font_draw(res.ui, "PAUSE", SCREEN_W - 56, 86, 20, RGBA(240, 240, 240, 230), ALIGN_CENTER);
+    }
     gfx_2d();
     gfx_blend(BLEND_ALPHA);
     float t = (float)G.t;

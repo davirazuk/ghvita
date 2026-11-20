@@ -612,7 +612,7 @@ static void menu_touch(void)
         return;
     uint32_t b = 0;
     if (playing) {
-        if (sy < 84 && sx > SCREEN_W - 150)
+        if ((sy < 84 || (game_vocal_part() && sy < 126)) && sx > SCREEN_W - 150)
             b = BTN_START;
         else if (plat_below() > 0 && game_vocal_part() && sy > SCREEN_H + 20 && sy < SCREEN_H + 170 && sx > SCREEN_W - 270)
             b = BTN_START;              // a vocal song held upright: the pause button under the picture
