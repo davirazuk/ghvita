@@ -1553,11 +1553,20 @@ static bool write_vhc(const char * path, Parsed * P, const Tempo * T, OutNote * 
             free(sp);
             free(solos);
         }
-    FILE * f = fopen(path, "wb");
+    // whole or not at all: written beside, then put in its place (a half-written chart can't be left to load)
+    char tmp[900];
+    snprintf(tmp, sizeof(tmp), "%s.part", path);
+    FILE * f = fopen(tmp, "wb");
     bool ok = f && fwrite(b.d, 1, b.n, f) == b.n;
     if (f && fclose(f) != 0)
         ok = false;
     free(b.d);
+    if (ok) {
+        remove(path);                   // (Windows won't rename over a file)
+        ok = rename(tmp, path) == 0;
+    }
+    if (!ok)
+        remove(tmp);
     return ok;
 }
 

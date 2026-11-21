@@ -16,7 +16,7 @@ RATE = 44100
 RES = 192                       # chart ticks a beat
 
 # the songs' version: a device with an older copy of one (still there, not deleted) gets this one over it
-STARTER_VERSION = 2
+STARTER_VERSION = 3
 
 MINOR = [0, 2, 3, 5, 7, 8, 10]
 MAJOR = [0, 2, 4, 5, 7, 9, 11]
@@ -82,6 +82,41 @@ SONGS = [
          form=[('Intro', 4, 'intro'), ('Verse 1', 8, 'verse'), ('Chorus 1', 8, 'chorus'), ('Verse 2', 8, 'verse2'),
                ('Chorus 2', 8, 'chorus'), ('Guitar Solo', 8, 'solo'), ('Chorus 3', 8, 'chorus'), ('Outro', 4, 'outro')],
          colors=((230, 120, 40), (50, 25, 10), (255, 210, 120))),
+    dict(key='riptide', motif='stars', name='Riptide Radio', artist='Jetstream Kids', genre='Glam Rock', bpm=132,
+         tonic=45, mode='major', style='glam', seed=89, tiers=dict(guitar=3, rhythm=2, bass=2, drums=3),
+         form=[('Intro', 4, 'intro'), ('Verse 1', 8, 'verse'), ('Chorus 1', 8, 'chorus'), ('Verse 2', 8, 'verse2'),
+               ('Chorus 2', 8, 'chorus'), ('Guitar Solo', 8, 'solo'), ('Bridge', 4, 'bridge'), ('Chorus 3', 8, 'chorus'),
+               ('Outro', 4, 'outro')],
+         colors=((255, 80, 170), (30, 10, 50), (255, 230, 90))),
+    dict(key='gray', motif='rain', name='Gray Static Morning', artist='Basement Saints', genre='Grunge', bpm=104,
+         tonic=38, low=38, mode='minor', style='grunge', seed=97, tiers=dict(guitar=2, rhythm=2, bass=2, drums=2),
+         form=[('Intro', 4, 'intro'), ('Verse 1', 8, 'verse'), ('Chorus 1', 8, 'chorus'), ('Verse 2', 8, 'verse2'),
+               ('Chorus 2', 8, 'chorus'), ('Guitar Solo', 8, 'solo'), ('Bridge', 8, 'bridge'), ('Chorus 3', 8, 'chorus'),
+               ('Outro', 4, 'outro')],
+         colors=((110, 130, 120), (20, 24, 26), (200, 220, 160))),
+    dict(key='monolith', motif='monolith', name='Monolith Sleeps', artist='Ashen Crown', genre='Doom Metal', bpm=70,
+         tonic=36, low=36, mode='minor', style='doom', seed=101, tiers=dict(guitar=1, rhythm=1, bass=1, drums=1),
+         form=[('Intro', 4, 'intro'), ('Verse 1', 8, 'verse'), ('Chorus 1', 4, 'chorus'), ('Verse 2', 8, 'verse2'),
+               ('Chorus 2', 4, 'chorus'), ('Guitar Solo', 8, 'solo'), ('Chorus 3', 4, 'chorus'), ('Outro', 4, 'outro')],
+         colors=((90, 60, 120), (8, 6, 14), (220, 200, 255))),
+    dict(key='steelcity', motif='skyline', name='Steel City Lights', artist='Northbound Wreck', genre='Hard Rock',
+         bpm=126, tonic=40, mode='minor', style='hard', seed=107, tiers=dict(guitar=3, rhythm=3, bass=2, drums=3),
+         form=[('Intro', 4, 'intro'), ('Verse 1', 8, 'verse'), ('Chorus 1', 8, 'chorus'), ('Verse 2', 8, 'verse2'),
+               ('Chorus 2', 8, 'chorus'), ('Bridge', 4, 'bridge'), ('Guitar Solo', 8, 'solo'), ('Chorus 3', 8, 'chorus'),
+               ('Outro', 4, 'outro')],
+         colors=((60, 160, 220), (10, 14, 30), (255, 190, 70))),
+    dict(key='thornfire', motif='flames', name='Thornfire', artist='Hollow Vanguard', genre='Metal', bpm=152, tonic=38,
+         low=38, mode='minor', style='metal', seed=113, tiers=dict(guitar=5, rhythm=4, bass=4, drums=5),
+         form=[('Intro', 8, 'intro'), ('Verse 1', 8, 'verse'), ('Chorus 1', 8, 'chorus'), ('Verse 2', 8, 'verse2'),
+               ('Chorus 2', 8, 'chorus'), ('Breakdown', 8, 'bridge'), ('Guitar Solo', 16, 'solo'),
+               ('Chorus 3', 8, 'chorus'), ('Outro', 4, 'outro')],
+         colors=((240, 90, 20), (20, 6, 4), (255, 220, 120))),
+    dict(key='summer', motif='stencil', name="Summer's Last Car", artist='The Paperbacks', genre='Pop Punk', bpm=190,
+         tonic=48, mode='major', style='punk', seed=127, tiers=dict(guitar=3, rhythm=2, bass=2, drums=3),
+         form=[('Intro', 4, 'intro'), ('Verse 1', 16, 'verse'), ('Chorus 1', 8, 'chorus'), ('Verse 2', 16, 'verse2'),
+               ('Chorus 2', 8, 'chorus'), ('Bridge', 8, 'bridge'), ('Guitar Solo', 8, 'solo'), ('Chorus 3', 16, 'chorus'),
+               ('Outro', 4, 'outro')],
+         colors=((60, 200, 255), (10, 20, 40), (255, 240, 120))),
 ]
 
 PROGRESSIONS = {
@@ -97,7 +132,7 @@ PROGRESSIONS = {
 # chord, m the root palm-muted, c a clean picked note (an arpeggio), b a boogie dyad (the root and a note `step`
 # semitones over it), g a dead ghost note (heard, not charted). step: scale steps up from the chord's root (b: semitones)
 O, M, C, B, G = 'o', 'm', 'c', 'b', 'g'
-LINE_STYLES = ('ballad', 'shuffle', 'funk', 'thrash', 'stoner')      # their riffs are lines: the steps every bar
+LINE_STYLES = ('ballad', 'shuffle', 'funk', 'thrash', 'stoner', 'grunge', 'doom')      # their riffs are lines: the steps every bar
 RIFFS = {
     'hard': dict(verse=[(0, .5, O), (.5, .5, M), (1, .5, M), (1.5, .5, O), (2, .5, M), (2.5, .5, M), (3, .5, M, 2),
                         (3.5, .5, M, 3)],
@@ -131,6 +166,13 @@ RIFFS.update({
     'thrash': dict(verse=[(i * .5, .5, O if i in (0, 4) else M, {3: 1, 7: 2}.get(i, 0)) for i in range(8)],
                    chorus=[(0, 1, O), (1, 1, O), (2, .5, O), (2.5, .5, O), (3, 1, O)],
                    bridge=[(0, 1.5, O), (1.5, .5, M), (2, 1, M), (3, 1, O)]),
+    'grunge': dict(verse=[(0, 1, C, 0), (1, .5, C, 4), (1.5, .5, C, 2), (2, 1, C, 0), (3, .5, C, 3), (3.5, .5, C, 2)],
+                   chorus=[(0, 1.5, O), (1.5, .5, O), (2, 2, O)], bridge=[(0, 1, O), (1, 1, O, 1), (2, 2, O, 3)]),
+    'glam': dict(verse=[(0, .5, O), (.5, .5, M), (1, .5, M), (1.5, .5, O), (2, .5, M), (2.5, .5, M), (3, 1, O, 4)],
+                 chorus=[(0, 1, O), (1, .5, O), (1.5, .5, O), (2, 1, O), (3, 1, O)],
+                 bridge=[(0, 2, O), (2, 2, O, 3)]),
+    'doom': dict(verse=[(0, 2, O), (2, 1, M, 1), (3, 1, O, 3)], chorus=[(0, 3, O), (3, 1, O, 4)],
+                 bridge=[(0, 2, O), (2, 2, O, 1)]),
     'stoner': dict(verse=[(0, 1, O), (1, .5, M), (1.5, .5, M), (2, .5, M, 2), (2.5, .5, M, 3), (3, .5, O, 4),
                           (3.5, .5, M, 3)],
                    chorus=[(0, 2, O), (2, 1.5, O), (3.5, .5, M, 3)], bridge=[(0, 4, O)]),
@@ -204,7 +246,7 @@ def compose(song):
             pop = [[(0, .5), (.5, .5), (1, 1), (2, .5), (2.5, .5), (3, .5), (3.5, .5), (4, 1.5), (5.5, .5), (6, 1),
                     (7, 1)], LEAD_RHYTHMS[0], LEAD_RHYTHMS[3]]
             # (a slow song's lead moves in eighths and sixteenths: its beats are long)
-            pool = pop if style == 'pop' else [LEAD_RHYTHMS[1], LEAD_RHYTHMS[3]] if style in ('ballad', 'stoner') \
+            pool = pop if style == 'pop' else [LEAD_RHYTHMS[1], LEAD_RHYTHMS[3]] if style in ('ballad', 'stoner', 'doom') \
                 else LEAD_RHYTHMS[:4]
             lead_rhythm[kind] = rnd.choice(pool)
         return lead_rhythm[kind]
@@ -258,7 +300,7 @@ def compose(song):
 
     def solo(start_beat, bars, degrees):
         out = []
-        fast = 0.25 if style in ('hard', 'metal', 'drive', 'thrash', 'funk', 'ballad') else 0.5
+        fast = 0.25 if style in ('hard', 'metal', 'drive', 'thrash', 'funk', 'ballad', 'glam') else 0.5
         # call and answer, high
         out += melody(start_beat, 2, degrees, 'solo', True)
         first = [n[2] for n in out]
@@ -335,7 +377,7 @@ def compose(song):
             if style == 'pop':
                 pat = [(0, 1, broot), (1, .5, broot), (1.5, .5, broot + 12), (2, 1, broot + 7), (3, .5, broot),
                        (3.5, .5, broot + (2 if nxt > broot else -1))]
-            elif style in ('metal', 'thrash') and riffkind == 'verse' or style == 'stoner':
+            elif style in ('metal', 'thrash') and riffkind == 'verse' or style in ('stoner', 'doom'):
                 pat = [(b, l, broot + iv) for b, l, iv in walk]       # the bass doubles the riff
             elif style == 'shuffle':                                  # the boogie walk: up the chord and back
                 pat = [(i * .5, .5, broot + w) for i, w in enumerate((0, 4, 7, 9, 10, 9, 7, 4))]
@@ -357,7 +399,7 @@ def compose(song):
                 while p < 28:
                     p += 12
                 sc.bass.append((b0 + b, l, p))
-            if (kind in ('chorus', 'bridge') or style == 'ballad') and style not in ('punk', 'thrash'):
+            if (kind in ('chorus', 'bridge') or style == 'ballad') and style not in ('punk', 'thrash', 'grunge', 'doom'):
                 tones = sorted({tonic + 12 + (t - tonic) % 12 for t in chord_tones(deg)})
                 sc.pad.append((b0, 4, [t + 12 if t < 55 else t for t in tones]))
         # the lead
@@ -443,6 +485,8 @@ def drums(sc, rnd, style, kind, start, bars, first, last, big=False):
         elif style == 'funk':                           # sixteenths on the hat, the kick off the beat
             hits += [(0, 'K'), (.75, 'K'), (2.5, 'K'), (1, 'S'), (3, 'S'), (3.75, 'S')] + \
                     [(i * .25, 'HO' if chorus and i % 4 == 2 else 'H') for i in range(16)]
+        elif style == 'doom':                           # slow and heavy: the snare on three, the cymbals on the beat
+            hits += [(0, 'K'), (1.5, 'K'), (2, 'S')] + [(b, 'R' if chorus else 'H') for b in range(4)]
         elif style == 'punk':
             if chorus:
                 hits += [(b, 'K') for b in range(4)] + [(b + .5, 'S') for b in range(4)] + \
@@ -451,7 +495,7 @@ def drums(sc, rnd, style, kind, start, bars, first, last, big=False):
                 hits += [(0, 'K'), (1.5, 'K'), (2, 'K'), (1, 'S'), (3, 'S')] + [(i * .5, 'H') for i in range(8)]
         else:
             kick = {'hard': [0, 2, 2.5], 'pop': [0, 1.5, 2.5], 'drive': [0, .5, 2, 2.5], 'ballad': [0, 2.5],
-                    'shuffle': [0, 2], 'stoner': [0, 1.5, 2.5]}[style]
+                    'shuffle': [0, 2], 'stoner': [0, 1.5, 2.5], 'grunge': [0, 1.5, 2.5], 'glam': [0, 2]}[style]
             if chorus:
                 kick = kick + [1.5] if 1.5 not in kick else kick + [3.5]
             hits += [(k, 'K') for k in kick] + [(1, 'S'), (3, 'S')]
@@ -459,7 +503,7 @@ def drums(sc, rnd, style, kind, start, bars, first, last, big=False):
                 hits += [(i * .5, 'R' if style != 'pop' else 'HO' if i % 2 else 'H') for i in range(8)]
             else:
                 hits += [(i * .5, 'H') for i in range(8)]
-        if bar % 2 == 0 and (chorus or kind == 'solo') or bar == 0 or big:
+        if bar % 2 == 0 and (chorus or kind == 'solo') or bar == 0 or big or style == 'glam' and chorus:
             hits = [h for h in hits if not (h[0] == 0 and h[1] in ('H', 'R', 'HO'))] + [(0, 'C')]
             if not any(h == (0, 'K') for h in hits):
                 hits.append((0, 'K'))
@@ -499,10 +543,12 @@ def filt(x, kind, f, order=2):
 _pluck = {}
 
 
-def pluck(pitch, dur, bright, decay, seed, bend=False, vibrato=0.0):
-    """a plucked string (Karplus-Strong): a burst of noise going round a delay one period long, softened each time.
-    bend: it starts two semitones under and is pushed up; vibrato: how wide it shakes (semitones) once held"""
-    key = (pitch, round(dur, 3), bright, decay, seed, bend, vibrato)
+def pluck(pitch, dur, bright, decay, seed, bend=False, vibrato=0.0, steps=()):
+    """a plucked string (Karplus-Strong): a burst of noise going round a delay one period long, softened each time,
+    picked near the bridge. bend: it starts two semitones under and is pushed up; vibrato: how wide it shakes
+    (semitones) once held; steps: (seconds, semitones from the first note) the fretting hand moves to while it rings
+    (hammer-ons, pull-offs and slides: one pick, several notes)"""
+    key = (pitch, round(dur, 3), bright, decay, seed, bend, vibrato, steps)
     if key in _pluck:
         return _pluck[key]
     f = hz(pitch)
@@ -518,11 +564,16 @@ def pluck(pitch, dur, bright, decay, seed, bend=False, vibrato=0.0):
     if vibrato:
         depth = vibrato * np.clip((t - .18) / .3, 0, 1)
         semis += depth * np.sin(2 * np.pi * 5.6 * t)
+    was = 0.0
+    for at, off in steps:                   # each new note a quick slide of the finger (a dozen milliseconds)
+        semis += (off - was) * np.clip((t - at) / .012, 0, 1)
+        was = off
     rate = (f / rendered_f) * 2 ** (semis / 12)
     pos = np.concatenate(([0.0], np.cumsum(rate)[:-1]))
     L = int(pos[-1]) + N + 4 if n else N + 4
     rng = np.random.default_rng(seed)
     exc = rng.uniform(-1, 1, N)
+    exc = exc - .9 * np.roll(exc, max(1, int(N * .18)))     # picked near the bridge: the harmonics that leaves
     exc = signal.lfilter([bright], [1, -(1 - bright)], exc)
     exc -= exc.mean()
     y = np.zeros(L)
@@ -557,20 +608,41 @@ def release(x, fade_s=.012):
     return x
 
 
+def peak(x, f, db, q):
+    """a peaking EQ band (RBJ's cookbook): db up or down around f"""
+    A = 10 ** (db / 40)
+    w = 2 * np.pi * f / RATE
+    al = np.sin(w) / (2 * q)
+    b = [1 + al * A, -2 * np.cos(w), 1 - al * A]
+    a = [1 + al / A, -2 * np.cos(w), 1 - al / A]
+    return signal.lfilter(np.array(b) / a[0], np.array(a) / a[0], x)
+
+
+def cab(x):
+    """a 4x12 cabinet as a close microphone hears it: the low thump, a dip, the presence, and little past 6 kHz"""
+    x = filt(x, 'highpass', 70)
+    for f, db, q in ((110, 3.5, 1.1), (420, -3.5, 1.0), (1700, 2.0, 1.2), (3000, 4.0, 2.0), (6800, -8, 3)):
+        x = peak(x, f, db, q)
+    return filt(x, 'lowpass', 5600, 6)
+
+
 def amp(x, gain, tone, tight=110, scoop=True):
-    """a distorted amp and its speaker: the lows tightened before it, clipped, then the cabinet's roll-off"""
+    """a valve amp: the lows tightened and the mids pushed (a pedal before it), two valve stages clipping a little
+    lopsided (as valves do: the even harmonics), and its speaker cabinet"""
     x = filt(x, 'highpass', tight)
-    x = np.tanh(x * gain) / np.tanh(gain)
-    x = filt(x, 'highpass', 75)
+    x = peak(x, 900, 4, .8)
+    x = np.tanh(x * gain * .6 + .15) - np.tanh(.15)
+    x = filt(x, 'lowpass', 7000)
+    x = np.tanh(x * 2.5 + .05) - np.tanh(.05)
     if scoop:
-        b, a = signal.iirpeak(500, 1.2, fs=RATE)
-        x = x - .35 * signal.lfilter(b, a, x)
-    x = filt(x, 'lowpass', tone, 4)
-    return x
+        x = peak(x, 500, -4, 1.0)
+    x = cab(x)
+    return filt(x, 'lowpass', tone, 2) / (np.max(np.abs(x)) + 1e-9)
 
 
 # each style's amp: how hard it's driven, and where its speaker rolls the top off
-AMPS = {'stoner': (34, 3000), 'funk': (3.0, 5200), 'shuffle': (5.0, 4800), 'ballad': (12, 4400)}
+AMPS = {'stoner': (34, 3000), 'funk': (3.0, 5200), 'shuffle': (5.0, 4800), 'ballad': (12, 4400), 'grunge': (22, 3800),
+        'glam': (10, 4600), 'doom': (40, 2800)}
 
 
 def clean_amp(x):
@@ -626,19 +698,33 @@ def guitar_track(song, sc, seed, swing_ms):
     out = amp(buf, gain, tone, tight=85)
     if np.any(clean):
         cl = clean_amp(clean)
-        out = out + cl * (.6 / (np.max(np.abs(cl)) + 1e-9))
+        out = out + cl * (1.15 / (np.max(np.abs(cl)) + 1e-9))     # (a clean guitar's peaks stand further out)
     return out
 
 
 def lead_track(song, sc, notes=None, seed=1000):
+    """the lead: picked notes, and runs of close quick notes played legato (one pick, the fretting hand hammering on
+    and pulling off), as a guitarist plays them; a held note bent into and shaken"""
     bs = beat_s(song)
     notes = sc.lead if notes is None else notes
     buf = np.zeros(int((sc.beats * bs + 4) * RATE))
-    for i, (b, l, p, bend) in enumerate(notes):
-        nxt = notes[i + 1][0] if i + 1 < len(notes) else b + l
-        dur = max(.06, (min(nxt, b + l) - b) * bs + .02)
-        x = pluck(p, dur, .85, .9996, seed + p, bend=bend, vibrato=.35 if dur > .45 else 0)
+    i = 0
+    while i < len(notes):
+        b, l, p, bend = notes[i]
+        j = i + 1
+        while (j < len(notes) and j - i < 6 and abs(notes[j][0] - (notes[j - 1][0] + notes[j - 1][1])) < .02
+               and abs(notes[j][2] - notes[j - 1][2]) <= 4 and notes[j - 1][1] <= .5 and not notes[j][3]):
+            j += 1
+        group = notes[i:j]
+        end = group[-1][0] + group[-1][1]
+        nxt = notes[j][0] if j < len(notes) else end
+        dur = max(.06, (min(nxt, end) - b) * bs + .02)
+        steps = tuple((round((g[0] - b) * bs, 4), g[2] - p) for g in group[1:])
+        one = len(group) == 1
+        x = pluck(p, dur, .85, .9996, seed + p, bend=bend and one, vibrato=.35 if one and dur > .45 else 0,
+                  steps=steps)
         place(buf, b * bs + (seed - 1000) * .0004, release(x, .02), .9)
+        i = j
     return amp(buf, 22, 5200, tight=220, scoop=False)
 
 
@@ -656,87 +742,128 @@ def bass_track(song, sc):
 
 
 def pad_track(song, sc):
+    """the keys: a rock organ (drawbars pulled for a full growl, a key click, a little drive) through a rotating
+    speaker, its slow swirl"""
     bs = beat_s(song)
     buf = np.zeros(int((sc.beats * bs + 4) * RATE))
+    bars = ((.5, .8), (1, 1), (1.5, .55), (2, .7), (3, .3), (4, .25), (6, .12))     # 16' 8' 5 1/3' 4' 2 2/3' 2' 1 1/3'
+    rng = np.random.default_rng(91)
     for b, l, ps in sc.pad:
-        n = int((l * bs + .4) * RATE)
+        n = int((l * bs + .12) * RATE)
         t = np.arange(n) / RATE
-        env = np.minimum(1, t / .25) * np.minimum(1, np.maximum(0, (l * bs + .4 - t) / .4))
+        env = np.minimum(1, t / .008) * np.minimum(1, np.maximum(0, (l * bs + .12 - t) / .06))
         x = np.zeros(n)
         for p in ps:
-            for det in (-.08, .08):
-                f = hz(p + det)
-                for h in range(1, 7):
-                    x += np.sin(2 * np.pi * f * h * t) / h
-        place(buf, b * bs, x * env / len(ps) * .25)
-    return filt(buf, 'lowpass', 1600, 2)
+            f = hz(p - 12)
+            for mult, lvl in bars:
+                x += lvl * np.sin(2 * np.pi * f * mult * t + rng.uniform(0, 6.28))
+        k = min(n, int(.004 * RATE))
+        x[:k] += filt(rng.uniform(-1, 1, k), 'highpass', 2000) * np.linspace(1, 0, k) * 1.5    # the key click
+        place(buf, b * bs, x * env / (len(ps) * 3))
+    buf = np.tanh(buf * 2.2) / np.tanh(2.2)
+    t = np.arange(len(buf)) / RATE
+    swirl = 2 * np.pi * 0.85 * t
+    back = (.0008 + .0004 * np.sin(swirl)) * RATE                  # the horn coming and going: its pitch, its level
+    buf = np.interp(np.arange(len(buf)) - back, np.arange(len(buf)), buf, left=0) * (1 + .22 * np.sin(swirl + 1))
+    return filt(buf, 'lowpass', 4500, 2)
 
 
 _hits = {}
+
+
+def ring(rng, n, freqs, decays, amps, glide=0.0, glide_t=.04):
+    """a struck body: each of its modes a sine, ringing down at its own rate (a pitch that starts a little high and
+    settles, as a skin does when it's hit hard)"""
+    t = np.arange(n) / RATE
+    x = np.zeros(n)
+    bend = 1 + glide * np.exp(-t / glide_t)
+    for f, d, a in zip(freqs, decays, amps):
+        ph = 2 * np.pi * np.cumsum(f * bend) / RATE + rng.uniform(0, 6.283)
+        x += a * np.sin(ph) * np.exp(-t / d)
+    return x
+
+
+def metal_ring(rng, n, lo, hi, count, decay, bloom=0.0):
+    """a cymbal: many inharmonic partials, the higher ones dying sooner, and (a crash) a moment's bloom"""
+    t = np.arange(n) / RATE
+    x = np.zeros(n)
+    for f in np.exp(rng.uniform(np.log(lo), np.log(hi), count)):
+        d = decay * rng.uniform(.6, 1.4) * (lo / f) ** .35
+        x += np.sin(2 * np.pi * f * t + rng.uniform(0, 6.283)) * np.exp(-t / d) * rng.uniform(.4, 1) / np.sqrt(f / lo)
+    if bloom:
+        x *= 1 - np.exp(-t / bloom)
+    return x / np.sqrt(count)
 
 
 def drum_hit(piece, seed):
     key = (piece, seed)
     if key in _hits:
         return _hits[key]
-    rng = np.random.default_rng(seed)
+    rng = np.random.default_rng(seed * 7 + sum(map(ord, piece)) * 131)     # (the same every run)
 
     def noise(sec):
         return rng.uniform(-1, 1, int(sec * RATE))
 
-    def t_of(x):
-        return np.arange(len(x)) / RATE
+    def click(sec, hp):                                  # the stick (or the beater) striking
+        c = filt(noise(sec), 'highpass', hp)
+        return c * np.linspace(1, 0, len(c)) ** 2
 
-    if piece == 'K':
-        n = int(.35 * RATE)
-        t = np.arange(n) / RATE
-        f = 54 + 90 * np.exp(-t / .03)
-        x = np.sin(2 * np.pi * np.cumsum(f) / RATE) * np.exp(-t / .16)
-        click = filt(noise(.006), 'highpass', 2500) * np.linspace(1, 0, int(.006 * RATE))
-        x[:len(click)] += click * .5
-        x = np.tanh(x * 1.6)
-    elif piece == 'S':
-        t = np.arange(int(.25 * RATE)) / RATE
-        tone = (np.sin(2 * np.pi * 185 * t) + .5 * np.sin(2 * np.pi * 330 * t)) * np.exp(-t / .05)
-        nz = filt(noise(.25), 'bandpass', [1200, 9000]) * np.exp(-t / .07)
-        x = .55 * tone + 1.1 * nz
-    elif piece in ('H', 'HO'):
-        sec = .06 if piece == 'H' else .32
-        x = metal(rng, sec + .02, 7000) * np.exp(-t_of(np.zeros(int((sec + .02) * RATE))) / (sec / 3))
-        x *= .5
-    elif piece == 'R':
-        x = metal(rng, .9, 4000)
-        t = t_of(x)
-        x = x * (.35 * np.exp(-t / .5) + .4 * np.exp(-t / .03)) * .6
-    elif piece in ('C', 'C2'):
-        x = metal(rng, 2.2, 3000) + .6 * filt(noise(2.2), 'highpass', 5000)
-        t = t_of(x)
-        x = x * np.exp(-t / .7) * .55
-    else:                                               # the toms: high, middle, floor
-        f0 = {'T1': 210, 'T2': 150, 'T3': 105}[piece]
+    if piece == 'K':                                     # a 22" kick: its skin's modes, the beater's click
         n = int(.45 * RATE)
+        x = ring(rng, n, [58, 92, 131, 172], [.24, .08, .045, .03], [1, .35, .18, .1], glide=.45, glide_t=.025)
+        c = click(.005, 1500)
+        x[:len(c)] += c * .6
+        x = np.tanh(x * 1.4) / np.tanh(1.4)
+    elif piece == 'S':                                   # a snare: the head's modes, then its wires' buzz
+        n = int(.35 * RATE)
+        f0 = 186 * rng.uniform(.99, 1.01)
+        ratios = [1, 1.59, 2.14, 2.30, 2.65, 2.92, 3.16]
+        x = .7 * ring(rng, n, [f0 * r for r in ratios], [.13, .08, .06, .055, .05, .04, .035],
+                      [1, .6, .45, .4, .3, .25, .2], glide=.08, glide_t=.02)
         t = np.arange(n) / RATE
-        f = f0 * (1 + .5 * np.exp(-t / .03))
-        x = np.sin(2 * np.pi * np.cumsum(f) / RATE) * np.exp(-t / .2)
-        x += .2 * filt(rng.uniform(-1, 1, n), 'lowpass', 3000) * np.exp(-t / .03)
+        wires = filt(noise(.35), 'bandpass', [1800, 9000], 2) * np.exp(-np.maximum(t - .002, 0) / .12)
+        x += .95 * wires
+        c = click(.003, 3000)
+        x[:len(c)] += c * .5
+        x = np.tanh(x * 1.2)
+    elif piece in ('H', 'HO'):                           # hi-hat: closed a tick, open a wash
+        sec = .09 if piece == 'H' else .45
+        n = int(sec * RATE)
+        x = metal_ring(rng, n, 3500, 15000, 60, .035 if piece == 'H' else .28)
+        t = np.arange(n) / RATE
+        x += .5 * filt(noise(sec), 'highpass', 7000) * np.exp(-t / (.02 if piece == 'H' else .2))
+        c = click(.002, 5000)
+        x[:len(c)] += c * .4
+        x *= .55
+    elif piece == 'R':                                   # ride: a long shimmer, a bell, the stick's ping
+        n = int(1.6 * RATE)
+        x = metal_ring(rng, n, 900, 12000, 90, 1.1)
+        x += .35 * ring(rng, n, [560, 1430, 2280], [.6, .4, .3], [1, .7, .5])
+        c = click(.004, 4000)
+        x[:len(c)] += c * .6
+        x *= .5
+    elif piece in ('C', 'C2'):                           # crash: blooms open, then a long bright decay
+        n = int(2.6 * RATE)
+        x = metal_ring(rng, n, 600, 16000, 120, 1.4, bloom=.012)
+        t = np.arange(n) / RATE
+        x += .45 * filt(noise(2.6), 'highpass', 4000) * np.exp(-t / .9) * (1 - np.exp(-t / .01))
+        x *= .6
+    else:                                                # toms: high, middle, floor
+        f0 = {'T1': 196, 'T2': 147, 'T3': 98}[piece] * rng.uniform(.99, 1.01)
+        n = int(.8 * RATE)
+        dec = {'T1': .35, 'T2': .45, 'T3': .6}[piece]
+        x = ring(rng, n, [f0, f0 * 1.5, f0 * 1.98, f0 * 2.44], [dec, dec * .4, dec * .25, dec * .15],
+                 [1, .45, .25, .15], glide=.1, glide_t=.05)
+        c = click(.003, 2500)
+        x[:len(c)] += c * .5
+        x = np.tanh(x * 1.3) / np.tanh(1.3)
     _hits[key] = x.astype(np.float64)
     return _hits[key]
 
 
-def metal(rng, sec, hp):
-    """a cymbal's ring: square waves at inharmonic pitches, mixed and kept high"""
-    n = int(sec * RATE)
-    t = np.arange(n) / RATE
-    x = np.zeros(n)
-    for f in (205.3, 304.4, 369.6, 522.7, 540.0, 800.0):
-        f *= rng.uniform(.97, 1.03)
-        x += np.sign(np.sin(2 * np.pi * f * t + rng.uniform(0, 6.28)))
-    x = filt(x, 'highpass', hp, 4)
-    return x / 6
-
-
+ROOM_SEND = {'K': .25, 'S': .55, 'T1': .45, 'T2': .45, 'T3': .45, 'H': .1, 'HO': .15, 'R': .15, 'C': .3, 'C2': .3}
 PAN = {'K': 0, 'S': 0, 'H': .35, 'HO': .35, 'R': -.4, 'C': -.45, 'C2': .5, 'T1': .3, 'T2': -.1, 'T3': -.4}
-LEVEL = {'K': 1.0, 'S': .8, 'H': .32, 'HO': .3, 'R': .28, 'C': .45, 'C2': .4, 'T1': .7, 'T2': .7, 'T3': .75}
+LEVEL = {'K': 1.0, 'S': .85, 'H': .45, 'HO': .42, 'R': .4, 'C': .55, 'C2': .45, 'T1': .75, 'T2': .75, 'T3': .8}
 
 
 def drum_tracks(song, sc):
@@ -750,8 +877,9 @@ def drum_tracks(song, sc):
         pan = PAN[piece]
         place(L, b * bs, x, g * (1 - max(0, pan)))
         place(R, b * bs, x, g * (1 + min(0, pan)))
-        if piece in ('S', 'T1', 'T2', 'T3'):
-            place(room, b * bs, x, g * .5)
+        send = ROOM_SEND.get(piece, 0)                  # the kit in the room: the overheads' and the walls' share
+        if send:
+            place(room, b * bs, x, g * send)
     return L, R, room
 
 
@@ -786,13 +914,15 @@ def fret_map(pitches):
     return frets
 
 
-def chart_lead(sc, bs_ticks, start, end):
-    """the lead between two beats as (tick, frets, sustain), two bars at a time"""
+def chart_lead(sc, bs_ticks, start, end, window=None):
+    """the lead between two beats as (tick, frets, sustain): its notes onto the frets a whole section at a time (a
+    note keeps its fret through the section, as it does in a hand-made chart), a solo's wider runs four bars at a time"""
     notes = [n for n in sc.lead if start <= n[0] < end]
     out = []
     w = 0
+    span = window or (end - start)
     while w < len(notes):
-        win_end = notes[w][0] // 8 * 8 + 8
+        win_end = start + ((notes[w][0] - start) // span + 1) * span
         j = w
         while j < len(notes) and notes[j][0] < win_end:
             j += 1
@@ -1039,7 +1169,7 @@ def write_chart(song, sc, folder):
         end = beat + bars * 4
         lead_here = [n for n in sc.lead if beat <= n[0] < end]
         if lead_here and kind != 'verse2':
-            guitar += chart_lead(sc, RES, beat, end)
+            guitar += chart_lead(sc, RES, beat, end, 16 if kind == 'solo' else None)
         elif lead_here:
             # the second verse: the riff for its first half, the melody over it after
             mid = beat + bars * 2
@@ -1189,6 +1319,46 @@ def write_cover(song, path):
         for k in range(4):
             pts = [(x, H * (.6 + k * .1) + 22 * math.sin(x / (90 + k * 30) + k)) for x in range(0, W + 8, 8)]
             d.polygon(pts + [(W, H), (0, H)], fill=mix(c1, c2, .2 + k * .2))
+    elif m == 'stars':                                  # glam: a burst of stars and sparkles
+        for k in range(40):
+            x, y = rnd.uniform(0, W), rnd.uniform(0, H)
+            d.ellipse([x - 1.5, y - 1.5, x + 1.5, y + 1.5], fill=(255, 255, 255))
+        for cx, cy, r in ((W * .5, H * .45, 120), (W * .2, H * .25, 40), (W * .8, H * .3, 55)):
+            pts = [(cx + (r if k % 2 == 0 else r * .35) * math.cos(k * math.pi / 8),
+                    cy + (r if k % 2 == 0 else r * .35) * math.sin(k * math.pi / 8)) for k in range(16)]
+            d.polygon(pts, fill=c3, outline=c1)
+    elif m == 'rain':                                   # grunge: a gray morning, rain on the glass
+        for k in range(160):
+            x, y = rnd.uniform(-40, W), rnd.uniform(-20, H)
+            d.line([(x, y), (x + 8, y + 26)], fill=mix(c1, (255, 255, 255), rnd.uniform(.2, .6)), width=1)
+        for k in range(5):
+            x, y = rnd.uniform(60, W - 60), H * rnd.uniform(.75, .95)
+            d.ellipse([x - 50, y - 6, x + 50, y + 6], outline=c3, width=2)
+    elif m == 'monolith':                               # doom: a slab on a hill, a pale moon, the fog
+        d.ellipse([W * .62, H * .1, W * .62 + 90, H * .1 + 90], fill=mix(c3, (255, 255, 255), .5))
+        d.polygon([(0, H), (0, H * .8), (W * .5, H * .68), (W, H * .82), (W, H)], fill=mix(c2, (0, 0, 0), .4))
+        d.polygon([(W * .42, H * .7), (W * .44, H * .2), (W * .58, H * .18), (W * .6, H * .7)], fill=(10, 8, 16))
+        for k in range(4):
+            y = H * (.72 + k * .06)
+            d.rectangle([0, y, W, y + 6], fill=mix(c2, c3, .25))
+    elif m == 'skyline':                                # a city at night, its windows lit
+        x = 0
+        while x < W:
+            w, h = rnd.uniform(30, 70), rnd.uniform(.25, .7) * H
+            d.rectangle([x, H - h, x + w, H], fill=mix(c2, (0, 0, 0), .3))
+            for wy in range(int(H - h + 8), H - 8, 14):
+                for wx in range(int(x + 6), int(x + w - 6), 12):
+                    if rnd.random() < .45:
+                        d.rectangle([wx, wy, wx + 5, wy + 7], fill=c3)
+            x += w + 4
+    elif m == 'flames':                                 # metal: flames up from below, embers
+        for k in range(22):
+            x0, h = rnd.uniform(-20, W), rnd.uniform(.4, .95) * H
+            w = rnd.uniform(30, 70)
+            d.polygon([(x0 - w / 2, H), (x0, H - h), (x0 + w / 2, H)], fill=mix(c1, c3, rnd.uniform(0, .7)))
+        for k in range(40):
+            x, y = rnd.uniform(0, W), rnd.uniform(0, H * .6)
+            d.ellipse([x - 2, y - 2, x + 2, y + 2], fill=c3)
     else:                                               # rings and rays
         cx, cy = W * .5, H * .45
         for r in (70, 120, 180):
@@ -1231,8 +1401,8 @@ def write_ogg(stereo, path):
 
 # how hard each part plays in each kind of section (rhythm guitars, drums, bass, lead, pad): the verses back off for
 # the choruses to hit, the bridge drops, the solo's backing makes room for the lead
-ENERGY = {'intro': (.8, .82, .88, 1, 1), 'verse': (.58, .7, .82, .9, 1), 'verse2': (.62, .74, .84, .9, 1),
-          'chorus': (1, 1, 1, 1, 1), 'bridge': (.48, .6, .75, 1, 1), 'solo': (.6, .88, .9, 1.12, 1),
+ENERGY = {'intro': (.85, .82, .88, 1, 1), 'verse': (.8, .66, .78, .9, 1), 'verse2': (.82, .7, .8, .9, 1),
+          'chorus': (1, 1, 1, 1, 1), 'bridge': (.68, .56, .7, 1, 1), 'solo': (.6, .88, .9, 1.12, 1),
           'outro': (1, 1, 1, 1, 1)}
 
 
@@ -1278,7 +1448,7 @@ def make(song, out, pack=False, charts_only=False):
     g_lead = .2 / rms(lead[np.abs(lead) > 1e-4]) if np.any(np.abs(lead) > 1e-4) else 0
     g_bass = .17 / rms(bass)
     g_drum = .22 / rms(np.concatenate([dl, dr]))
-    g_pad = .05 / rms(pad[np.abs(pad) > 1e-4]) if np.any(np.abs(pad) > 1e-4) else 0
+    g_pad = .06 / rms(pad[np.abs(pad) > 1e-4]) if np.any(np.abs(pad) > 1e-4) else 0
     # then each section as hard as it should be (the levels above are set at full strength)
     bs = beat_s(song)
     e = [energy_curve(sc, bs, n, k) for k in range(5)]
@@ -1289,10 +1459,24 @@ def make(song, out, pack=False, charts_only=False):
     lead_room = reverb(lead * g_lead, 1.6, 7)
     room_l = reverb(room * g_drum, 1.1, 9) + reverb(pad * g_pad, 2.0, 11)
     room_r = reverb(room * g_drum, 1.1, 10) + reverb(pad * g_pad, 2.0, 12)
-    guitars = np.stack([gl * g_rhy * .95 + gr * g_rhy * .25 + lead * g_lead * .8 + lead_room * .35 + hl,
-                        gr * g_rhy * .95 + gl * g_rhy * .25 + lead * g_lead * .9 + lead_room * .35 + hr], 1)
-    rest = np.stack([dl * g_drum + bass * g_bass + pad * g_pad * .9 + room_l * .3,
-                     dr * g_drum + bass * g_bass + pad * g_pad * 1.1 + room_r * .3], 1)
+    # guitar.ogg is what the guitar chart plays (so a miss silences just that, and it's the guitar heard most): the
+    # lead where the chart follows it, the left rhythm guitar where it follows the riff. The rest go in song.ogg, and
+    # the rhythm guitars step back under a charted lead
+    m_lead = np.zeros(n)
+    for beat, name, kind, bars in sc.sections:
+        end = beat + bars * 4
+        if any(beat <= x[0] < end for x in sc.lead):
+            a0 = beat + bars * 2 if kind == 'verse2' else beat
+            m_lead[int(a0 * bs * RATE):int(end * bs * RATE)] = 1
+    m_lead = ndimage.uniform_filter1d(m_lead, int(.05 * RATE))
+    duck = 1 - .25 * m_lead
+    mine, under = gl * (1 - m_lead) * g_rhy * 1.25, gl * m_lead * g_rhy * duck     # (the one you play, up front)
+    guitars = np.stack([mine * 1.05 + lead * g_lead * 1.1 + lead_room * .35,
+                        mine * .55 + lead * g_lead * 1.2 + lead_room * .35], 1)
+    rest = np.stack([dl * g_drum + bass * g_bass + pad * g_pad * .9 + room_l * .3 + under * .9 + gr * g_rhy * .25 * duck
+                     + hl,
+                     dr * g_drum + bass * g_bass + pad * g_pad * 1.1 + room_r * .3 + under * .3 + gr * g_rhy * .95 * duck
+                     + hr], 1)
     rest = signal.sosfilt(butter('highpass', 38, 4), rest, axis=0)     # nothing under the kick's and bass's notes
     # the whole mix squeezed a little (the same gain on both halves, so together they're the mix), to -1 dB
     mix = guitars + rest

@@ -1,10 +1,16 @@
-ignition	The Static Hearts - Highway Ignition	2
-paper	Velvet Dynamo - Paper Kings	2
-glass	Iron Lanterns - Glass Thunder	2
-lastlight	Neon Vultures - Last Light Run	2
-overdrive	Cobalt Ruin - Midnight Overdrive	2
-northern	Saltwater Radio - Northern Lights	2
-gravel	The Dusty Rails - Gravel Road Shuffle	2
-voltage	Mister Lumen - Voltage Parade	2
-sawtooth	Grave Circuit - Sawtooth Saints	2
-desert	Mammoth Mile - Desert Engine	2
+ignition	The Static Hearts - Highway Ignition	3
+paper	Velvet Dynamo - Paper Kings	3
+glass	Iron Lanterns - Glass Thunder	3
+lastlight	Neon Vultures - Last Light Run	3
+overdrive	Cobalt Ruin - Midnight Overdrive	3
+northern	Saltwater Radio - Northern Lights	3
+gravel	The Dusty Rails - Gravel Road Shuffle	3
+voltage	Mister Lumen - Voltage Parade	3
+sawtooth	Grave Circuit - Sawtooth Saints	3
+desert	Mammoth Mile - Desert Engine	3
+riptide	Jetstream Kids - Riptide Radio	3
+gray	Basement Saints - Gray Static Morning	3
+monolith	Ashen Crown - Monolith Sleeps	3
+steelcity	Northbound Wreck - Steel City Lights	3
+thornfire	Hollow Vanguard - Thornfire	3
+summer	The Paperbacks - Summer's Last Car	3
