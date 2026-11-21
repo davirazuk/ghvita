@@ -560,8 +560,46 @@ void songs_set_fav(Song * s, bool fav)
 
 // The songs the game comes with (assets/starter, made by tools/mkstarter.py): copied into the songs folder the first
 // time a build that has them starts, so a new player has something to play, and they're songs like any other (shared,
-// deleted). starter.txt beside the saves lists the ones copied: one deleted stays deleted, a new one in a later build
-// still comes in.
+// deleted). starter.txt beside the saves lists the ones copied and their versions: one deleted stays deleted, a new one
+// in a later build still comes in, and a newer version of one still there replaces it (and is read afresh).
+static const char * const starter_files[] = {"song.ini", "notes.chart", "guitar.ogg", "song.ogg", "album.png"};
+
+static bool starter_copy(const char * key, const char * dir)
+{
+    bool ok = true;
+    dl_mkdirs(dir);
+    for (int i = 0; i < 5 && ok; i++) {
+        char from[700], to[700];
+        snprintf(from, sizeof(from), "%sstarter/%s/%s", plat_asset_dir(), key, starter_files[i]);
+        snprintf(to, sizeof(to), "%s/%s", dir, starter_files[i]);
+        FILE * in = fopen(from, "rb");
+        FILE * out = in ? fopen(to, "wb") : NULL;
+        static uint8_t buf[64 * 1024];
+        size_t n;
+        ok = in && out;
+        while (ok && (n = fread(buf, 1, sizeof(buf), in)) > 0)
+            ok = fwrite(buf, 1, n, out) == n;
+        if (in)
+            fclose(in);
+        if (out && fclose(out) != 0)
+            ok = false;
+    }
+    if (!ok)
+        for (int i = 0; i < 5; i++) {
+            char to[700];
+            snprintf(to, sizeof(to), "%s/%s", dir, starter_files[i]);
+            remove(to);
+        }
+    // what the game made from the last copy goes: this one's converted afresh
+    static const char * const made[] = {"notes.vhc", "ghvita.ini", "album.jpg"};
+    for (int i = 0; i < 3; i++) {
+        char m[700];
+        snprintf(m, sizeof(m), "%s/%s", dir, made[i]);
+        remove(m);
+    }
+    return ok;
+}
+
 static void starter_install(void)
 {
     char list[400], have_path[400];
@@ -570,93 +608,82 @@ static void starter_install(void)
     FILE * l = fopen(list, "r");
     if (!l)
         return;
-    // what's come in before
-    static char have[4096];
-    have[0] = 0;
+    // what's come in before: "name" (the first version) or "name<tab>version", a line each
+    enum { MOST = 64 };
+    static char had[MOST][256];
+    static int had_ver[MOST];
+    int nh = 0;
     FILE * h = fopen(have_path, "r");
-    if (h) {
-        size_t n = fread(have, 1, sizeof(have) - 1, h);
-        have[n] = 0;
-        fclose(h);
-    }
-    static const char * const files[] = {"song.ini", "notes.chart", "guitar.ogg", "song.ogg", "album.png"};
     char row[320];
-    int copied = 0;
+    while (h && nh < MOST && fgets(row, sizeof(row), h)) {
+        row[strcspn(row, "\r\n")] = 0;
+        char * v = strchr(row, '\t');
+        had_ver[nh] = v ? atoi(v + 1) : 1;
+        if (v)
+            *v = 0;
+        if (row[0])
+            snprintf(had[nh++], sizeof(had[0]), "%s", row);
+    }
+    if (h)
+        fclose(h);
+    int copied = 0, updated = 0;
+    bool changed = false;
     while (fgets(row, sizeof(row), l)) {
-        // each: its folder in assets/starter (no spaces: the Vita's packager), a tab, its folder's name in songs/
+        // each: its folder in assets/starter (no spaces: the Vita's packager), its folder's name in songs/, its version
         row[strcspn(row, "\r\n")] = 0;
         char * name = strchr(row, '\t');
         if (!name)
             continue;
         *name++ = 0;
+        char * vs = strchr(name, '\t');
+        int ver = vs ? atoi(vs + 1) : 1;
+        if (vs)
+            *vs = 0;
         const char * key = row;
         if (!name[0] || !key[0] || strstr(name, "..") || strchr(name, '/') || strstr(key, "..") || strchr(key, '/'))
             continue;
-        char line[260];
-        snprintf(line, sizeof(line), "%s\n", name);
-        if (strstr(have, line)) {
-            // copied by a build before the songs were marked instrumental: marked now (the singer keeps quiet)
-            char gi[700], buf[2048];
-            snprintf(gi, sizeof(gi), "%ssongs/%s/ghvita.ini", plat_data_dir(), name);
-            FILE * g = fopen(gi, "r");
-            size_t n = g ? fread(buf, 1, sizeof(buf) - 1, g) : 0;
-            if (g)
-                fclose(g);
-            buf[n] = 0;
-            if (n && !strstr(buf, "instrumental") && (g = fopen(gi, "a"))) {
-                fputs("instrumental = 1\n", g);
-                fclose(g);
-            }
-            continue;
-        }
-        char dir[600];
+        int k = 0;
+        while (k < nh && strcmp(had[k], name))
+            k++;
+        if (k < nh && had_ver[k] >= ver)
+            continue;                   // this version's been, and stayed or was deleted
+        char dir[600], ini[700];
         snprintf(dir, sizeof(dir), "%ssongs/%s", plat_data_dir(), name);
-        char ini[700];
         snprintf(ini, sizeof(ini), "%s/song.ini", dir);
         struct stat st;
-        bool there = stat(ini, &st) == 0;   // (a folder a copy failed in, with no song.ini, is copied again)
+        bool there = stat(ini, &st) == 0;
         bool ok = true;
-        if (!there) {
-            dl_mkdirs(dir);
-            for (int i = 0; i < 5 && ok; i++) {
-                char from[700], to[700];
-                snprintf(from, sizeof(from), "%sstarter/%s/%s", plat_asset_dir(), key, files[i]);
-                snprintf(to, sizeof(to), "%s/%s", dir, files[i]);
-                FILE * in = fopen(from, "rb");
-                FILE * out = in ? fopen(to, "wb") : NULL;
-                static uint8_t buf[64 * 1024];
-                size_t n;
-                ok = in && out;
-                while (ok && (n = fread(buf, 1, sizeof(buf), in)) > 0)
-                    ok = fwrite(buf, 1, n, out) == n;
-                if (in)
-                    fclose(in);
-                if (out && fclose(out) != 0)
-                    ok = false;
-            }
-            if (ok)
+        if (k == nh) {
+            // a new one: copied (unless a song by the name is already there)
+            if (!there && (ok = starter_copy(key, dir)))
                 copied++;
-            else {
-                plat_log("starter: couldn't copy %s", name);
-                for (int i = 0; i < 5; i++) {
-                    char to[700];
-                    snprintf(to, sizeof(to), "%s/%s", dir, files[i]);
-                    remove(to);
-                }
-            }
+        } else if (there) {
+            // an older version, still kept: the new one over it
+            if ((ok = starter_copy(key, dir)))
+                updated++;
         }
-        if (ok && strlen(have) + strlen(line) < sizeof(have)) {
-            strcat(have, line);
-            FILE * w = fopen(have_path, "w");
-            if (w) {
-                fputs(have, w);
-                fclose(w);
-            }
+        if (!ok) {
+            plat_log("starter: couldn't copy %s", name);
+            continue;                   // (tried again next time)
         }
+        if (k == nh && nh < MOST) {
+            snprintf(had[nh], sizeof(had[0]), "%s", name);
+            nh++;
+        }
+        if (k < MOST)
+            had_ver[k] = ver;
+        changed = true;
     }
     fclose(l);
-    if (copied)
-        plat_log("starter: %d songs added", copied);
+    if (changed) {
+        FILE * w = fopen(have_path, "w");
+        for (int i = 0; w && i < nh; i++)
+            fprintf(w, "%s\t%d\n", had[i], had_ver[i]);
+        if (w)
+            fclose(w);
+    }
+    if (copied || updated)
+        plat_log("starter: %d songs added, %d updated", copied, updated);
 }
 
 int songs_scan(void (*progress)(int found, const char * converting))
