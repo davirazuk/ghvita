@@ -159,8 +159,17 @@ static int lookup(void * arg)
             *colon = 0;
         uint32_t ip = inet_addr(host);
         if (ip == INADDR_NONE) {
-            struct hostent * h = gethostbyname(host);
-            ip = h && h->h_addrtype == AF_INET && h->h_addr_list[0] ? *(uint32_t *)h->h_addr_list[0] : 0;
+            // (getaddrinfo, not gethostbyname: the STUN lookup may be running in its own thread at the same moment,
+            // and gethostbyname's answer is one shared buffer)
+            struct addrinfo hints, * res = NULL;
+            memset(&hints, 0, sizeof(hints));
+            hints.ai_family = AF_INET;
+            hints.ai_socktype = SOCK_STREAM;
+            ip = 0;
+            if (getaddrinfo(host, NULL, &hints, &res) == 0 && res) {
+                ip = ((struct sockaddr_in *)res->ai_addr)->sin_addr.s_addr;
+                freeaddrinfo(res);
+            }
         }
         broker_ip[i] = ip == INADDR_NONE ? 0 : ip;
         if (test[0] && i == 0) {            // (one test broker)

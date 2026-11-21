@@ -699,10 +699,16 @@ static int stun_lookup(void * arg)
             *colon = 0;
         uint32_t ip = inet_addr(host);
         if (ip == INADDR_NONE) {
-            struct hostent * h = gethostbyname(host);
-            if (!h || h->h_addrtype != AF_INET || !h->h_addr_list[0])
+            // (getaddrinfo: the relay's lookup may run in its own thread at the same moment; gethostbyname shares one
+            // buffer between them)
+            struct addrinfo hints, * res = NULL;
+            memset(&hints, 0, sizeof(hints));
+            hints.ai_family = AF_INET;
+            hints.ai_socktype = SOCK_DGRAM;
+            if (getaddrinfo(host, NULL, &hints, &res) != 0 || !res)
                 continue;
-            memcpy(&ip, h->h_addr_list[0], 4);
+            ip = ((struct sockaddr_in *)res->ai_addr)->sin_addr.s_addr;
+            freeaddrinfo(res);
         }
         stun_ip[n] = ip;
         stun_port[n++] = (uint16_t)port;
