@@ -47,3 +47,10 @@ void p2p_code_begin(void);                          // asks (in the background) 
 int p2p_my_code(char * buf, int size);              // 1: buf has it, 0: still asking, -1: none (no internet)
 bool p2p_parse_code(const char * text, uint32_t * ip, uint16_t * port);
 bool p2p_connect_code(uint32_t ip, uint16_t port);  // like p2p_connect, trying for longer (they're typing too)
+// far away, by a room code: one hosts (and is given the code to pass on), the other joins with it. They meet through
+// public MQTT brokers (relay.h), connect directly when their networks let them, and through the relay when not
+bool p2p_room_host(char * code, int size);
+bool p2p_room_join(const char * typed_code);       // false: not a code
+int p2p_room(char * code, int size);               // 0 none, 1 hosting, 2 joining; the code
+const char * p2p_room_status(void);                // what's happening, to show
+bool p2p_relayed(void);                            // connected through the relay (slower: songs copy slowly)

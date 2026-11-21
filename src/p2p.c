@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "p2p.h"
+#include "relay.h"
 #include "plat.h"
 #ifdef _WIN32
 #include <winsock2.h>
@@ -46,7 +47,8 @@ typedef int sock_t;
 #define DEVICE "Linux"
 #endif
 
-enum { K_HELLO = 1, K_CONNECT, K_ACCEPT, K_MSG, K_ACK, K_FAST, K_BYE, K_PING, K_PONG, K_BUSY };
+enum { K_HELLO = 1, K_CONNECT, K_ACCEPT, K_MSG, K_ACK, K_FAST, K_BYE, K_PING, K_PONG, K_BUSY, K_PUNCH };
+#define RELAY_IP 0xFFFFFFFEu   // "from" a packet that came through the relay (no real address is this)
 #define HEAD 20
 #define WIN 256                 // messages out and not yet acknowledged, at most
 #define QUEUE 1024              // messages waiting to go out, and come in and not yet read
@@ -103,11 +105,24 @@ static struct {
     uint8_t stun_tx[12];
     uint32_t pub_ip;            // network order
     uint16_t pub_port;          // host order
+    // a room (far away), met in through the relay: the other one's addresses, tried directly before the relay's used
+    int room;                   // 0 none, 1 hosting one, 2 joining one
+    char room_code[8];
+    double room_t, join_t, punch_t, punch_until, direct_until;
+    uint32_t cand_ip[8];
+    uint16_t cand_port[8];
+    int ncand;
+    bool relay, welcomed, busy_room;
 } P;
 
 static double now_s(void)
 {
     return plat_now_us() / 1e6;
+}
+
+static double t_since(double t)
+{
+    return now_s() - t;
 }
 
 static void put32(uint8_t * p, uint32_t v)
@@ -181,6 +196,15 @@ static void nat_sent(uint32_t ip, uint16_t port)
 
 static void send_to(uint32_t ip, uint16_t port, const uint8_t * pkt, int len)
 {
+    if (ip == RELAY_IP) {
+        uint8_t m[RELAY_MAX];
+        if (len + 1 <= RELAY_MAX) {
+            m[0] = 'P';
+            memcpy(m + 1, pkt, (size_t)len);
+            relay_send(m, len + 1);
+        }
+        return;
+    }
 #ifndef __vita__
     nat_sent(ip, port);
 #endif
@@ -423,6 +447,11 @@ void p2p_hangup(void)
     P.other[0] = P.other_device[0] = 0;
     P.hosting = false;
     reset_link();
+    if (P.room) {
+        relay_stop();                   // (the room's over with the connection)
+        P.room = 0;
+    }
+    P.relay = false;
 }
 
 void p2p_close(void)
@@ -801,11 +830,300 @@ bool p2p_parse_code(const char * text, uint32_t * ip, uint16_t * port)
     return *ip != 0 && *port != 0;
 }
 
+// one packet in, from the network (fip, fport) or through the relay (RELAY_IP)
+static void take_packet(const uint8_t * pkt, int n, uint32_t fip, uint16_t fport, double t)
+{
+    if (pkt[0] != 'G' || pkt[1] != 'V' || pkt[2] != 1)
+        return;
+    int kind = pkt[3];
+    uint32_t id = get32(pkt + 4), seq = get32(pkt + 8), ack = get32(pkt + 12), bits = get32(pkt + 16);
+    const uint8_t * body = pkt + HEAD;
+    int blen = n - HEAD;
+    if (kind == K_HELLO) {
+        got_hello(fip, body, blen, id);
+        return;
+    }
+    if (kind == K_PUNCH)
+        return;                         // (only there to open the way through the routers)
+    if (kind == K_CONNECT) {
+        if (blen < 58)
+            return;
+        if (P.state == P2P_CONNECTED && id == P.conn && fip == RELAY_IP && !P.relay) {
+            // the same connection through the relay now (the guest gave up on the direct way): that way. (Not another
+            // of its own addresses: the guest tries them all at once, and stays with the one that answered first)
+            P.ip = fip;
+            P.peer_port = fport;
+            P.relay = true;
+        }
+        if (P.state == P2P_CONNECTED && id == P.conn && fip != P.ip)
+            return;                     // (a try of the same connection by another of its addresses: already in)
+        if (P.state == P2P_CONNECTED && !(id == P.conn && fip == P.ip)) {
+            uint8_t r[HEAD];
+            memset(r, 0, sizeof(r));
+            r[0] = 'G', r[1] = 'V', r[2] = 1, r[3] = K_BUSY;
+            put32(r + 4, id);
+            send_to(fip, fport, r, HEAD);
+            return;
+        }
+        // both connecting to each other at once (two codes typed): the one whose try has the lower number goes on
+        // trying, and the other takes it (and hosts)
+        if (P.state == P2P_CONNECTING && fip == P.ip && P.conn < id)
+            return;
+        if (P.state != P2P_CONNECTED) {
+            // someone wants to play: this one hosts
+            reset_link();
+            P.ip = fip;
+            P.peer_port = fport;
+            P.conn = id;
+            P.state = P2P_CONNECTED;
+            P.hosting = true;
+            P.relay = fip == RELAY_IP;
+            snprintf(P.other, sizeof(P.other), "%.31s", (const char *)body);
+            snprintf(P.other_device, sizeof(P.other_device), "%.15s", (const char *)body + 32);
+            P.heard = t;
+            plat_log("p2p: %s (%s) connected%s", P.other, P.other_device, P.relay ? " through the relay" : "");
+        }
+        uint8_t me[64];
+        who_am_i(me);
+        send_kind(K_ACCEPT, me, 58);
+        return;
+    }
+    if (kind == K_ACCEPT && P.state == P2P_CONNECTING && id == P.conn && fip != P.ip && fip != RELAY_IP)
+        for (int i = 0; i < P.ncand; i++)
+            if (P.cand_ip[i] == fip) {
+                P.ip = fip;             // (one of the room's addresses answered: that one)
+                P.peer_port = fport;
+                P.relay = false;
+            }
+    if (id != P.conn || fip != P.ip)
+        return;                   // not this connection's
+    P.heard = t;
+    if (kind == K_ACCEPT && P.state == P2P_CONNECTING) {
+        if (blen >= 58) {
+            snprintf(P.other, sizeof(P.other), "%.31s", (const char *)body);
+            snprintf(P.other_device, sizeof(P.other_device), "%.15s", (const char *)body + 32);
+        }
+        P.state = P2P_CONNECTED;
+        P.peer_port = fport;
+        plat_log("p2p: connected to %s (%s)%s", P.other, P.other_device, P.relay ? " through the relay" : "");
+        return;
+    }
+    if (kind == K_BUSY && P.state == P2P_CONNECTING) {
+        P.state = P2P_LOST;
+        return;
+    }
+    if (P.state != P2P_CONNECTED)
+        return;
+    take_ack(ack, bits);
+    if (kind == K_MSG)
+        got_msg(seq, body, blen);
+    else if (kind == K_FAST && blen >= 3) {
+        int len = body[1] | body[2] << 8;
+        if (len <= blen - 3 && P.in_n < QUEUE)
+            to_inbox(body[0], body + 3, len);
+    } else if (kind == K_BYE) {
+        plat_log("p2p: %s left", P.other);
+        P.state = P2P_LOST;
+    } else if (kind == K_PING && blen >= 8) {
+        uint8_t r[16];
+        memcpy(r, body, 8);
+        double mine = t;
+        memcpy(r + 8, &mine, 8);
+        send_kind(K_PONG, r, 16);
+    } else if (kind == K_PONG && blen >= 16) {
+        double t0, theirs;
+        memcpy(&t0, body, 8);
+        memcpy(&theirs, body + 8, 8);
+        double rtt = t - t0;
+        if (rtt >= 0 && rtt < 2 && rtt <= P.best_rtt * 1.5 + 0.002) {
+            // the clock from the quickest answers (the one-way time taken as half the round trip)
+            if (rtt < P.best_rtt)
+                P.best_rtt = rtt;
+            P.offset = theirs - (t0 + t) / 2;
+        }
+    }
+}
+
+
+// ---- rooms: meeting far away through the relay (relay.h), then talking directly if the networks allow it
+
+// this device's addresses as the other one would try them: the internet's view of it (STUN), then its own networks'
+static int my_addresses(uint8_t * out)
+{
+    int n = 0;
+    uint32_t ip[4], bc[4];
+    if (P.stun == 2) {
+        memcpy(out, &P.pub_ip, 4);
+        out[4] = (uint8_t)(P.pub_port >> 8), out[5] = (uint8_t)P.pub_port;
+        n++;
+    }
+    int k = my_networks(ip, bc, 4);
+    for (int i = 0; i < k && n < 6; i++, n++) {
+        memcpy(out + n * 6, &ip[i], 4);
+        out[n * 6 + 4] = (uint8_t)(P.port >> 8), out[n * 6 + 5] = (uint8_t)P.port;
+    }
+#ifndef __vita__
+    if (getenv("GHV_P2P_LOOPBACK") && n < 6) {      // tests: two copies on one machine
+        uint32_t lo = htonl(0x7f000001);
+        memcpy(out + n * 6, &lo, 4);
+        out[n * 6 + 4] = (uint8_t)(P.port >> 8), out[n * 6 + 5] = (uint8_t)P.port;
+        n++;
+    }
+#endif
+    return n;
+}
+
+// 'J' (the guest: here I am) and 'W' (the host: welcome): who, and where to reach them
+static void say_room(char type)
+{
+    uint8_t m[1 + 58 + 1 + 6 * 6];
+    m[0] = (uint8_t)type;
+    who_am_i(m + 1);
+    int n = my_addresses(m + 60);
+    m[59] = (uint8_t)n;
+    relay_send(m, 60 + n * 6);
+}
+
+static void heard_room(const uint8_t * m, int n)
+{
+    // the other one's addresses
+    P.ncand = 0;
+    int k = n >= 60 ? m[59] : 0;
+    for (int i = 0; i < k && i < 8 && 60 + i * 6 + 6 <= n; i++) {
+        memcpy(&P.cand_ip[P.ncand], m + 60 + i * 6, 4);
+        P.cand_port[P.ncand++] = (uint16_t)(m[60 + i * 6 + 4] << 8 | m[60 + i * 6 + 5]);
+    }
+    snprintf(P.other, sizeof(P.other), "%.31s", (const char *)m + 1);
+    snprintf(P.other_device, sizeof(P.other_device), "%.15s", (const char *)m + 33);
+}
+
+static void room_poll(double t)
+{
+    if (!P.room)
+        return;
+    relay_poll();
+    uint8_t m[RELAY_MAX];
+    int n;
+    while ((n = relay_recv(m, sizeof(m))) > 0) {
+        if (m[0] == 'P' && n > 1)
+            take_packet(m + 1, n - 1, RELAY_IP, 0, t);
+        else if (m[0] == 'J' && P.room == 1 && n >= 60) {
+            if (P.state == P2P_CONNECTED) {
+                uint8_t b = 'B';
+                relay_send(&b, 1);          // (this room has its two)
+                continue;
+            }
+            heard_room(m, n);
+            plat_log("p2p: %s (%s) is in the room, %d addresses", P.other, P.other_device, P.ncand);
+            say_room('W');
+            P.punch_until = t + 10;
+        } else if (m[0] == 'W' && P.room == 2 && n >= 60 && !P.welcomed && P.state != P2P_CONNECTED) {
+            heard_room(m, n);
+            P.welcomed = true;
+            plat_log("p2p: in %s's room, %d addresses", P.other, P.ncand);
+            // try them directly; the relay if none answers
+            reset_link();
+            P.conn = (uint32_t)(plat_now_us() * 131) ^ P.me_id ^ 0x5a5a1234u;
+            P.state = P2P_CONNECTING;
+            P.hosting = false;
+            P.tried = -1;
+            P.began = t;
+            P.patience = 45;
+            P.relay = P.ncand == 0;
+            P.ip = P.relay ? RELAY_IP : P.cand_ip[0];
+            P.peer_port = P.relay ? 0 : P.cand_port[0];
+            P.direct_until = t + 6;
+        } else if (m[0] == 'B' && P.room == 2 && P.state != P2P_CONNECTED)
+            P.busy_room = true;
+    }
+    // the guest: here I am, again now and then until welcomed (once the internet's view of this one's known, or soon)
+    if (P.room == 2 && !P.welcomed && relay_ready() && (P.stun != 1 || t - P.room_t > 4) && t - P.join_t > 2) {
+        P.join_t = t;
+        say_room('J');
+    }
+    // the host: knocking on the guest's addresses, so its router lets the guest's knocks in
+    if (P.room == 1 && P.state != P2P_CONNECTED && t < P.punch_until && t - P.punch_t > 0.25) {
+        P.punch_t = t;
+        uint8_t k[HEAD];
+        head(k, K_PUNCH, 0);
+        for (int i = 0; i < P.ncand; i++)
+            send_to(P.cand_ip[i], P.cand_port[i], k, HEAD);
+    }
+}
+
+bool p2p_room_host(char * code, int size)
+{
+    if (!P.open)
+        return false;
+    p2p_hangup();
+    relay_new_room(P.room_code, sizeof(P.room_code));
+    snprintf(code, (size_t)size, "%s", P.room_code);
+    P.room = 1;
+    P.room_t = now_s();
+    P.ncand = 0;
+    P.punch_until = 0;
+    P.relay = P.welcomed = P.busy_room = false;
+    p2p_code_begin();                   // (the internet's view of this one: the guest tries it first)
+    relay_start(P.room_code, true);
+    plat_log("p2p: hosting a room");
+    return true;
+}
+
+bool p2p_room_join(const char * typed)
+{
+    char code[8];
+    if (!P.open || !relay_room_ok(typed, code, sizeof(code)))
+        return false;
+    p2p_hangup();
+    snprintf(P.room_code, sizeof(P.room_code), "%s", code);
+    P.room = 2;
+    P.room_t = now_s();
+    P.join_t = -10;
+    P.ncand = 0;
+    P.relay = P.welcomed = P.busy_room = false;
+    p2p_code_begin();
+    relay_start(P.room_code, false);
+    plat_log("p2p: joining a room");
+    return true;
+}
+
+int p2p_room(char * code, int size)
+{
+    if (code)
+        snprintf(code, (size_t)size, "%s", P.room ? P.room_code : "");
+    return P.room;
+}
+
+const char * p2p_room_status(void)
+{
+    if (!P.room)
+        return "";
+    if (P.state == P2P_CONNECTED)
+        return P.relay ? "Connected (through the relay)" : "Connected (directly)";
+    if (relay_failed())
+        return "Couldn't get online: is this device on the internet?";
+    if (!relay_ready())
+        return "Getting online...";
+    if (P.room == 1)
+        return P.ncand ? "They're here: connecting..." : "Waiting for the other player to join...";
+    if (P.busy_room)
+        return "That room already has two players";
+    if (!P.welcomed)
+        return t_since(P.room_t) > 25 ? "No one's hosting that room (check the code)" : "Looking for the room...";
+    return P.relay ? "Connecting through the relay..." : "Reaching them directly...";
+}
+
+bool p2p_relayed(void)
+{
+    return P.state == P2P_CONNECTED && P.relay;
+}
+
 void p2p_poll(void)
 {
     if (!P.open)
         return;
     double t = now_s();
+    room_poll(t);
     uint8_t pkt[HEAD + 3 + P2P_MAX_MSG + 16];
     for (int budget = 0; budget < 600; budget++) {
         struct sockaddr_in from;
@@ -816,110 +1134,40 @@ void p2p_poll(void)
 #ifndef __vita__
         if (pkt[3] != K_HELLO && !nat_lets_in(from.sin_addr.s_addr, ntohs(from.sin_port)))
             continue;
+        static int no_udp = -1;         // tests: networks that never let two devices talk directly (the relay's needed)
+        if (no_udp < 0)
+            no_udp = getenv("GHV_P2P_NOUDP") != NULL;
+        if (no_udp && pkt[0] == 'G')
+            continue;
 #endif
         if (pkt[0] == 0x01 && pkt[1] == 0x01) {
             stun_answer(pkt, n);
             continue;
         }
-        if (pkt[0] != 'G' || pkt[1] != 'V' || pkt[2] != 1)
-            continue;
-        int kind = pkt[3];
-        uint32_t id = get32(pkt + 4), seq = get32(pkt + 8), ack = get32(pkt + 12), bits = get32(pkt + 16);
-        uint32_t fip = from.sin_addr.s_addr;
-        uint16_t fport = ntohs(from.sin_port);
-        const uint8_t * body = pkt + HEAD;
-        int blen = n - HEAD;
-        if (kind == K_HELLO) {
-            got_hello(fip, body, blen, id);
-            continue;
-        }
-        if (kind == K_CONNECT) {
-            if (blen < 58)
-                continue;
-            if (P.state == P2P_CONNECTED && !(id == P.conn && fip == P.ip)) {
-                uint8_t r[HEAD];
-                memset(r, 0, sizeof(r));
-                r[0] = 'G', r[1] = 'V', r[2] = 1, r[3] = K_BUSY;
-                put32(r + 4, id);
-                send_to(fip, fport, r, HEAD);
-                continue;
-            }
-            // both connecting to each other at once (two codes typed): the one whose try has the lower number goes on
-            // trying, and the other takes it (and hosts)
-            if (P.state == P2P_CONNECTING && fip == P.ip && P.conn < id)
-                continue;
-            if (P.state != P2P_CONNECTED) {
-                // someone wants to play: this one hosts
-                reset_link();
-                P.ip = fip;
-                P.peer_port = fport;
-                P.conn = id;
-                P.state = P2P_CONNECTED;
-                P.hosting = true;
-                snprintf(P.other, sizeof(P.other), "%.31s", (const char *)body);
-                snprintf(P.other_device, sizeof(P.other_device), "%.15s", (const char *)body + 32);
-                P.heard = t;
-                plat_log("p2p: %s (%s) connected", P.other, P.other_device);
-            }
-            uint8_t me[64];
-            who_am_i(me);
-            send_kind(K_ACCEPT, me, 58);
-            continue;
-        }
-        if (id != P.conn || fip != P.ip)
-            continue;                   // not this connection's
-        P.heard = t;
-        if (kind == K_ACCEPT && P.state == P2P_CONNECTING) {
-            if (blen >= 58) {
-                snprintf(P.other, sizeof(P.other), "%.31s", (const char *)body);
-                snprintf(P.other_device, sizeof(P.other_device), "%.15s", (const char *)body + 32);
-            }
-            P.state = P2P_CONNECTED;
-            P.peer_port = fport;
-            plat_log("p2p: connected to %s (%s)", P.other, P.other_device);
-            continue;
-        }
-        if (kind == K_BUSY && P.state == P2P_CONNECTING) {
-            P.state = P2P_LOST;
-            continue;
-        }
-        if (P.state != P2P_CONNECTED)
-            continue;
-        take_ack(ack, bits);
-        if (kind == K_MSG)
-            got_msg(seq, body, blen);
-        else if (kind == K_FAST && blen >= 3) {
-            int len = body[1] | body[2] << 8;
-            if (len <= blen - 3 && P.in_n < QUEUE)
-                to_inbox(body[0], body + 3, len);
-        } else if (kind == K_BYE) {
-            plat_log("p2p: %s left", P.other);
-            P.state = P2P_LOST;
-        } else if (kind == K_PING && blen >= 8) {
-            uint8_t r[16];
-            memcpy(r, body, 8);
-            double mine = t;
-            memcpy(r + 8, &mine, 8);
-            send_kind(K_PONG, r, 16);
-        } else if (kind == K_PONG && blen >= 16) {
-            double t0, theirs;
-            memcpy(&t0, body, 8);
-            memcpy(&theirs, body + 8, 8);
-            double rtt = t - t0;
-            if (rtt >= 0 && rtt < 2 && rtt <= P.best_rtt * 1.5 + 0.002) {
-                // the clock from the quickest answers (the one-way time taken as half the round trip)
-                if (rtt < P.best_rtt)
-                    P.best_rtt = rtt;
-                P.offset = theirs - (t0 + t) / 2;
-            }
-        }
+        take_packet(pkt, n, from.sin_addr.s_addr, ntohs(from.sin_port), t);
     }
     if (P.state == P2P_CONNECTING) {
         if (t - P.tried > 0.25) {
             P.tried = t;
             uint8_t me[64];
             who_am_i(me);
-            send_kind(K_CONNECT, me, 58);
+            if (P.room == 2 && !P.relay)
+                for (int i = 0; i < P.ncand; i++) {
+                    uint8_t c[HEAD + 64];
+                    head(c, K_CONNECT, 0);
+                    memcpy(c + HEAD, me, 58);
+                    send_to(P.cand_ip[i], P.cand_port[i], c, HEAD + 58);
+                }
+            else
+                send_kind(K_CONNECT, me, 58);
+        }
+        if (P.room == 2 && !P.relay && t > P.direct_until) {
+            // the networks won't let the two talk directly: the game through the relay instead
+            P.relay = true;
+            P.ip = RELAY_IP;
+            P.peer_port = 0;
+            P.tried = -1;
+            plat_log("p2p: no direct way to them: through the relay");
         }
         if (t - P.began > P.patience)
             P.state = P2P_LOST;
@@ -935,7 +1183,7 @@ void p2p_poll(void)
             }
         }
         // then what's waiting, as far as the window lets it
-        while (P.wait_n && P.next_seq - P.base < WIN) {
+        while (P.wait_n && P.next_seq - P.base < (P.relay ? 24u : (uint32_t)WIN)) {     // (the relay: less in flight)
             Msg * m = &P.wait[P.wait_head];
             Slot * sl = &P.out[P.next_seq % WIN];
             sl->used = true;

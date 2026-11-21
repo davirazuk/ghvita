@@ -4857,6 +4857,8 @@ static void results_screen(void)
     if (result.versus) {
         char vt[80];
         snprintf(vt, sizeof(vt), "%s", result.versus == 1 ? "YOU WIN!" : result.versus == 3 ? "A DRAW!" : "");
+        if (result.versus == 4)
+            snprintf(vt, sizeof(vt), "BAND SCORE  %d", result.score + result.rival_score);
         if (result.versus == 2)
             snprintf(vt, sizeof(vt), "%s WINS", result.rival_name);
         font_draw_fit(res.title, vt, SCREEN_W / 2, 48, 52, 820,
@@ -4880,7 +4882,7 @@ static void results_screen(void)
             for (int k = 0; k < 2; k++) {
                 bool me = k == 0;
                 int sc = me ? result.score : result.rival_score;
-                bool won = result.versus ? result.versus == 3 || me == (result.versus == 1) : me == (result.battle == 1);
+                bool won = result.versus ? result.versus >= 3 || me == (result.versus == 1) : me == (result.battle == 1);
                 float y = 96 + k * 17;
                 font_draw_fit(res.ui, me ? "You" : result.rival_name, bx - 12, y - 3, 16, 160,
                               me ? RGBA(150, 215, 255, 255) : RGBA(255, 160, 140, 255), ALIGN_RIGHT);
@@ -7052,6 +7054,8 @@ static void news_screen(void)
         "Share songs between them: the song the host picks comes over by itself, and Share songs copies any of the other one's songs here (or all the ones you're missing).",
         "Ten songs come with the game, made for GH Vita and nothing anyone else wrote: hard rock, pop rock, metal, punk, a power ballad with clean picked verses, a swinging blues shuffle, funk rock, stoner rock, and Sawtooth Saints, a 200 BPM thrash song for when Expert is too easy. Each has guitar, rhythm, bass and drums on all four difficulties, Easy really easy, and its own cover.",
         "The first five built-in songs are better: verses back off so the choruses hit, the last chorus has a second guitar in harmony, riffs and solos move instead of hammering one note, and Hard, Medium and Easy are real steps down (Medium was nearly Expert).",
+        "PLAY TOGETHER far away: one picks Host a game online and gets a room code, the other types it. Any Wi-Fi or phone data, any distance, no port forwarding: the two meet through free public meeting points, talk directly when their networks allow it, and through the meeting point when they don't. What goes through is encrypted with the room code.",
+        "PLAY TOGETHER modes (the host picks): Versus, a race of scores; Battle, Star Power phrases become attacks thrown at the other player (empty their meter to win); Co-op, one band and one score, and one out of meter is carried by the other.",
         "A song with singing but no singing part charted: the singer sings when the recording does (its vocals track, if it has one, heard a moment ahead so the mic comes up for the first word, her mouth moving with the voice), or else in the verses and choruses, resting through intros, solos and instrumental breaks.",
         "The band plays what's in the song: the singer's mouth opens on the sung words (it flapped to the beat), no one starts before the first note, the bassist follows a bass line charted as rhythm, your own player plays your part at your difficulty, and in an instrumental the singer keeps the mic down.",
         "The band nods to the music: guitarists and bassists dip their heads on every beat, the singer a little too.",
@@ -7271,7 +7275,10 @@ static void mp_address_typed(const char * t)
             return;
         }
     }
-    if (p2p_parse_code(t, &ip, &port)) {
+    if (p2p_room_join(t)) {
+        mp_by_code = false;
+        mp_say("Joining the room...");
+    } else if (p2p_parse_code(t, &ip, &port)) {
         p2p_connect_code(ip, port);
         mp_by_code = true;
         mp_code_t = now_s;
@@ -7280,7 +7287,7 @@ static void mp_address_typed(const char * t)
         mp_by_code = false;
         mp_say("Connecting...");
     } else
-        mp_say("That's not a code (ten letters and numbers, like K7Q2M-XH4PB) or an address (like 192.168.1.5)");
+        mp_say("That's not a room code (six letters and numbers, like K7Q2MX) or an address (like 192.168.1.5)");
 }
 
 // the round's over (the song finished, or quit): the other told, the lobby again
@@ -7314,7 +7321,8 @@ static void multi_screen(void)
         return;
     }
     P2PPeer peers[12];
-    int n = p2p_is_open() ? p2p_peers(peers, 12) : 0, rows = n + 1;
+    int n = p2p_is_open() ? p2p_peers(peers, 12) : 0, rows = n + 2;
+    int room = p2p_room(NULL, 0);
     if (dl_typing) {
         kb_update();
     } else {
@@ -7324,10 +7332,10 @@ static void multi_screen(void)
             mp_row = (mp_row + 1) % rows;
         if (mp_row >= rows)
             mp_row = rows - 1;
-        if ((pressed & BTN_CIRCLE) && waiting) {
-            ui_sound(SND_UI_BACK);      // stop trying (and stay)
+        if ((pressed & BTN_CIRCLE) && (waiting || room)) {
+            ui_sound(SND_UI_BACK);      // stop trying, or leave the room (and stay)
             p2p_hangup();
-            mp_say("Stopped");
+            mp_say(room ? "Left the room" : "Stopped");
         } else if (pressed & BTN_CIRCLE) {
             ui_sound(SND_UI_BACK);
             p2p_close();
@@ -7342,11 +7350,16 @@ static void multi_screen(void)
                 char t[80];
                 snprintf(t, sizeof(t), "Connecting to %s...", peers[mp_row].name);
                 mp_say(t);
+            } else if (mp_row == n) {
+                char code[8];
+                mp_by_code = false;
+                if (p2p_room_host(code, sizeof(code)))
+                    mp_say("Room open: give the other player its code");
             } else {
                 dl_typed[0] = 0;
                 dl_typing = true;
                 kb_apply = mp_address_typed;
-                kb_title = "The other one's code or address";
+                kb_title = "The room code (or an address)";
             }
         }
     }
@@ -7374,32 +7387,39 @@ static void multi_screen(void)
             snprintf(t, sizeof(t), "%s, %d songs", peers[i].device, peers[i].songs);
             font_draw_fit(res.ui, t, 512, y + 8, 17, 170, RGBA(180, 180, 190, 255), ALIGN_RIGHT);
         } else
-            font_draw(res.ui, "Type the other one's code or address...", 70, y + 8, 20, on ? WHITE : RGBA(200, 200, 210, 255),
-                      ALIGN_LEFT);
+            font_draw(res.ui, i == n ? (room == 1 ? "Hosting a game online (Circle: close it)" : "Host a game online...")
+                                     : "Type a room code (or an address)...",
+                      70, y + 8, 20, on ? WHITE : RGBA(200, 200, 210, 255), ALIGN_LEFT);
     }
     if (!n && p2p_is_open()) {
         float k = 0.6f + 0.4f * sinf((float)(now_s - opened) * 3);
-        font_draw_fit(res.ui, "Looking for other devices...", 60, 142 + 44 + 10, 18, 460, RGBA(200, 200, 210, (int)(255 * k)), ALIGN_LEFT);
+        font_draw_fit(res.ui, "Looking for other devices nearby...", 60, 142 + rows * 44 + 8, 18, 460,
+                      RGBA(200, 200, 210, (int)(255 * k)), ALIGN_LEFT);
     }
     panel(560, 96, 360, 380);
     char me[48], code[24], t[160];
     p2p_my_address(me, sizeof(me));
-    int have_code = p2p_is_open() ? p2p_my_code(code, sizeof(code)) : -1;
-    static const char * const how[] = {
-        "Same Wi-Fi, or one on the other's phone hotspot: open PLAY TOGETHER on both and pick the other one here.",
-        "Far apart: send each other your codes (a message, a call), and both type the other's.",
-    };
     float y = 112;
-    for (int i = 0; i < 2; i++)
-        y += draw_wrapped(how[i], 578, y, 18, 324, 4, RGBA(225, 225, 230, 255)) + 10;
-    font_draw_fit(res.ui, "Your code", 578, 268, 18, 324, RGBA(200, 200, 210, 255), ALIGN_LEFT);
-    if (have_code == 1)
-        font_draw_shadow(res.title, code, 578, 290, 40, RGBA(255, 222, 120, 255), ALIGN_LEFT);
-    else
-        font_draw_fit(res.ui, have_code == 0 ? "asking the internet..." : "none (no internet here)", 578, 298, 20, 324,
-                      RGBA(200, 200, 210, 255), ALIGN_LEFT);
-    draw_wrapped("It carries your internet address: give it only to who you play with.", 578, 336, 15, 324, 2,
-                 RGBA(170, 170, 180, 255));
+    if (room) {
+        // a room: its code to pass on (hosting), and how it's going
+        p2p_room(code, sizeof(code));
+        font_draw_fit(res.ui, room == 1 ? "Room code" : "Joining room", 578, y, 18, 324, RGBA(200, 200, 210, 255), ALIGN_LEFT);
+        font_draw_shadow(res.title, code, 578, y + 24, 52, RGBA(255, 222, 120, 255), ALIGN_LEFT);
+        y += 92;
+        if (room == 1)
+            y += draw_wrapped("Give this code to the other player (a message, a call). On their PLAY TOGETHER they pick "
+                              "Type a room code and type it. Any Wi-Fi or phone data, anywhere.", 578, y, 17, 324, 5,
+                              RGBA(225, 225, 230, 255)) + 10;
+        float k = 0.6f + 0.4f * sinf((float)now_s * 3);
+        draw_wrapped(p2p_room_status(), 578, y, 18, 324, 3, RGBA(150, 220, 255, (int)(255 * k)));
+    } else {
+        static const char * const how[] = {
+            "Same Wi-Fi, or one on the other's phone hotspot: open PLAY TOGETHER on both and pick the other one here.",
+            "Far apart, on any Wi-Fi or phone data: one picks Host a game online and gives the other the code it shows.",
+        };
+        for (int i = 0; i < 2; i++)
+            y += draw_wrapped(how[i], 578, y, 18, 324, 4, RGBA(225, 225, 230, 255)) + 10;
+    }
     snprintf(t, sizeof(t), "This one: %s", player_name(player_current()));
     font_draw_fit(res.ui, t, 578, 380, 20, 324, RGBA(255, 236, 190, 255), ALIGN_LEFT);
     snprintf(t, sizeof(t), "Address: %s", p2p_is_open() ? me : "no network");
@@ -7414,7 +7434,10 @@ static void multi_screen(void)
         font_draw_fit(res.ui, mp_note, SCREEN_W / 2, 482, 18, 860, RGBA(255, 200, 150, 255), ALIGN_CENTER);
     static const char * help[] = {"btn_cross", "Connect", "btn_circle", "Back"};
     static const char * help_wait[] = {"btn_circle", "Stop"};
-    if (waiting)
+    static const char * help_room[] = {"btn_circle", "Leave the room"};
+    if (room)
+        help_bar(help_room, 2);
+    else if (waiting)
         help_bar(help_wait, 2);
     else
         help_bar(help, 4);
@@ -7464,13 +7487,18 @@ static void lobby_screen(void)
     }
     bool host = p2p_hosting();
     double start = mp_start_at();
-    enum { L_SONG, L_PART, L_DIFF, L_READY, L_SHARE, L_LEAVE, L_ROWS };
+    enum { L_SONG, L_MODE, L_PART, L_DIFF, L_READY, L_SHARE, L_LEAVE, L_ROWS };
     if (mp_active() && start <= 0) {
         if (repeat & BTN_UP)
             mp_row = (mp_row + L_ROWS - 1) % L_ROWS;
         if (repeat & BTN_DOWN)
             mp_row = (mp_row + 1) % L_ROWS;
         int lr = repeat & BTN_LEFT ? -1 : repeat & BTN_RIGHT ? 1 : 0;
+        if (lr && mp_row == L_MODE && host && !mp_am_ready()) {
+            mp_set_mode(mp_mode() + lr);
+            ui_sound(SND_UI_MOVE);
+        } else if (lr && mp_row == L_MODE && !host)
+            mp_say("The host chooses the mode");
         if (lr && s && !mp_am_ready()) {
             if (mp_row == L_PART)
                 mp_step_part(s, lr, &part, &diff);
@@ -7488,7 +7516,7 @@ static void lobby_screen(void)
                 mp_picking = true;
                 go(songs_count() ? S_SONGS : S_EMPTY);
                 return;
-            } else if (mp_row == L_READY || mp_row == L_PART || mp_row == L_DIFF) {
+            } else if (mp_row == L_READY || mp_row == L_PART || mp_row == L_DIFF || mp_row == L_MODE) {
                 if (!s)
                     mp_say(host ? "Pick a song first" : "Waiting for the song");
                 else
@@ -7520,6 +7548,9 @@ static void lobby_screen(void)
     if (start > 0 && plat_now_us() / 1e6 >= start && s) {
         int idx = songs_find(s->folder);
         game_versus(p2p_other());
+        game_versus_mode(mp_mode());
+        if (mp_mode() == 1)
+            game_battle(-1);            // (its rival is the other device's player: game_versus_mode)
         if (idx >= 0 && game_start(s, part, diff)) {
             sel = idx;
             mp_started();
@@ -7551,13 +7582,18 @@ static void lobby_screen(void)
     snprintf(t, sizeof(t), "With %s (%s)   %.0f ms", p2p_other(), p2p_other_device(), p2p_ping_ms());
     font_draw_fit(res.ui, t, SCREEN_W - 30, 30, 20, 420, RGBA(200, 220, 255, 255), ALIGN_RIGHT);
     panel(40, 96, 880, 380);
-    static const char * names[L_ROWS] = {"Song", "Your part", "Difficulty", "Ready", "Share songs", "Leave"};
+    static const char * names[L_ROWS] = {"Song", "Mode", "Your part", "Difficulty", "Ready", "Share songs", "Leave"};
+    static const char * const modes[3] = {"Versus", "Battle", "Co-op"};
+    static const char * const mode_how[3] = {
+        "Versus: a race, the higher score wins.",
+        "Battle: Star Power phrases become attacks thrown at the other player. Empty their meter to win.",
+        "Co-op: one band, one score. If one of you runs out of meter, the other carries you."};
     for (int i = 0; i < L_ROWS; i++) {
-        float y = 110 + i * 46;
+        float y = 106 + i * 39;
         bool on = i == mp_row;
-        gfx_rect(56, y, 848, 42, on ? RGBA(70, 58, 30, 255) : RGBA(0, 0, 0, 70));
-        tap_item(56, y, 848, 42, i - mp_row);
-        font_draw(res.ui, names[i], 72, y + 9, 22, on ? WHITE : RGBA(200, 200, 210, 255), ALIGN_LEFT);
+        gfx_rect(56, y, 848, 36, on ? RGBA(70, 58, 30, 255) : RGBA(0, 0, 0, 70));
+        tap_item(56, y, 848, 36, i - mp_row);
+        font_draw(res.ui, names[i], 72, y + 6, 22, on ? WHITE : RGBA(200, 200, 210, 255), ALIGN_LEFT);
         t[0] = 0;
         uint32_t c = RGBA(255, 236, 190, 255);
         if (i == L_SONG) {
@@ -7565,7 +7601,9 @@ static void lobby_screen(void)
                 snprintf(t, sizeof(t), "%s - %s", mp_song_name(), mp_song_artist());
             else
                 snprintf(t, sizeof(t), "%s", host ? "Choose one (X)" : "The other one's choosing...");
-        } else if (i == L_PART && s)
+        } else if (i == L_MODE)
+            snprintf(t, sizeof(t), host ? "<  %s  >" : "%s", modes[mp_mode()]);
+        else if (i == L_PART && s)
             snprintf(t, sizeof(t), "<  %s  >", part_name(part));
         else if (i == L_DIFF && s)
             snprintf(t, sizeof(t), "<  %s  >", diff_name(diff));
@@ -7573,8 +7611,9 @@ static void lobby_screen(void)
             snprintf(t, sizeof(t), "%s", mp_am_ready() ? "READY" : "not yet (X)");
             c = mp_am_ready() ? RGBA(130, 235, 130, 255) : c;
         }
-        font_draw_fit(res.ui, t, 888, y + 9, 22, 560, c, ALIGN_RIGHT);
+        font_draw_fit(res.ui, t, 888, y + 6, 22, 560, c, ALIGN_RIGHT);
     }
+    draw_wrapped(mode_how[mp_mode()], 72, 384, 17, 816, 2, RGBA(255, 222, 150, 255));
     // the other one, and the song on its way here
     int tp, td;
     mp_their_pick(&tp, &td);
@@ -7583,7 +7622,7 @@ static void lobby_screen(void)
         snprintf(them, sizeof(them), "%s: %s, %s%s", p2p_other(), part_name(tp), diff_name(td), mp_they_ready() ? ", READY" : "");
     else
         snprintf(them, sizeof(them), "%s is here", p2p_other());
-    font_draw_fit(res.ui, them, 72, 392, 20, 820, mp_they_ready() ? RGBA(130, 235, 130, 255) : RGBA(220, 220, 225, 255), ALIGN_LEFT);
+    font_draw_fit(res.ui, them, 72, 422, 20, 820, mp_they_ready() ? RGBA(130, 235, 130, 255) : RGBA(220, 220, 225, 255), ALIGN_LEFT);
     char in[96], out[96];
     int ip, op, q;
     if (mp_transfer(in, sizeof(in), &ip, out, sizeof(out), &op, &q)) {
@@ -7591,7 +7630,7 @@ static void lobby_screen(void)
             snprintf(t, sizeof(t), "Copying %s from %s: %d%%", in, p2p_other(), ip);
         else
             snprintf(t, sizeof(t), "Sending a song to %s: %d%%", p2p_other(), op);
-        font_draw_fit(res.ui, t, 72, 420, 20, 820, RGBA(150, 210, 255, 255), ALIGN_LEFT);
+        font_draw_fit(res.ui, t, 72, 446, 18, 820, RGBA(150, 210, 255, 255), ALIGN_LEFT);
     } else if (mp_song_name()[0] && !s)
         font_draw_fit(res.ui, "This one hasn't that song: asking for it...", 72, 420, 20, 820, RGBA(255, 210, 150, 255), ALIGN_LEFT);
     else if (host && s && !mp_they_have())
@@ -7730,11 +7769,20 @@ static void mp_frame(void)
             mp_sent_t = now_s;
             MpState st = {0};
             game_live(&st.score, &st.streak, &st.mult, &st.rock, &st.pct, &st.sp);
+            st.failed = game_failed_now();
             mp_send_state(&st);
         }
         const MpState * th = mp_their_state();
-        if (th)
+        if (th) {
             game_versus_update(th->score, th->streak, th->rock, th->pct, th->done);
+            game_versus_failed(th->failed);
+        }
+        // a battle's attacks: thrown from here, and from there
+        int a;
+        while ((a = game_battle_fired()) >= 0)
+            mp_send_attack(a);
+        while ((a = mp_attack_in()) >= 0)
+            game_battle_attack(a);
         // left the song some way other than its results (quit from the pause menu): the round's over
         if (screen != S_PLAY && screen != S_PAUSE && screen != S_RESUME && screen != S_RESULTS) {
             mp_round_over();

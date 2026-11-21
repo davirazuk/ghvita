@@ -320,6 +320,8 @@ static struct {
     double sp_until;                    // the rival's own Star Power: its points doubled till then
     int result;                         // 1 won, 2 lost
     unsigned seed;
+    bool net;                           // the rival's another device's player (PLAY TOGETHER): nothing simulated
+    int out[8], out_n;                  // attacks thrown at them, to send
 } battle;
 static void battle_fire(void);
 static void battle_land(int a);
@@ -331,7 +333,8 @@ static void battle_reset(void);
 static void battle_update(void);
 static void draw_battle(void);
 static struct {
-    bool on, done;
+    bool on, done, failed;
+    int mode;                           // 0 versus (the race), 1 battle (attacks), 2 co-op (a band: one score)
     char name[32];
     long score;
     int streak, pct;
@@ -3668,6 +3671,36 @@ void game_versus(const char * name)
     }
 }
 
+void game_versus_mode(int mode)
+{
+    versus.mode = mode;
+}
+
+int game_battle_fired(void)
+{
+    if (!battle.out_n)
+        return -1;
+    int a = battle.out[0];
+    memmove(battle.out, battle.out + 1, sizeof(int) * --battle.out_n);
+    return a;
+}
+
+void game_battle_attack(int a)
+{
+    if (battle.on && battle.net && a >= 0 && a < ATK_COUNT && battle.theirs_n < 3)
+        battle.theirs[battle.theirs_n++] = a;
+}
+
+bool game_failed_now(void)
+{
+    return G.failed;
+}
+
+void game_versus_failed(bool failed)
+{
+    versus.failed = failed;
+}
+
 void game_versus_update(int score, int streak, float rock, int pct, bool done)
 {
     versus.score = score;
@@ -3721,7 +3754,10 @@ Result game_result(void)
         snprintf(r.rival_name, sizeof(r.rival_name), "%s", battle.name);
     }
     if (versus.on) {
-        r.versus = (long)G.score > versus.score ? 1 : (long)G.score < versus.score ? 2 : 3;
+        // (a battle's knockout decides it: one out of the song lost; to the end, the scores do, a tie a draw)
+        bool knockout = versus.mode == 1 && battle.result && (G.failed || battle.rock <= 0);
+        r.versus = versus.mode == 2 ? 4 : knockout ? battle.result
+                   : (long)G.score > versus.score ? 1 : (long)G.score < versus.score ? 2 : 3;
         r.rival_score = (int)versus.score;
         r.rival_pct = versus.pct;
         snprintf(r.rival_name, sizeof(r.rival_name), "%.23s", versus.name);
@@ -3896,9 +3932,11 @@ static void rock_change(float d)
     G.rock += d;
     if (G.rock > 1)
         G.rock = 1;
+    // co-op: one out of the meter plays on while the other still has some (the band fails when both are out)
+    bool carried = versus.on && versus.mode == 2 && !versus.failed && versus.rock > 0.02f;
     if (G.rock <= 0) {
         G.rock = 0;
-        if ((!cfg.nofail || battle.on) && !G.autoplay && !practice.on) {
+        if ((!cfg.nofail || battle.on) && !G.autoplay && !practice.on && !carried) {
             G.failed = true;
             if (battle.on)
                 battle.result = 2;
@@ -6316,6 +6354,9 @@ static void battle_reset(void)
     battle.theirs_ready = 8;            // nothing thrown in the first seconds
     battle.broken_lane = -1;
     snprintf(battle.name, sizeof(battle.name), "%s", names[(int)(battle_rand() * 12) % 12]);
+    battle.net = versus.on && versus.mode == 1;
+    if (battle.net)
+        snprintf(battle.name, sizeof(battle.name), "%.23s", versus.name);
 }
 
 // how hard a note is for the rival's fingers: chords, fast runs, long streams and taps cost it
@@ -6361,6 +6402,17 @@ static void battle_fire(void)
         return;
     int a = battle.mine[0];
     memmove(battle.mine, battle.mine + 1, sizeof(int) * --battle.mine_n);
+    if (battle.net) {
+        // at the other device's player: sent, and it lands there
+        if (battle.out_n < 8)
+            battle.out[battle.out_n++] = a;
+        battle.thrown++;
+        char t[48];
+        snprintf(t, sizeof(t), "%s!", atk_names[a]);
+        popup_always(t);
+        sound_play(res.snd[SND_SP_DEPLOY], 0.9f, false);
+        return;
+    }
     static const float shake[ATK_COUNT] = {0.12f, 0.16f, 0.06f, 0.1f, 0.14f, 0.12f, 0.1f, 0.1f};
     static const float secs[ATK_COUNT] = {6, 5, 3, 7, 6, 7, 5, 6};
     battle.rival_hit = shake[a];
@@ -6428,7 +6480,20 @@ static void battle_land(int a)
 static void battle_update(void)
 {
     const Part * p = G.part;
-    while (battle.next < p->note_count && p->notes[battle.next].time / 1e6 <= G.t) {
+    if (battle.net) {
+        // the other device's player: their meter and score as they come (out of the song: beaten); what they throw
+        // lands here a second after its warning, one at a time
+        battle.rock = versus.failed ? 0 : versus.rock;
+        battle.score = versus.score;
+        battle.streak = versus.streak;
+        if (battle.theirs_n && !battle.warn_t && G.t >= battle.theirs_ready) {
+            battle.warn_atk = battle.theirs[0];
+            memmove(battle.theirs, battle.theirs + 1, sizeof(int) * --battle.theirs_n);
+            battle.warn_t = G.t + 1.0;
+            battle.theirs_ready = G.t + 2;
+        }
+    }
+    while (!battle.net && battle.next < p->note_count && p->notes[battle.next].time / 1e6 <= G.t) {
         int i = battle.next++;
         const Note * n = &p->notes[i];
         float chance = battle.skill - note_cost(i) + battle.form;
@@ -6474,7 +6539,7 @@ static void battle_update(void)
         battle_land(battle.warn_atk);
     }
     // the rival's throw: when the player is low, when a run is coming, or when it's sat on one too long
-    if (battle.theirs_n && !battle.warn_t && G.t >= battle.theirs_ready) {
+    if (!battle.net && battle.theirs_n && !battle.warn_t && G.t >= battle.theirs_ready) {
         bool finish = G.rock < 0.4f, run = notes_ahead(4) >= 6, bored = G.t >= battle.theirs_ready + 12;
         int pick = -1;
         for (int k = 0; k < battle.theirs_n && pick < 0; k++) {
@@ -6501,6 +6566,23 @@ static void draw_versus(void)
 {
     if (!versus.on || battle.on || G.view_mode)
         return;
+    if (versus.mode == 2) {
+        // a band: one score, and each one's meter (one out of it plays on while the other has some)
+        char t[64];
+        snprintf(t, sizeof(t), "BAND  %ld", (long)G.score + versus.score);
+        font_draw_shadow(res.ui, t, SCREEN_W / 2, 6, 22, RGBA(255, 230, 150, 255), ALIGN_CENTER);
+        const float w = 150, y = 34, h = 8;
+        for (int k = 0; k < 2; k++) {
+            float x = SCREEN_W / 2 + (k ? 12 : -12 - w), r = k ? versus.rock : G.rock;
+            r = r < 0 ? 0 : r > 1 ? 1 : r;
+            gfx_rect(x - 2, y - 2, w + 4, h + 4, RGBA(0, 0, 0, 200));
+            gfx_rect(x, y, w * r, h, r < 0.25f ? RGBA(235, 70, 55, 255) : r < 0.5f ? RGBA(240, 200, 60, 255)
+                                                                         : RGBA(90, 220, 110, 255));
+            font_draw_fit(res.ui, k ? versus.name : "YOU", k ? x + w + 8 : x - 8, y - 6, 16, 140,
+                          k ? RGBA(255, 200, 160, 255) : RGBA(150, 215, 255, 255), k ? ALIGN_LEFT : ALIGN_RIGHT);
+        }
+        return;
+    }
     const float w = 360, x = (SCREEN_W - w) / 2, y = 12, h = 12;
     long mine = (long)G.score;
     float split = mine + versus.score > 0 ? (float)mine / (float)(mine + versus.score) : 0.5f;

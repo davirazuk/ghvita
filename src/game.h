@@ -29,7 +29,7 @@ typedef struct {
     int rival_score;
     int attacks_thrown, attacks_taken, rival_pct, rival_level;
     char rival_name[24];
-    int versus;                 // against another device: 0 no, 1 won, 2 lost, 3 level
+    int versus;                 // with another device: 0 no, 1 won, 2 lost, 3 level, 4 co-op (a band)
     int perfects, greats, goods;    // the hits by timing: within 25 ms, 50 ms, the rest of the window
     int accuracy_x10;               // Perfect 100%, Great 70%, Good 40%, a miss 0, over every note: in tenths of a percent
     char rank[3];                   // S+ S A B C D, F when failed
@@ -43,6 +43,11 @@ double game_time(void);                         // where the song is, seconds
 // against another device (main.c, mp.h): the next game_start shows them across the top (NULL: nobody); their latest
 void game_versus(const char * name);
 void game_versus_update(int score, int streak, float rock, int pct, bool done);
+void game_versus_mode(int mode);        // 0 versus (a race of scores), 1 battle (Star Power phrases are attacks), 2 co-op
+void game_versus_failed(bool failed);   // the other one's out of the song
+int game_battle_fired(void);            // an attack thrown at the other device's player, to send (-1 none)
+void game_battle_attack(int a);         // an attack from them: it lands here a second after its warning
+bool game_failed_now(void);
 // how it's going now: for the other device
 void game_live(int * score, int * streak, int * mult, float * rock, int * pct, bool * sp);
 // the venue the next songs play in (the tour's), NULL to leave it to the options

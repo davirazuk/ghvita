@@ -1416,11 +1416,24 @@ def bake(path, work, tex_dir, alt=False):
         ref = next((f for f in range(len(skins)) if not (alt is False and f >= JUMP) and
                     np.abs(skins[f][N['Bone_Mic_Stand']][:3, :3]).sum() > 1e-6), None)
         if ref is not None:
+            # and standing straight: the frame it's taken from may have it tilted (one singer's loop leans hers 41
+            # degrees, its top off to the side, and that lean stood all song). Turned about its foot till its post is
+            # upright, facing as it faced
+            S0 = skins[ref][N['Bone_Mic_Stand']]
+            up = S0[:3, :3] @ np.array([0, 1.0, 0])
+            foot = (S0 @ joint)[:3]
+            C = np.eye(4)
+            C[:3, :3] = rotation_between(up / np.linalg.norm(up), np.array([0, 1.0, 0]))
+            C[:3, 3] = foot - C[:3, :3] @ foot
+            lean = np.degrees(np.arccos(np.clip(up[1] / np.linalg.norm(up), -1, 1)))
+            if lean > 1:
+                print(name, 'mic stand stood up from %.0f degrees' % lean)
+            keep = {b: skins[ref][b].copy() for b in sb}     # (the reference itself is among the frames changed)
             for f, sk in enumerate(skins):
                 if alt is False and f >= JUMP:
                     continue
                 for b in sb:
-                    sk[b] = skins[ref][b].copy()
+                    sk[b] = C @ keep[b] if lean > 1 else keep[b].copy()
     c = np.mean(centre, axis=0) if centre else np.zeros(3)
     if THREED:
         layers = None

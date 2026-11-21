@@ -12,7 +12,7 @@
 
 void p2p_set_songs(int n);
 
-enum { MT_LOBBY = 10, MT_PICK, MT_READY, MT_START, MT_STATE, MT_OVER,
+enum { MT_LOBBY = 10, MT_PICK, MT_READY, MT_START, MT_STATE, MT_OVER, MT_MODE, MT_ATTACK,
        MT_LIST_REQ = 20, MT_LIST, MT_LIST_END, MT_GET, MT_SONG_BEGIN, MT_FILE_BEGIN, MT_FILE_DATA, MT_FILE_END, MT_SONG_END,
        MT_SONG_FAIL };
 #define CHUNK 1180              // a file's bytes a message
@@ -28,6 +28,8 @@ static struct {
     double start_at;
     MpState theirs;
     bool theirs_in;
+    int mode;                   // the host's choice: 0 versus, 1 battle, 2 co-op
+    int atk_in[8], atk_n;       // attacks from them, to land here
     // the other's list
     MpSong * list;
     int list_n, list_cap;
@@ -419,6 +421,14 @@ static void got(int type, const uint8_t * b, int n)
         M.me_ready = M.they_ready = false;
         M.start_at = 0;
         break;
+    case MT_MODE:
+        if (n >= 1 && !p2p_hosting())
+            M.mode = b[0] % 3;
+        break;
+    case MT_ATTACK:
+        if (n >= 1 && M.atk_n < 8)
+            M.atk_in[M.atk_n++] = b[0];
+        break;
     case MT_LIST_REQ:
         M.list_out = 0;
         break;
@@ -482,6 +492,10 @@ void mp_poll(void)
         if (st == P2P_CONNECTED) {
             M.my_part = M.my_part < 0 ? 0 : M.my_part;
             send_pick();
+            if (p2p_hosting()) {
+                uint8_t m = (uint8_t)M.mode;
+                p2p_send(MT_MODE, &m, 1);
+            }
         }
         M.was = st;
     }
@@ -582,6 +596,7 @@ void mp_started(void)
 {
     M.start_at = -1;                // used: no start again till the next round
     M.theirs_in = false;
+    M.atk_n = 0;
 }
 
 void mp_send_state(const MpState * s)
@@ -657,4 +672,34 @@ bool mp_transfer(char * in, int in_size, int * in_pct, char * out, int out_size,
 int mp_got(void)
 {
     return M.got;
+}
+
+void mp_set_mode(int mode)
+{
+    if (!p2p_hosting() && mp_active())
+        return;                         // (the host chooses)
+    M.mode = (mode % 3 + 3) % 3;
+    uint8_t m = (uint8_t)M.mode;
+    if (mp_active())
+        p2p_send(MT_MODE, &m, 1);
+}
+
+int mp_mode(void)
+{
+    return M.mode;
+}
+
+void mp_send_attack(int a)
+{
+    uint8_t m = (uint8_t)a;
+    p2p_send(MT_ATTACK, &m, 1);
+}
+
+int mp_attack_in(void)
+{
+    if (!M.atk_n)
+        return -1;
+    int a = M.atk_in[0];
+    memmove(M.atk_in, M.atk_in + 1, sizeof(int) * --M.atk_n);
+    return a;
 }

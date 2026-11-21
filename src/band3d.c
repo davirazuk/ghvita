@@ -197,6 +197,21 @@ static long read_parts(B3Mesh * mesh, int nparts, int nbones, const uint8_t * d,
             snprintf(path, sizeof(path), "%sband3d/tex/%s.png", plat_asset_dir(), tex);
             p->tex = tex_load(path, (mipmaps ? TEX_MIPMAP : 0) | (c[2] ? TEX_REPEAT : 0));
             gfx_load_hair(0, NULL, 0, false);
+            // a vertex's own alpha is World Tour's for its hair cards' ends; on clothes and skin it means something else
+            // there, and here it made them vanish (a singer's trousers, so her legs were gone): opaque off the hair
+            if (p->tex && !all)
+                for (int k = 0; k < p->vc; k++) {
+                    if (p->v[k].w[3] == 255)
+                        continue;
+                    float u = p->v[k].uv[0] - floorf(p->v[k].uv[0]), v = p->v[k].uv[1] - floorf(p->v[k].uv[1]);
+                    float x = u * p->tex->w, y = v * p->tex->h;
+                    bool hair = false;
+                    for (int r = 0; r < nr && !hair; r++)
+                        hair = x >= rects[r * 4] && x < rects[r * 4] + rects[r * 4 + 2] && y >= rects[r * 4 + 1] &&
+                               y < rects[r * 4 + 1] + rects[r * 4 + 3];
+                    if (!hair)
+                        p->v[k].w[3] = 255;
+                }
         }
         mesh->total_v += p->vc;
     }

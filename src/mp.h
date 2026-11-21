@@ -30,6 +30,12 @@ Song * mp_song(void);                   // this device's copy of it, NULL while 
 void mp_pick(int part, int diff);       // this one's part and difficulty
 void mp_their_pick(int * part, int * diff);
 void mp_ready(bool on);
+// how the two play: 0 versus (a race of scores), 1 battle (Star Power phrases thrown as attacks), 2 co-op (a band, one
+// score; out of the meter plays on while the other has some). The host chooses
+void mp_set_mode(int mode);
+int mp_mode(void);
+void mp_send_attack(int a);
+int mp_attack_in(void);                 // an attack from them (-1 none)
 bool mp_am_ready(void);
 bool mp_they_ready(void);
 bool mp_they_have(void);
