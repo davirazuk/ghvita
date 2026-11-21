@@ -600,10 +600,12 @@ static void member_spot(int r, float m[3])
     m[0] += b->walk * m[2];
     m[1] += b->front * 26;
     m[2] *= 1 + b->front * 0.2f;
-    // wherever they wander, out of the way of the board and the rock meter, but never shoved far from where they stand
-    // in the picture: a venue whose mark is well inside those had them standing in the air beyond the stage's edge
+    // wherever they wander, out of the way of the board and the rock meter. In the venue's other angles never shoved
+    // far from where they stand in the picture: one whose mark was well inside those had them standing in the air
+    // beyond the stage's edge. (The main angle looks along the stage: a mark below the picture's bottom, as many are,
+    // is brought up onto its floor)
     m[0] = r == 3 ? fminf(fmaxf(m[0], 222), 262) : fminf(fmaxf(m[0], 738), 858);
-    {
+    if (G.shot_marks[0] && G.marks != G.shot_marks[0]) {
         float mx = (r == 3 ? G.marks[r][0] + 34 : G.marks[r][0]) + b->walk * m[2], my = G.marks[r][1] + b->front * 26;
         m[0] = fminf(fmaxf(m[0], mx - 60), mx + 60);
         m[1] = fmaxf(m[1], my - 40);
