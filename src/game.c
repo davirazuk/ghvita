@@ -3602,6 +3602,11 @@ static float star_progress(int * stars)
     return (float)(f < 0 ? 0 : f > 1 ? 1 : f);
 }
 
+double game_time(void)
+{
+    return G.t;
+}
+
 float game_song_speed(void)
 {
     return G.song_speed > 0 ? G.song_speed : 1;

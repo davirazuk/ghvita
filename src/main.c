@@ -7338,7 +7338,39 @@ int main(void)
 #endif   // the drawn pads are a phone's: a Vita's screen plays its cups as it always did
         int drawn = screen;
         plat_menu_pass(0);
+#ifndef __vita__
+        struct timespec prof_ts;
+        clock_gettime(CLOCK_MONOTONIC, &prof_ts);
+        double prof_t0 = prof_ts.tv_sec * 1e6 + prof_ts.tv_nsec / 1e3;
+#endif
         run_screen();
+#ifndef __vita__
+        if (getenv("GHV_PROFILE") && screen == S_PLAY) {
+            // tests: the CPU a song's frame takes (its GL calls included), and the band's posing on the worker
+            extern volatile double band3d_pose_us;
+            extern volatile int band3d_pose_n, band3d_pose_verts;
+            static double sum, worst;
+            static int n, calls, calls_worst;
+            int dc = gfx_draw_calls();
+            calls += dc;
+            calls_worst = dc > calls_worst ? dc : calls_worst;
+            clock_gettime(CLOCK_MONOTONIC, &prof_ts);
+            double us = prof_ts.tv_sec * 1e6 + prof_ts.tv_nsec / 1e3 - prof_t0;
+            if (us > 12000)
+                plat_log("profile: slow frame %.1f ms at %.2f s", us / 1000, game_time());
+            sum += us;
+            worst = us > worst ? us : worst;
+            if (++n == 600) {
+                plat_log("profile: frame %.2f ms (worst %.2f), %d draw calls (worst %d), posing %d a frame, %.2f ms each, %d verts each",
+                         sum / n / 1000, worst / 1000, calls / n, calls_worst, band3d_pose_n / n,
+                         band3d_pose_n ? band3d_pose_us / band3d_pose_n / 1000 : 0, band3d_pose_n ? band3d_pose_verts / band3d_pose_n : 0);
+                sum = worst = 0;
+                n = calls = calls_worst = 0;
+                band3d_pose_us = 0;
+                band3d_pose_n = band3d_pose_verts = 0;
+            }
+        }
+#endif
         if (portrait_menu && drawn == screen) {
             // held upright: the menu's panel drawn again under its list (its second view), nothing pressed this time
             menu_focus(screen_frames < 2);

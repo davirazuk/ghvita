@@ -348,8 +348,8 @@ void plat_thread(const char * name, int (*fn)(void * arg), void * arg, int core)
     // 64 is the most urgent a program's thread can be, 191 the least; the game's own thread runs at 160. A background
     // thread at 120 outranked it: a download converting audio could take the game's core from it (the lag while
     // downloading). Now below everything, and the game's thread is kept on core 0, which no worker uses
-    int prio = core == PLAT_BACKGROUND ? 185 : 80, cores = core == PLAT_BACKGROUND ? 0x60000 : core == 1 ? 0x20000
-                                                                                                         : 0x40000;
+    int prio = core == PLAT_BACKGROUND ? 185 : core == PLAT_SIDE ? 96 : 80,
+        cores = core == PLAT_BACKGROUND ? 0x60000 : core == 1 ? 0x20000 : 0x40000;
     SceUID th = sceKernelCreateThread(name, thread_entry, prio, 0x40000, 0, cores, NULL);
     sceKernelStartThread(th, sizeof(ts), &ts);
 }
@@ -580,6 +580,12 @@ void plat_song_keys(bool on)
 float plat_below(void)
 {
     return 0;
+}
+
+void * plat_gl_proc(const char * name)
+{
+    (void)name;
+    return NULL;
 }
 
 void plat_portrait_full(bool on)

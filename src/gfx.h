@@ -64,6 +64,12 @@ void gfx_tex(Tex * t);
 void gfx_quad(const float p[4][3], const float uv[4][2], const uint32_t c[4]);
 void gfx_flush(void);
 int gfx_draw_calls(void);
+// buffers the GPU keeps (what never changes, handed over once); 0: none could be made (draw from the arrays)
+unsigned gfx_vbo(const void * data, size_t bytes, bool index);
+void gfx_vbo_update(unsigned id, const void * data, size_t bytes);
+void gfx_vbo_free(unsigned id);         // any thread: deleted at the next frame
+void gfx_mesh_vbo(const float mv[16], Tex * t, unsigned xyz_b, const float * xyz, unsigned uv_b, const float * uv,
+                  int uv_stride, unsigned col_b, const uint32_t * col, unsigned idx_b, const uint16_t * idx, int n);
 
 // 2D helpers
 void gfx_sprite(const Sprite * s, float x, float y, float w, float h, uint32_t color);

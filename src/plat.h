@@ -44,6 +44,7 @@ void plat_view(int * x, int * y, int * w, int * h, int * full_w, int * full_h);
 // a phone held upright: the screen under the picture, in the game's units (960 across); 0 otherwise. A finger there
 // comes in with y past SCREEN_H
 float plat_below(void);
+void * plat_gl_proc(const char * name);   // an OpenGL function past 1.1 by name (NULL: none)
 void plat_portrait_song(bool on);    // a song's own portrait layout (on) or a menu's (the whole picture)
 void plat_portrait_full(bool on);    // held upright in a song: the whole picture's width across the top (the vocals)
 // a menu held upright: the stretch of the picture worth seeing (x0 and width, in its 960), shown as big as fits over
@@ -84,6 +85,8 @@ void plat_mic_close(int port);
 // a worker thread (on the Vita: on core 1 or 2, below the audio thread's priority; core 0 runs the game), or with
 // PLAT_BACKGROUND a thread below all of those (the downloader)
 #define PLAT_BACKGROUND 0
+// PLAT_SIDE: core 2 just below the audio decoder there (the band's second posing worker)
+#define PLAT_SIDE 3
 void plat_thread(const char * name, int (*fn)(void * arg), void * arg, int core);
 void plat_sleep_us(int us);
 // 0: light (menus), 1: full speed (a song)

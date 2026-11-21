@@ -192,6 +192,11 @@ void plat_view(int * x, int * y, int * w, int * h, int * full_w, int * full_h)
 
 // held upright, a song's screen is laid out for it (the picture's middle bigger, the pads under it); a menu shows the
 // whole picture in the middle of the screen
+void * plat_gl_proc(const char * name)
+{
+    return SDL_GL_GetProcAddress(name);
+}
+
 void plat_portrait_song(bool on)
 {
     portrait_song = on;

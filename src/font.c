@@ -17,7 +17,11 @@ struct Font {
     int size, line, ascent;
     int count;
     Glyph * glyphs;
+    const Glyph * latin[256];   // the first 256 code points looked up once (fallbacks included): text is drawn every
+                                // frame, and a search per letter, twice a string, was most of the main thread's time
 };
+
+static void font_index(Font * f);
 
 Font * font_load(const char * png, const char * fnt)
 {
@@ -44,6 +48,7 @@ Font * font_load(const char * png, const char * fnt)
         font->count = 0;
     fclose(f);
     font->tex = tex_load(png, TEX_MIPMAP);
+    font_index(font);
     return font;
 }
 
@@ -80,8 +85,26 @@ static const Glyph * find(const Font * f, uint32_t cp)
     return NULL;
 }
 
+static const Glyph * glyph_slow(const Font * f, uint32_t cp)
+{
+    const Glyph * g = find(f, cp);
+    if (!g && cp >= 'a' && cp <= 'z')
+        g = find(f, cp - 32);           // a capitals-only face
+    if (!g)
+        g = find(f, '?');
+    return g;
+}
+
+static void font_index(Font * f)
+{
+    for (uint32_t c = 0; c < 256; c++)
+        f->latin[c] = glyph_slow(f, c);
+}
+
 static const Glyph * glyph(const Font * f, uint32_t cp)
 {
+    if (cp < 256)
+        return f->latin[cp];
     const Glyph * g = find(f, cp);
     if (!g && cp >= 'a' && cp <= 'z')
         g = find(f, cp - 32);           // a capitals-only face

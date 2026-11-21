@@ -22,6 +22,7 @@
 #endif
 #include "gfx.h"
 #include "plat.h"
+#include <pthread.h>
 #define STBI_ONLY_PNG
 #define STBI_ONLY_JPEG
 #define STB_IMAGE_IMPLEMENTATION
@@ -42,6 +43,107 @@ static Tex * current_tex;
 static Tex * white;
 static int current_blend = -1;
 static int draw_calls;
+
+// ---------------------------------------------------------------------------------------- buffers the GPU keeps
+// What never changes (a venue's shape, a model's texture places and triangles) handed over once instead of every
+// frame: vitaGL and a phone's driver copy client arrays at every draw. Where buffers can't be had (an old driver),
+// every draw gives its arrays as before
+#ifndef GL_ARRAY_BUFFER
+#define GL_ARRAY_BUFFER 0x8892
+#define GL_ELEMENT_ARRAY_BUFFER 0x8893
+#define GL_STATIC_DRAW 0x88E4
+#define GL_DYNAMIC_DRAW 0x88E8
+#endif
+#if defined(__vita__) || defined(GHV_ES)
+#define vbo_gen glGenBuffers
+#define vbo_bind glBindBuffer
+#define vbo_data glBufferData
+#define vbo_sub glBufferSubData
+#define vbo_del glDeleteBuffers
+static bool vbo_ready(void)
+{
+    return true;
+}
+#else
+#ifndef APIENTRY
+#define APIENTRY
+#endif
+typedef void (APIENTRY * VboGen)(GLsizei, GLuint *);
+typedef void (APIENTRY * VboBind)(GLenum, GLuint);
+typedef void (APIENTRY * VboData)(GLenum, ptrdiff_t, const void *, GLenum);
+typedef void (APIENTRY * VboSub)(GLenum, ptrdiff_t, ptrdiff_t, const void *);
+typedef void (APIENTRY * VboDel)(GLsizei, const GLuint *);
+static VboGen vbo_gen;
+static VboBind vbo_bind;
+static VboData vbo_data;
+static VboSub vbo_sub;
+static VboDel vbo_del;
+static bool vbo_ready(void)
+{
+    static int tried;
+    if (!tried) {
+        tried = 1;
+        if (!getenv("GHV_NO_VBO")) {
+            vbo_gen = (VboGen)plat_gl_proc("glGenBuffers");
+            vbo_bind = (VboBind)plat_gl_proc("glBindBuffer");
+            vbo_data = (VboData)plat_gl_proc("glBufferData");
+            vbo_sub = (VboSub)plat_gl_proc("glBufferSubData");
+            vbo_del = (VboDel)plat_gl_proc("glDeleteBuffers");
+        }
+    }
+    return vbo_gen && vbo_bind && vbo_data && vbo_sub && vbo_del;
+}
+#endif
+static pthread_mutex_t vbo_lock = PTHREAD_MUTEX_INITIALIZER;
+static unsigned vbo_dead[512];          // let go of off the drawing thread (a model freed elsewhere): deleted at the next frame
+static int vbo_dead_n;
+
+unsigned gfx_vbo(const void * data, size_t bytes, bool index)
+{
+    if (!data || !bytes || !vbo_ready())
+        return 0;
+    GLuint id = 0;
+    vbo_gen(1, &id);
+    if (!id)
+        return 0;
+    GLenum target = index ? GL_ELEMENT_ARRAY_BUFFER : GL_ARRAY_BUFFER;
+    vbo_bind(target, id);
+    vbo_data(target, (ptrdiff_t)bytes, data, GL_STATIC_DRAW);
+    vbo_bind(target, 0);
+    return id;
+}
+
+void gfx_vbo_update(unsigned id, const void * data, size_t bytes)
+{
+    if (!id || !vbo_ready())
+        return;
+    vbo_bind(GL_ARRAY_BUFFER, id);
+    vbo_sub(GL_ARRAY_BUFFER, 0, (ptrdiff_t)bytes, data);
+    vbo_bind(GL_ARRAY_BUFFER, 0);
+}
+
+void gfx_vbo_free(unsigned id)
+{
+    if (!id)
+        return;
+    pthread_mutex_lock(&vbo_lock);
+    if (vbo_dead_n < 512)
+        vbo_dead[vbo_dead_n++] = id;
+    pthread_mutex_unlock(&vbo_lock);
+}
+
+static void vbo_reap(void)
+{
+    pthread_mutex_lock(&vbo_lock);
+    if (vbo_dead_n && vbo_ready()) {
+        GLuint ids[512];
+        for (int i = 0; i < vbo_dead_n; i++)
+            ids[i] = vbo_dead[i];
+        vbo_del(vbo_dead_n, ids);
+    }
+    vbo_dead_n = 0;
+    pthread_mutex_unlock(&vbo_lock);
+}
 
 void gfx_init(void)
 {
@@ -562,6 +664,7 @@ Sprite sprite_whole(Tex * t)
 void gfx_begin(float r, float g, float b)
 {
     draw_calls = 0;
+    vbo_reap();
 #ifdef __vita__
     glViewport(0, 0, SCREEN_W, SCREEN_H);
     glClearColor(r, g, b, 1);
@@ -811,6 +914,39 @@ void gfx_mesh_depth(bool test)
 }
 
 // the same with a modelview matrix (column-major) taking xyz onto the screen
+// a mesh whose arrays are in buffers where it has them (an id, 0: the pointer instead)
+void gfx_mesh_vbo(const float mv[16], Tex * t, unsigned xyz_b, const float * xyz, unsigned uv_b, const float * uv,
+                  int uv_stride, unsigned col_b, const uint32_t * col, unsigned idx_b, const uint16_t * idx, int n)
+{
+    if (!(xyz_b | uv_b | col_b | idx_b) || !vbo_ready()) {
+        gfx_mesh_xf(mv, t, xyz, uv, uv_stride, col, idx, n);
+        return;
+    }
+#ifndef __vita__
+    static int skip = -1;
+    if (skip < 0)
+        skip = getenv("GHV_NO_MESH") != NULL;
+    if (skip)
+        return;
+#endif
+    glMatrixMode(GL_MODELVIEW);
+    glLoadMatrixf(mv);
+    glBindTexture(GL_TEXTURE_2D, (t ? t : white)->id);
+    vbo_bind(GL_ARRAY_BUFFER, xyz_b);
+    glVertexPointer(3, GL_FLOAT, 12, xyz_b ? NULL : xyz);
+    vbo_bind(GL_ARRAY_BUFFER, uv_b);
+    glTexCoordPointer(2, GL_FLOAT, uv_stride, uv_b ? NULL : uv);
+    vbo_bind(GL_ARRAY_BUFFER, col_b);
+    glColorPointer(4, GL_UNSIGNED_BYTE, 4, col_b ? NULL : col);
+    vbo_bind(GL_ARRAY_BUFFER, 0);
+    vbo_bind(GL_ELEMENT_ARRAY_BUFFER, idx_b);
+    glDrawElements(GL_TRIANGLES, n, GL_UNSIGNED_SHORT, idx_b ? NULL : idx);
+    vbo_bind(GL_ELEMENT_ARRAY_BUFFER, 0);
+    draw_calls++;
+    current_tex = NULL;
+    glLoadIdentity();
+}
+
 void gfx_mesh_xf(const float mv[16], Tex * t, const float * xyz, const float * uv, int uv_stride, const uint32_t * col,
                  const uint16_t * idx, int n)
 {

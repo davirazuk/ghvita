@@ -14,6 +14,7 @@
 // camera is all in the matrix the GPU is given at the draw, so a cut or a camera move is never a frame behind the
 // picture it's drawn over.
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -34,6 +35,8 @@ typedef struct {
     B3Vert * v;
     float * uv;                 // the texture places packed tight (vitaGL copies what it's given every draw)
     uint16_t * idx;
+    unsigned vb_uv, vb_idx;     // the two in buffers the GPU keeps (0: not yet, or none to be had)
+    bool vb_tried;
 } B3Part;
 
 typedef struct {
@@ -204,6 +207,8 @@ static void free_mesh(B3Mesh * mesh)
 {
     for (int i = 0; mesh->parts && i < mesh->nparts; i++) {
         tex_free(mesh->parts[i].tex);
+        gfx_vbo_free(mesh->parts[i].vb_uv);
+        gfx_vbo_free(mesh->parts[i].vb_idx);
         free(mesh->parts[i].v);
         free(mesh->parts[i].uv);
         free(mesh->parts[i].idx);
@@ -573,9 +578,32 @@ typedef struct {
     float M[256][12], LS[256][12];
     uint8_t layered[256];
 } Scratch;
-static Scratch scratch_main, scratch_worker;    // pose_model runs on two threads: each its own
+static Scratch scratch_main, scratch_worker[2];    // pose_model runs on three threads: each its own
+
+// tests (GHV_PROFILE): how long posing takes, summed
+volatile double band3d_pose_us;
+volatile int band3d_pose_n, band3d_pose_verts;
+
+static void pose_model_inner(Band3D * m, const Band3DDraw * d, int buf, Scratch * sc);
+
+#include <time.h>
+static double real_us(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec * 1e6 + ts.tv_nsec / 1e3;
+}
 
 static void pose_model(Band3D * m, const Band3DDraw * d, int buf, Scratch * sc)
+{
+    double t0 = real_us();
+    pose_model_inner(m, d, buf, sc);
+    __atomic_add_fetch(&band3d_pose_n, 1, __ATOMIC_RELAXED);
+    __atomic_add_fetch(&band3d_pose_verts, m->lod[m->posed_lod[buf]].total_v, __ATOMIC_RELAXED);
+    band3d_pose_us += real_us() - t0;        // (a rough sum: two threads may add at once)
+}
+
+static void pose_model_inner(Band3D * m, const Band3DDraw * d, int buf, Scratch * sc)
 {
     float (*M)[12] = sc->M, (*LS)[12] = sc->LS;
     uint8_t * layered = sc->layered;
@@ -770,18 +798,21 @@ typedef struct {
 static Job jobs[4];
 static bool worker_on;
 
+// two workers share the band (a member each at a time, claimed: 1 asked -> 3 being posed -> 2 done): one posing all
+// four fell behind on the Vita, and the band moved in jerks
 static int worker(void * arg)
 {
-    (void)arg;
+    int me = (int)(intptr_t)arg;
     uint64_t spent = 0;
     int posed = 0, verts = 0;
     for (;;) {
         bool did = false;
-        for (int i = 0; i < 4; i++)
-            if (__atomic_load_n(&jobs[i].state, __ATOMIC_ACQUIRE) == 1) {
+        for (int i = 0; i < 4; i++) {
+            int expect = 1;
+            if (__atomic_compare_exchange_n(&jobs[i].state, &expect, 3, false, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) {
                 Band3D * m = jobs[i].m;
                 uint64_t t0 = (uint64_t)plat_now_us();
-                pose_model(m, &jobs[i].d, m->front ^ 1, &scratch_worker);
+                pose_model(m, &jobs[i].d, m->front ^ 1, &scratch_worker[me]);
                 spent += (uint64_t)plat_now_us() - t0;
                 verts += m->lod[m->posed_lod[m->front ^ 1]].total_v;
                 if (++posed == 3000) {
@@ -793,6 +824,7 @@ static int worker(void * arg)
                 __atomic_store_n(&jobs[i].state, 2, __ATOMIC_RELEASE);
                 did = true;
             }
+        }
         if (!did)
             plat_sleep_us(1000);
     }
@@ -804,7 +836,7 @@ void band3d_release(Band3D * m)
 {
     if (!m || m->job < 0)
         return;
-    while (__atomic_load_n(&jobs[m->job].state, __ATOMIC_ACQUIRE) == 1)
+    for (int st; (st = __atomic_load_n(&jobs[m->job].state, __ATOMIC_ACQUIRE)) == 1 || st == 3;)
         plat_sleep_us(200);
     __atomic_store_n(&jobs[m->job].state, 0, __ATOMIC_RELEASE);
     jobs[m->job].m = NULL;
@@ -837,7 +869,8 @@ void band3d_draw(Band3D * m, const Band3DDraw * d)
             return;
     if (!worker_on) {
         worker_on = true;
-        plat_thread("band3d", worker, NULL, 1);
+        plat_thread("band3d", worker, (void *)(intptr_t)0, 1);
+        plat_thread("band3d2", worker, (void *)(intptr_t)1, PLAT_SIDE);
     }
     // the worker's last posing to the front, and this frame's asked for (drawn next frame: a frame late, unseen)
     if (m->job >= 0 && __atomic_load_n(&jobs[m->job].state, __ATOMIC_ACQUIRE) == 2) {
@@ -867,8 +900,13 @@ void band3d_draw(Band3D * m, const Band3DDraw * d)
     const B3Mesh * mesh = &m->lod[m->posed_lod[m->front]];
     size_t at = 0;
     for (int pi = 0; pi < mesh->nparts; pi++) {
-        const B3Part * p = &mesh->parts[pi];
-        gfx_mesh_xf(mv, p->tex, m->pose[m->front] + at * 3, p->uv, 8, m->col[m->front] + at, p->idx, p->tc * 3);
+        B3Part * p = &mesh->parts[pi];
+        if (!p->vb_tried) {
+            p->vb_tried = true;
+            p->vb_uv = gfx_vbo(p->uv, (size_t)p->vc * 8, false);
+            p->vb_idx = gfx_vbo(p->idx, (size_t)p->tc * 6, true);
+        }
+        gfx_mesh_vbo(mv, p->tex, 0, m->pose[m->front] + at * 3, p->vb_uv, p->uv, 8, 0, m->col[m->front] + at, p->vb_idx, p->idx, p->tc * 3);
         at += (size_t)p->vc;
     }
     if (!d->far) {
@@ -879,7 +917,7 @@ void band3d_draw(Band3D * m, const Band3DDraw * d)
         at = 0;
         for (int pi = 0; pi < mesh->nparts; pi++) {
             const B3Part * p = &mesh->parts[pi];
-            gfx_mesh_xf(mv, p->tex, m->pose[m->front] + at * 3, p->uv, 8, m->col[m->front] + at, p->idx, p->tc * 3);
+            gfx_mesh_vbo(mv, p->tex, 0, m->pose[m->front] + at * 3, p->vb_uv, p->uv, 8, 0, m->col[m->front] + at, p->vb_idx, p->idx, p->tc * 3);
             at += (size_t)p->vc;
         }
         gfx_mesh_state(true, 0.45f);
@@ -918,6 +956,8 @@ typedef struct {
     uint32_t * col;
     uint16_t * idx;
     float lo[3], hi[3];         // its box: a line that misses it misses its triangles
+    unsigned vb_xyz, vb_uv, vb_col, vb_idx;     // in buffers the GPU keeps (its colours renewed with the show's)
+    bool vb_tried, vb_col_old;
 } V3Part;
 
 struct Venue3D {
@@ -933,6 +973,10 @@ void venue3d_free(Venue3D * v)
         return;
     for (int i = 0; v->parts && i < v->nparts; i++) {
         tex_free(v->parts[i].tex);
+        gfx_vbo_free(v->parts[i].vb_xyz);
+        gfx_vbo_free(v->parts[i].vb_uv);
+        gfx_vbo_free(v->parts[i].vb_col);
+        gfx_vbo_free(v->parts[i].vb_idx);
         free(v->parts[i].xyz);
         free(v->parts[i].uv);
         free(v->parts[i].light);
@@ -1061,6 +1105,29 @@ const float * venue3d_mark(const Venue3D * v, int role)
 
 // the venue through a camera: cam->pos is where the stage's origin (the floor under the drummer) is from what the
 // camera looks at. Writes the depth: the band drawn after it stands in it
+// whether a box (the part's own axes) is wholly outside the picture through mv: every corner past the same edge, or
+// every one behind the lens. Any doubt: it's drawn
+static bool off_screen(const float mv[16], const float lo[3], const float hi[3])
+{
+    int left = 0, right = 0, up = 0, down = 0, behind = 0;
+    for (int c = 0; c < 8; c++) {
+        float x = c & 1 ? hi[0] : lo[0], y = c & 2 ? hi[1] : lo[1], z = c & 4 ? hi[2] : lo[2];
+        float X = mv[0] * x + mv[4] * y + mv[8] * z + mv[12];
+        float Y = mv[1] * x + mv[5] * y + mv[9] * z + mv[13];
+        float W = mv[3] * x + mv[7] * y + mv[11] * z + mv[15];
+        if (W <= 0.001f) {
+            behind++;
+            continue;
+        }
+        float sx = X / W, sy = Y / W;
+        left += sx < -40;
+        right += sx > SCREEN_W + 40;
+        up += sy < -40;
+        down += sy > SCREEN_H + 40;
+    }
+    return behind == 8 || (behind == 0 && (left == 8 || right == 8 || up == 8 || down == 8));
+}
+
 void venue3d_draw(Venue3D * v, const Band3DDraw * cam, const float tint[3])
 {
     if (!v)
@@ -1077,6 +1144,7 @@ void venue3d_draw(Venue3D * v, const Band3DDraw * cam, const float tint[3])
                 int l = p->light[k], r = l * t[0] >> 8, g = l * t[1] >> 8, b = l * t[2] >> 8;
                 p->col[k] = (uint32_t)(r > 255 ? 255 : r) | (uint32_t)(g > 255 ? 255 : g) << 8 | (uint32_t)(b > 255 ? 255 : b) << 16 | 0xff000000u;
             }
+            p->vb_col_old = true;
         }
     }
     float mv[16], CW[3][3];
@@ -1090,7 +1158,21 @@ void venue3d_draw(Venue3D * v, const Band3DDraw * cam, const float tint[3])
         const V3Part * p = &v->parts[i];
         if (i < lo || i > hi)
             continue;
-        gfx_mesh_xf(mv, p->tex, p->xyz, p->uv, 8, p->col, p->idx, p->tc * 3);
+        V3Part * w = &v->parts[i];
+        if (off_screen(mv, w->lo, w->hi))
+            continue;                   // nothing of it in the picture (a close shot sees a corner of the venue)
+        if (!w->vb_tried) {
+            w->vb_tried = true;
+            w->vb_xyz = gfx_vbo(w->xyz, (size_t)w->vc * 12, false);
+            w->vb_uv = gfx_vbo(w->uv, (size_t)w->vc * 8, false);
+            w->vb_col = gfx_vbo(w->col, (size_t)w->vc * 4, false);
+            w->vb_idx = gfx_vbo(w->idx, (size_t)w->tc * 6, true);
+            w->vb_col_old = false;
+        } else if (w->vb_col_old) {
+            gfx_vbo_update(w->vb_col, w->col, (size_t)w->vc * 4);
+            w->vb_col_old = false;
+        }
+        gfx_mesh_vbo(mv, p->tex, w->vb_xyz, p->xyz, w->vb_uv, p->uv, 8, w->vb_col, p->col, w->vb_idx, p->idx, p->tc * 3);
     }
 }
 
