@@ -9,15 +9,56 @@ import os, subprocess, sys
 from PIL import Image, ImageChops, ImageEnhance, ImageFilter
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-OUT = os.path.join(HERE, '..', 'assets', 'venues')
+OUT = os.environ.get('VENUES_OUT') or os.path.join(HERE, '..', 'assets', 'venues')     # (tests: somewhere else)
 RENDER = os.path.join(HERE, '..', 'build-tools', 'venue_render')
 # back, up, look height, fov, lens shift up (half screens): the shift puts the band above and beside the highway
 CAMERA = ['10.5', '3.4', '0.7', '34', '0.5']
 # the studios are small rooms: from 10.5 m the camera stood outside the wall
 CAMERA_FOR = {'studio': ['5.2', '2.4', '0.8', '52', '0.5'], 'studio2': ['5.2', '2.4', '0.8', '52', '0.5']}
-# set pieces in front of the stage from the audience's spot (Tushino's parked helicopter)
-HIDE_TEX = {}
-HIDE_PARTS = {'tushino': ','.join(str(k) for k in list(range(225, 237)) + list(range(240, 260)))}
+# set pieces in front of the stage from the audience's spot (Tushino's parked helicopter), and what the export can't show
+# as GHWT does: effect cards frozen on one frame (the Keep's flaming arrows stood round the stage as orange shards)
+HIDE_TEX = {'castle': '305e261e 64a8637b'}
+HIDE_PARTS = {'tushino': ','.join(str(k) for k in list(range(225, 237)) + list(range(240, 260))),
+              # (with its flaming arrows and their fire, by texture) the stakes along the stage's front edge (dark red
+              # teeth across the bottom of the picture), the two black boxes over the riser's steps (a pit in the stage)
+              'castle': '169,174,176',
+              # a black card (GHWT draws it as a light: black adds nothing) stood up in front of the riser as a black horn
+              'icecave': '16',
+              # plain white cards GHWT lights in the show's colours, a ring of white teeth round the riser here
+              'lhc': '20',
+              # holograms of a guitarist either side and two untextured panels round them: see-through sheets over the
+              # band
+              'carhenge': '84,85,207,208',
+              # an untextured lightning bolt on the floor where the singer stands (it glows in GHWT): a black shape
+              'scifi': '131'}
+# parts the export hides that the stage needs: the Keep's moat floor (left out, the stage had a black hole in it)
+SHOW_PARTS = {'castle': '122'}
+# parts GHWT tints with a material colour the export hasn't: the Keep's floor came out a white tiled bathroom
+TINT_PARTS = {'castle': '170:0.36,0.34,0.31',
+              'paris': ' '.join('%d:0.74,0.72,0.78' % k for k in (96, 98, 99))}
+# parts drawn solid: Paris's riser is white cloth at 80%; drawn as haze it was a ghost
+OPAQUE_PARTS = {'paris': '96,98,99'}
+
+
+def zone_fixes(zone):
+    """The same fixes as numbers, for tools/venue3d.py: parts hidden, shown, drawn solid, texture words hidden, and
+    each tinted part's brightness (its tint's mean)"""
+    nums = lambda t: {int(x) for x in t.replace(',', ' ').split()} if t else set()
+    tint = {}
+    for item in TINT_PARTS.get(zone, '').split():
+        k, rgb = item.split(':')
+        tint[int(k)] = sum(float(c) for c in rgb.split(',')) / 3
+    return (nums(HIDE_PARTS.get(zone)), nums(SHOW_PARTS.get(zone)), nums(OPAQUE_PARTS.get(zone)),
+            HIDE_TEX.get(zone, '').split(), tint)
+
+
+def zone_env(zone):
+    env = dict(os.environ)
+    for var, table in (('VR_HIDE_TEX', HIDE_TEX), ('VR_HIDE', HIDE_PARTS), ('VR_SHOW', SHOW_PARTS), ('VR_TINT', TINT_PARTS),
+                       ('VR_OPAQUE', OPAQUE_PARTS)):
+        if zone in table:
+            env[var] = table[zone]
+    return env
 
 TITLES = {"ballpark": "AT&T Park", "bayou": "Swamp Shack", "castle": "Will Heilm's Keep", "cathedral": "Bone Church",
           "fairgrounds": "Strutter's Farm", "frathouse": "Phi Psi Kappa", "goth": "Wilted Orchid", "harbor": "Pang Tang Bay",
@@ -87,11 +128,7 @@ def render_shots(tex_dir, work, zones):
     lines = [l.rstrip('\n').split('|') for l in open(path) if '|' in l]
     by_zone = {l[0]: l for l in lines}
     for zone in zones:
-        env = dict(os.environ)
-        if zone in HIDE_TEX:
-            env['VR_HIDE_TEX'] = HIDE_TEX[zone]
-        if zone in HIDE_PARTS:
-            env['VR_HIDE'] = HIDE_PARTS[zone]
+        env = zone_env(zone)
         want = by_zone[zone][2].split() if zone in by_zone else []
         want_y = float(want[want.index('drummer') + 2]) if 'drummer' in want else 191
         extra = []
@@ -143,11 +180,7 @@ def main():
     lines = []
     for zone in zones:
         prefix = os.path.join(work, zone)
-        env = dict(os.environ)
-        if zone in HIDE_TEX:
-            env['VR_HIDE_TEX'] = HIDE_TEX[zone]
-        if zone in HIDE_PARTS:
-            env['VR_HIDE'] = HIDE_PARTS[zone]
+        env = zone_env(zone)
         r = subprocess.run([RENDER, tex_dir, zone, prefix] + CAMERA_FOR.get(zone, CAMERA), capture_output=True, text=True,
                            env=env)
         if r.returncode != 0:
@@ -170,4 +203,5 @@ def main():
             f.write('\n'.join(lines) + '\n')
 
 
-main()
+if __name__ == '__main__':
+    main()

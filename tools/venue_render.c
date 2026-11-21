@@ -43,8 +43,10 @@ typedef struct {
     char cls[8];                    // what its texture looks like: opaque, soft, blend or glowpm (see classify)
     bool glare;                     // a lens-glare sprite (grey, all soft edges): GHWT fades these with the view
     bool solid;                     // its texture is mostly opaque (a see-through part that's really scenery)
+    bool screen;                    // its texture is one flat grey: a video screen's stand-in, drawn as one that's off
     float gain;                     // strength cap from its share of the picture (see probe)
     bool hidden;
+    float tint[3];                  // its colour multiplied (VR_TINT: a floor GHWT tints with a material colour)
     GLuint gl, light;               // the texture, and its light version (alpha = alpha x brightness)
     bool has_tex;
     float cx, cy, cz;               // centre, for sorting see-through parts
@@ -128,6 +130,7 @@ static bool load_wtch(const char * path)
             m->cz = sz / vc;
         }
         strcpy(m->blend, "opaque");
+        m->tint[0] = m->tint[1] = m->tint[2] = 1;
     }
     free(d);
     return true;
@@ -233,6 +236,33 @@ static void load_json(const char * zone)
     }
     if (f)
         fclose(f);
+    // VR_SHOW="122 ...": parts drawn though the export hides them (a pit's floor GHWT shows from the start)
+    const char * show = getenv("VR_SHOW");
+    while (show && *show) {
+        char * e;
+        long k = strtol(show, &e, 10);
+        if (e == show)
+            break;
+        if (k >= 0 && k < mesh_count)
+            meshes[k].hidden = false;
+        show = *e ? e + 1 : e;
+    }
+    // VR_TINT="170:0.4,0.38,0.35 ...": a part's colour multiplied
+    const char * tint = getenv("VR_TINT");
+    while (tint && *tint) {
+        int k, n = 0;
+        float r, g, b;
+        if (sscanf(tint, "%d:%f,%f,%f%n", &k, &r, &g, &b, &n) != 4)
+            break;
+        if (k >= 0 && k < mesh_count) {
+            meshes[k].tint[0] = r;
+            meshes[k].tint[1] = g;
+            meshes[k].tint[2] = b;
+        }
+        tint += n;
+        while (*tint == ' ')
+            tint++;
+    }
 }
 
 // the YargLook rules for "opaque" art that isn't (see CharacterLoader.SoftAlpha / MostlyClear)
@@ -271,6 +301,21 @@ static void classify(Mesh * m, const unsigned char * px, int w, int h)
             all_sat += mx - mn;
         }
     m->glare = n && all_sat / n < 14 && mid > n * 0.5;
+    // one flat grey all over, nothing in it: a video screen's stand-in (Nashville's riser front and windows were
+    // mid-grey slabs). Drawn as a screen that's off
+    {
+        double s1 = 0, s2 = 0;
+        int k = 0;
+        for (int y = 0; y < h; y += 4)
+            for (int x = 0; x < w; x += 4, k++) {
+                const unsigned char * c = px + (y * w + x) * 4;
+                double v = (c[0] + c[1] + c[2]) / 3.0;
+                s1 += v;
+                s2 += v * v;
+            }
+        double mean = k ? s1 / k : 0, sd = k ? sqrt(fmax(0, s2 / k - mean * mean)) : 0;
+        m->screen = k && sd < 4 && all_sat / n < 4 && mean > 50 && mean < 210 && low < n * 0.05;
+    }
     // (a plain white card isn't scenery: it's a light panel GHWT tints, Nashville's windows and riser)
     m->solid = n && low < n * 0.2 && !(seen && lum / seen > 235 && all_sat / n < 10);
     if (n && mid > n * 0.3 && low > n * 0.4)
@@ -304,6 +349,7 @@ static void load_textures(void)
                 strcpy(m->cls, meshes[i].cls);
                 m->glare = meshes[i].glare;
                 m->solid = meshes[i].solid;
+                m->screen = meshes[i].screen;
                 break;
             }
         if (m->has_tex || !m->tex[0])
@@ -347,17 +393,33 @@ static void load_textures(void)
     for (int k = 0; k < mesh_count; k++)
         if (!strcmp(meshes[k].blend, "opaque") && meshes[k].cls[0])
             strcpy(meshes[k].blend, meshes[k].cls);
+    // VR_OPAQUE="96 98": parts drawn solid whatever their art says (Paris's riser, white cloth at 80%, was a ghost)
+    const char * solid = getenv("VR_OPAQUE");
+    while (solid && *solid) {
+        char * e;
+        long k = strtol(solid, &e, 10);
+        if (e == solid)
+            break;
+        if (k >= 0 && k < mesh_count) {
+            strcpy(meshes[k].blend, "opaque");
+            meshes[k].solid = true;
+        }
+        solid = *e ? e + 1 : e;
+    }
 }
 
 static void draw_mesh(const Mesh * m, float r, float g, float b, float a, bool light)
 {
-    if (m->has_tex) {
+    if (m->has_tex && !m->screen) {
         glEnable(GL_TEXTURE_2D);
         glBindTexture(GL_TEXTURE_2D, light ? m->light : m->gl);
     } else {
         glDisable(GL_TEXTURE_2D);
         r = g = b = 0.17f;              // an untextured part: an off screen, not a white card
     }
+    r *= m->tint[0];
+    g *= m->tint[1];
+    b *= m->tint[2];
     glBegin(GL_TRIANGLES);
     for (int i = 0; i < m->tc * 3; i++) {
         const Vert * v = &m->v[m->t[i]];
@@ -574,31 +636,70 @@ int main(int argc, char ** argv)
     save(prefix, "glow");
 
     if (getenv("VR_PICK")) {
-        glDepthMask(GL_TRUE);           // (before the clear: a masked depth buffer isn't cleared)
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        glDisable(GL_BLEND);
-        for (int k = 0; k < mesh_count; k++) {
-            if (meshes[k].hidden || darkening(&meshes[k]))
-                continue;
-            int id = k + 1;
-            glDisable(GL_TEXTURE_2D);
-            glBegin(GL_TRIANGLES);
-            glColor3ub(id & 255, id >> 8, 0);
-            for (int i = 0; i < meshes[k].tc * 3; i++)
-                glVertex3fv(meshes[k].v[meshes[k].t[i]].p);
-            glEnd();
-        }
+        // every part under each point (its art's own see-through parts not counted), nearest first
+        enum { MAXP = 32 };
+        int px[MAXP], py[MAXP], np = 0, used;
         const char * q = getenv("VR_PICK");
-        int x, y, used;
-        while (sscanf(q, "%d,%d%n", &x, &y, &used) == 2) {
-            unsigned char c[3];
-            glReadPixels(x, H - 1 - y, 1, 1, GL_RGB, GL_UNSIGNED_BYTE, c);
-            int id = c[0] | c[1] << 8;
-            printf("pick %d,%d: part %d %s %s\n", x, y, id - 1, id ? meshes[id - 1].tex : "-", id ? meshes[id - 1].blend : "");
+        while (np < MAXP && sscanf(q, "%d,%d%n", &px[np], &py[np], &used) == 2) {
+            np++;
             q += used;
             while (*q == ' ')
                 q++;
         }
+        float * hit = malloc(sizeof(float) * np * mesh_count);
+        glDepthMask(GL_TRUE);           // (before the clear: a masked depth buffer isn't cleared)
+        glDisable(GL_BLEND);
+        glEnable(GL_ALPHA_TEST);
+        glAlphaFunc(GL_GREATER, 0.3f);
+        glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_COMBINE);
+        glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB, GL_REPLACE);
+        glTexEnvi(GL_TEXTURE_ENV, GL_SOURCE0_RGB, GL_PRIMARY_COLOR);
+        glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_ALPHA, GL_REPLACE);
+        glTexEnvi(GL_TEXTURE_ENV, GL_SOURCE0_ALPHA, GL_TEXTURE);
+        for (int k = 0; k < mesh_count; k++) {
+            for (int p = 0; p < np; p++)
+                hit[p * mesh_count + k] = 2;
+            if (meshes[k].hidden)
+                continue;
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+            if (meshes[k].has_tex) {
+                glEnable(GL_TEXTURE_2D);
+                glBindTexture(GL_TEXTURE_2D, meshes[k].gl);
+            } else
+                glDisable(GL_TEXTURE_2D);
+            glBegin(GL_TRIANGLES);
+            glColor4f(1, 1, 1, 1);
+            for (int i = 0; i < meshes[k].tc * 3; i++) {
+                const Vert * v = &meshes[k].v[meshes[k].t[i]];
+                glTexCoord2f(v->uv[0], v->uv[1]);
+                glVertex3fv(v->p);
+            }
+            glEnd();
+            for (int p = 0; p < np; p++) {
+                unsigned char c[3];
+                float z;
+                glReadPixels(px[p], H - 1 - py[p], 1, 1, GL_RGB, GL_UNSIGNED_BYTE, c);
+                glReadPixels(px[p], H - 1 - py[p], 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &z);
+                if (c[0])
+                    hit[p * mesh_count + k] = z;
+            }
+        }
+        for (int p = 0; p < np; p++) {
+            printf("pick %d,%d:", px[p], py[p]);
+            for (int shown = 0; shown < 6; shown++) {
+                int best = -1;
+                for (int k = 0; k < mesh_count; k++)
+                    if (hit[p * mesh_count + k] < 1.5f && (best < 0 || hit[p * mesh_count + k] < hit[p * mesh_count + best]))
+                        best = k;
+                if (best < 0)
+                    break;
+                printf(" [%d %s %s%s]", best, meshes[best].tex + (strncmp(meshes[best].tex, "venue_ghwt_", 11) ? 0 : 11),
+                       meshes[best].blend, meshes[best].solid ? " solid" : "");
+                hit[p * mesh_count + best] = 2;
+            }
+            printf("\n");
+        }
+        free(hit);
     }
     // where the marks land (the game puts its band there)
     snprintf(path, sizeof(path), "%s_marks.txt", prefix);

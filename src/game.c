@@ -341,6 +341,7 @@ static struct {
     float rock;
 } versus;
 static void draw_versus(void);
+static bool shot_fits(const float (*mk)[3]);
 static void popup_always(const char * text);
 static void ghost_start(const Song * song, int part, int diff);
 static void ghost_track(void);
@@ -498,11 +499,14 @@ static void pick_venue(const Song * song)
         int want = cfg.still_camera ? 1 : res_venue_shot_count(zone);
         int64_t t0 = plat_now_us();
         for (int k = 1; k < want; k++) {
+            const float (*mk)[3] = res_venue_shot_marks(zone, k);
+            if (!mk)
+                break;
+            if (!shot_fits(mk))
+                continue;               // the band would stand in the air in it: an angle left out
             if (!res_venue_shot(zone, k, &G.shot_tex[G.shots], &G.shot_glow[G.shots]))
                 break;
-            G.shot_marks[G.shots] = res_venue_shot_marks(zone, k);
-            if (!G.shot_marks[G.shots])
-                break;
+            G.shot_marks[G.shots] = mk;
             G.shots++;
         }
         if (G.shots > 1)
@@ -548,13 +552,27 @@ static const CineShot cine_shots[CS_COUNT] = {
     [CS_HERO] = {2, 0.0f, 2.30f, 2.05f, 38, 24, -20, -16, 2.6f, 0.21f, 0.50f},       // from the floor, legs long
     [CS_FACE] = {0, 0.07f, 1.02f, 0.92f, 34, 18, -8, -5, 3.4f, 0.50f, 0.30f},       // the face over the top of the board
     [CS_NECK] = {1, -0.06f, 1.50f, 1.32f, -30, -18, -2, 2, 2.8f, 0.23f, 0.46f},     // from the neck's side, the fret hand near
-    [CS_DRUMS] = {0, -0.12f, 1.9f, 1.7f, 22, 10, 22, 16, 4.2f, 0.31f, 0.40f},         // the drummer's face over his kit, beside the highway
+    [CS_DRUMS] = {0, -0.12f, 1.9f, 1.7f, 22, 10, 22, 16, 4.2f, 0.21f, 0.29f},         // the drummer's face over his kit, up beside the far end of the highway (nearer its middle, the board hid all of him but his head)
     [CS_LINE] = {2, 0.25f, 5.0f, 4.5f, 10, -6, -8, -6, 8.0f, 0.50f, 0.27f},          // the whole band strung across
     [CS_WAIST] = {1, -0.10f, 1.95f, 1.75f, -22, -8, -10, -8, 3.6f, 0.25f, 0.46f},    // waist up, the guitar in the picture
 };
 
 // where each stands in the band-line shot (metres: x across the stage, y up, z toward the audience)
 static const float cine_line[4][3] = {{0.75f, 0.35f, -2.4f}, {-0.95f, 0, 0.6f}, {2.6f, 0, 0}, {-2.7f, 0, 0}};
+
+// whether a venue angle's marks leave the guitarists where they stand. member_spot keeps them clear of the board and
+// the rock meter; an angle with one of them close to the camera, in front of the highway, had them shoved up and over
+// into the air off the stage's edge (a ballpark's guitarist 165 pixels off her mark)
+static bool shot_fits(const float (*mk)[3])
+{
+    for (int r = 2; r < 4; r++) {
+        float x = r == 3 ? mk[r][0] + 34 : mk[r][0], y = mk[r][1];
+        float cx = r == 3 ? fminf(fmaxf(x, 244), 262) : fminf(fmaxf(fminf(x, 850), 738), 858), cy = fminf(y, 318);
+        if (hypotf(cx - x, cy - y) > 70)
+            return false;
+    }
+    return true;
+}
 
 static void member_spot(int r, float m[3])
 {
@@ -582,14 +600,28 @@ static void member_spot(int r, float m[3])
     m[0] += b->walk * m[2];
     m[1] += b->front * 26;
     m[2] *= 1 + b->front * 0.2f;
-    // wherever they wander, out of the way of the board and the rock meter
+    // wherever they wander, out of the way of the board and the rock meter, but never shoved far from where they stand
+    // in the picture: a venue whose mark is well inside those had them standing in the air beyond the stage's edge
     m[0] = r == 3 ? fminf(fmaxf(m[0], 222), 262) : fminf(fmaxf(m[0], 738), 858);
+    {
+        float mx = (r == 3 ? G.marks[r][0] + 34 : G.marks[r][0]) + b->walk * m[2], my = G.marks[r][1] + b->front * 26;
+        m[0] = fminf(fmaxf(m[0], mx - 60), mx + 60);
+        m[1] = fmaxf(m[1], my - 40);
+    }
     if (r == 3 && G.band[1]) {
         // and never into the singer, who stands just right of them: half a body's width apart at least
         float v[3];
         member_spot(1, v);
         m[0] = fminf(m[0], v[0] - (v[2] + m[2]) * 0.42f);
     }
+#ifndef __vita__
+    static int spotlog = -1;
+    if (spotlog < 0)
+        spotlog = getenv("GHV_SPOTLOG") != NULL;
+    if (spotlog)                        // tests: the venue's mark for them and where they're put
+        fprintf(stderr, "spot r%d mark %.0f %.0f %.0f -> %.0f %.0f %.0f\n", r, G.marks[r][0], G.marks[r][1], G.marks[r][2],
+                m[0], m[1], m[2]);
+#endif
 }
 
 // a guitarist out in a solo of their own part
@@ -1509,7 +1541,7 @@ static CineCam cine_cam(double beat)
     float sx = G.cine_shot == CS_LINE || G.cine_shot == CS_FACE ? cs->sx
                : side > 0 ? 1 - cs->sx : cs->sx;
     if (G.cine_shot == CS_FACE)
-        sx = 0.5f - side * 0.06f;
+        sx = side > 0 ? 0.74f : 0.26f;  // beside the board: over its top they were a head behind it, the body hidden
     float kick = cfg.flashes < 2 ? G.kick : 0;
     c.cx = SCREEN_W * sx + sinf(t * 0.83f) * 3 + sinf(t * 61) * 7 * kick;
     float sy = G.cine_who == 1 && cs->anchor == 1 ? 0.36f : G.cine_who == 1 && G.cine_shot == CS_FACE ? 0.36f : cs->sy;      // (the singer's: the head a third down)

@@ -112,6 +112,45 @@ jobs:
             fi
           fi
 
+      # The venues the export draws wrong (tools/venues.py's lists: effect cards frozen on a frame, black cards GHWT
+      # draws as light, a floor left white, a pit with no floor), their pictures and models made again from the source
+      # art. Once: the release after carries them, with VENUE_FIX in assets/venues/fix.txt
+      - name: The venues' pictures and models, made again where the export drew them wrong
+        env:
+          VENUE_FIX: venues 1 (castle, icecave, lhc, carhenge, paris, scifi, nashville, dublin, tushino)
+          ZONES: castle icecave lhc carhenge paris scifi nashville dublin tushino
+        run: |
+          if [ "$(cat assets/venues/fix.txt 2>/dev/null)" != "$VENUE_FIX" ]; then
+            # (in a shell of its own that stops at the first failure: a failure keeps the last release's art, and the
+            # release goes on)
+            if bash -e -s <<'SH'
+            which blender >/dev/null || sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq blender python3-pil >/dev/null
+            pip install -q --break-system-packages py7zr pillow
+            mkdir -p /tmp/sa
+            [ -f /tmp/sa/ghwt-textures.7z ] || gh release download source-art --pattern ghwt-textures.7z --dir /tmp/sa
+            [ -f /tmp/sa/ghwt-tools.7z ] || gh release download source-art --pattern ghwt-tools.7z --dir /tmp/sa
+            tex=/tmp/sa/v/mods/yarg-look/YargLook/textures
+            [ -f $tex/venue_ghwt_castle.wtch ] || python3 -c "import py7zr; z=py7zr.SevenZipFile('/tmp/sa/ghwt-textures.7z'); z.extract(path='/tmp/sa/v', targets=[n for n in z.getnames() if not n.endswith('.mp3')])"
+            [ -d /tmp/sa/t/mods/refs/yarg/ghwt-tools ] || python3 -c "import py7zr; py7zr.SevenZipFile('/tmp/sa/ghwt-tools.7z').extractall('/tmp/sa/t')"
+            export GHWT_TOOLS=/tmp/sa/t/mods/refs/yarg/ghwt-tools
+            mkdir -p build-tools
+            gcc -O2 -o build-tools/venue_render tools/venue_render.c -Isrc -lSDL2 -lGL -lm
+            Xvfb :79 -screen 0 1280x720x24 >/dev/null 2>&1 &
+            xvfb=$!
+            sleep 2
+            DISPLAY=:79 python3 tools/venues.py $tex /tmp/sa/vwork $ZONES | grep -c ' parts ('
+            DISPLAY=:79 python3 tools/venues.py --shots $tex /tmp/sa/vwork $ZONES | grep -c ' shift '
+            kill $xvfb || true
+            BLENDER=$(which blender) python3 tools/venue3d.py $tex /tmp/sa/work $ZONES | grep -c ' tris '
+            for z in $ZONES; do test -s assets/venues/$z.jpg && test -s assets/venues/${z}_s3.jpg && test -s assets/venue3d/$z.v3d; done
+          SH
+            then
+              echo "$VENUE_FIX" > assets/venues/fix.txt
+            else
+              echo "::warning::the venues weren't made again: the last release's pictures and models go on"
+            fi
+          fi
+
       - name: The update token for a fresh install (the owner's read-only one, so a Vita without update.txt still updates)
         run: |
           [ -s android/update_token ] && cp android/update_token assets/update_token && echo "token in" || true

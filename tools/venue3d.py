@@ -15,6 +15,9 @@ spec = importlib.util.spec_from_file_location('band', os.path.join(HERE, 'band.p
 band = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(band)
 wc = band.wc
+spec = importlib.util.spec_from_file_location('venues', os.path.join(HERE, 'venues.py'))
+venues = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(venues)        # (its lists of what the export draws wrong, shared with the venue pictures)
 OUT = os.path.join(HERE, '..', 'assets', 'venue3d')
 NEAR_M, MID_M = 16.0, 70.0              # metres from the stage: what's near keeps its shape, the skyline hardly any
 BUDGET = {'near': 9500, 'mid': 4000, 'far': 3200}
@@ -55,12 +58,23 @@ def texture_kind(path, cache={}):
     return cache[path]
 
 
+def flat_grey(path, cache={}):
+    # one flat grey all over, nothing in it: a video screen's stand-in (Nashville's riser front, mid-grey slabs)
+    if path not in cache:
+        a = np.asarray(Image.open(path).convert('RGBA').resize((32, 32))).astype(np.float32)
+        v = a[:, :, :3].mean(2)
+        sat = (a[:, :, :3].max(2) - a[:, :, :3].min(2)).mean()
+        cache[path] = bool(v.std() < 4 and sat < 4 and 50 < v.mean() < 210 and (a[:, :, 3] < 235).mean() < 0.05)
+    return cache[path]
+
+
 def bake(zone, tex_dir, work):
     name = 'venue_ghwt_' + zone
     bones, meshes, clips = wc.read(os.path.join(tex_dir, name + '.wtch'))
     j = json.load(open(os.path.join(tex_dir, name + '.json')))
     blends = json.load(open(os.path.join(tex_dir, name + '.parts.json')))['blend']
-    hide = set(j.get('hide', []))
+    more_hide, show, solid, hide_words, tint = venues.zone_fixes(zone)
+    hide = (set(j.get('hide', [])) | more_hide) - show
     f = np.array(j.get('facing', [0, 0, -1]), float) * [1, 1, -1]
     f[1] = 0
     f /= np.linalg.norm(f)
@@ -77,11 +91,16 @@ def bake(zone, tex_dir, work):
 
     keep = []
     for i, (tex, V, T) in enumerate(meshes):
-        if i in hide or (i < len(blends) and blends[i] != 'opaque') or not tex or len(T) == 0:
+        if i in hide or (i not in solid and i < len(blends) and blends[i] != 'opaque') or not tex or len(T) == 0:
+            continue
+        if any(w in tex for w in hide_words):
             continue
         src = band.find_tex(tex_dir, tex)
-        if not src or texture_kind(src) == 'soft':
+        if not src or (i not in solid and texture_kind(src) == 'soft'):
             continue
+        # the brightness it's lit at, carried through the thinning in the vertex alpha (the model doesn't keep that):
+        # a tinted part's, a flat grey screen's as one that's off
+        shade = tint.get(i, 0.3 if flat_grey(src) else 1.0)
         P = to_stage(np.asarray(V['p'], float) * [1, 1, -1])    # Unity's left-handed space back to GHWT's, as the marks are
         T = np.asarray(T)
         # triangles wholly out behind where any camera stands, and the ones below the world: gone
@@ -92,7 +111,7 @@ def bake(zone, tex_dir, work):
         c = P[np.unique(T)].mean(0)
         dist = math.hypot(c[0], c[2] - 1.5)
         # the file's texture places count up from the picture's bottom row, the game's down from its top
-        keep.append((tex, P, np.asarray(V['uv'], np.float32) * [1, -1] + [0, 1], np.asarray(V['a'], np.float32), T, dist))
+        keep.append((tex, P, np.asarray(V['uv'], np.float32) * [1, -1] + [0, 1], np.full(len(P), shade, np.float32), T, dist))
     # thin things (a lighting truss's tubes, railings: thousands of slivers) fall to shards when thinned: the nearest of
     # them stay, lightly thinned, up to THIN_KEEP triangles; the rest go
     thin_ix = []
@@ -156,17 +175,18 @@ def bake(zone, tex_dir, work):
     merged, order = {}, []
     for tname, V, T, wraps in packed:
         if tname not in merged:
-            merged[tname] = [[], [], [], 0, wraps]
+            merged[tname] = [[], [], [], 0, wraps, []]
             order.append(tname)
         m = merged[tname]
         m[0].append(V['p'])
         m[1].append(V['uv'])
         m[2].append(np.asarray(T) + m[3])
         m[3] += len(V['p'])
+        m[5].append(np.asarray(V['a'], np.float32).reshape(-1))
     recs = []
     for tname in order:
-        P, uv, T, n, wraps = merged[tname]
-        P, uv, T = np.concatenate(P), np.concatenate(uv), np.concatenate(T)
+        P, uv, T, n, wraps, A = merged[tname]
+        P, uv, T, A = np.concatenate(P), np.concatenate(uv), np.concatenate(T), np.clip(np.concatenate(A), 0, 1)
         # 65535 vertices a part: split what's bigger
         for s in range(0, len(T), 20000):
             tt = T[s:s + 20000]
@@ -178,7 +198,7 @@ def bake(zone, tex_dir, work):
             rec['uv'] = uv[used]
             # the show lights the stage: what's further from it is darker
             dist = np.hypot(P[used][:, 0], P[used][:, 2] - 1.5)
-            rec['l'][:, 0] = np.clip((1.12 - dist / 60) * 255, 70, 255)
+            rec['l'][:, 0] = np.clip((1.12 - dist / 60) * 255, 70, 255) * A[used]
             recs.append((tname, rec, remap[tt].astype('<u2'), wraps))
     with open(os.path.join(OUT, zone + '.v3d'), 'wb') as o:
         o.write(b'V3D1' + struct.pack('<i', len(recs)))

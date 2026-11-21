@@ -7050,6 +7050,8 @@ static void rockers_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "The band stays on the stage: in some venues' other camera angles the guitarist or bassist stood in the air beyond the stage's edge (an angle that can't show them where they stand is left out now). Close-ups of the singer and the drummer frame them beside the highway, not behind it.",
+        "Venues fixed: Will Heilm's Keep had a black hole in the stage, a white tiled floor and frozen orange flames; the Ice Cave a black horn in front of the riser; the Large Hadron Collider white shards round the stage; Carhenge see-through sheets over the band; Paris a ghost of a riser; the Sci-Fi stage a black bolt where the singer stands; Nashville blank grey slabs for its screens.",
         "PLAY TOGETHER (main menu): two devices play the same song at the same moment, each one's score racing the other's across the top. Any mix: Vita, phone, PC. On the same Wi-Fi (or one on the other's phone hotspot) they find each other; far apart, each types the other's code. No server, no port forwarding.",
         "Share songs between them: the song the host picks comes over by itself, and Share songs copies any of the other one's songs here (or all the ones you're missing).",
         "Sixteen songs come with the game now, made for GH Vita: six new ones (glam rock, grunge, doom, hard rock, drop-D metal and pop punk) join the ten.",
