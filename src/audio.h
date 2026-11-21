@@ -27,6 +27,8 @@ bool audio_song_finished(void);
 bool audio_song_active(void);
 // a stem's volume, 0..1 (eased over a few milliseconds)
 void audio_stem_volume(int stem, float volume);
+// a stem's loudness (0..1 of full scale, RMS, smoothed over ~50 ms): now, or a third of a second ahead (decoded early)
+float audio_stem_level(int stem, bool ahead);
 // the whammy: how far the bar is down on a stem, 0..1; the stem stays that much lower, up to a semitone, until it comes up
 void audio_stem_bend(int stem, float amount);
 void audio_log_cost(void);

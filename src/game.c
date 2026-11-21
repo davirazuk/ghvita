@@ -2105,11 +2105,60 @@ static int band_cell(int r, const BandPart * b, double beat)
     return row * cols + land + (int)at;
 }
 
+// The singer with no part charted for her: the recording's own singing, from its vocals stem (read a third of a second
+// ahead, so the mic's up for the first word), held through a breath between lines. A song with no vocals stem (or a
+// silent one): its sections, the verses and choruses sung, the intros, solos and instrumental breaks not.
+static struct {
+    float peak;                         // the loudest the stem's been (slowly forgotten): "a voice" is relative to it
+    double heard;                       // when a voice was last heard in it (ahead)
+} ear;
+
+static bool section_sung(void)
+{
+    const Chart * c = G.chart;
+    if (!c || G.section < 0 || G.section >= c->section_count)
+        return true;
+    char n[64];
+    int k = 0;
+    for (const char * p = c->sections[G.section].name; *p && k < 63; p++)
+        n[k++] = (char)tolower((unsigned char)*p);
+    n[k] = 0;
+    static const char * const sung[] = {"verse", "chorus", "bridge", "hook", "refrain", "pre-", "vocal", "sing"};
+    static const char * const not_sung[] = {"intro", "solo", "instrumental", "interlude", "break", "outro", "riff",
+                                            "ending", "jam", "guitar", "drum", "bass", "build", "lead", "fill",
+                                            "noise", "silence", "count", "end", "fade"};
+    for (int i = 0; i < 8; i++)
+        if (strstr(n, sung[i]))
+            return true;
+    for (int i = 0; i < 20; i++)
+        if (strstr(n, not_sung[i]))
+            return false;
+    return true;
+}
+
+static bool singer_hears(void)
+{
+    if (G.song && G.song->instrumental)
+        return false;
+    if (G.vox_stem >= 0) {
+        float lv = audio_stem_level(G.vox_stem, true);
+        ear.peak = fmaxf(lv, ear.peak * powf(0.9995f, G.fstep));
+        if (lv > 0.012f && lv > ear.peak * 0.15f)
+            ear.heard = G.t;
+        if (ear.peak > 0.02f || G.t < 20)      // (a stem that's stayed silent: the sections instead)
+            return G.t - ear.heard < 0.9;
+    }
+    return section_sung();
+}
+
 // what a member of the band is playing right now, from their own part of the chart. Plays on through a short rest
 static bool band_playing(int r, double beat_len)
 {
-    if (r == 1)
-        return !(G.song && G.song->instrumental && !G.vocal) && vox_singing(G.t);
+    if (r == 1) {
+        if (G.song && G.song->instrumental && !G.vocal)
+            return false;
+        return vox_mouth(G.t) >= 0 ? vox_singing(G.t) : G.t > 0 && singer_hears();
+    }
     BandPart * b = &G.band_part[r];
     const Part * p = b->part;
     if (!p)
@@ -2400,7 +2449,8 @@ static void draw_band(double beat)
             // the mic comes up for a line and goes down after it: raised over a third of a second, starting half a
             // second before the words (it snapped up in a tenth, just before them)
             bool words = !(G.song && G.song->instrumental && !G.vocal);     // an instrumental: the mic stays down
-            float want = playing || (words && vox_singing(G.t + 0.45)) ? 1 : 0, step = want - bp->mic;
+            bool charted = vox_mouth(G.t) >= 0;
+            float want = playing || (words && charted && vox_singing(G.t + 0.45)) ? 1 : 0, step = want - bp->mic;
             bp->mic += (step > 0.05f ? 0.05f : step < -0.04f ? -0.04f : step) * fminf(G.fstep, 2);
         }
         Band3D * m3 = G.band3d[r];
@@ -2448,7 +2498,11 @@ static void draw_band(double beat)
                 // the singer's mouth: open on the sung notes (a syllable's start wide, then held a little open),
                 // shut between them; with no chart for them, in time with the beat while the mic's up
                 float open = vox_mouth(G.t);
-                if (open < 0)
+                if (open < 0 && G.vox_stem >= 0 && ear.peak > 0.02f) {
+                    // no chart: her mouth with the recorded voice, as loud as it is
+                    float lv = audio_stem_level(G.vox_stem, false);
+                    open = lv > 0.012f ? fminf(1, 0.25f + lv / (ear.peak * 0.6f)) : 0;
+                } else if (open < 0)
                     open = 0.3f + 0.4f * fabsf(sinf((float)(phase * 3.14159265 * 4)));
                 d3.mouth = open * bp->mic;
             }
@@ -3361,6 +3415,11 @@ bool game_start(Song * song, int part, int diff)
     if (G.drum_stem_count == song->stem_count)
         G.drum_stem_count = 0;
     G.vox_stem = song->stem_count > 1 ? song->part_stem[PART_VOCALS] : -1;
+    for (int i = 0; G.vox_stem < 0 && song->stem_count > 1 && i < song->stem_count; i++)
+        if (!strncasecmp(song->stems[i], "vocals", 6))
+            G.vox_stem = i;             // a singer recorded apart, with no part charted for it
+    ear.peak = 0;                       // the singer listens afresh
+    ear.heard = -100;
     G.speed = 4.0 + cfg.speed * 0.8;
     G.highway = res_highway(cfg.highway);
     pick_venue(song);

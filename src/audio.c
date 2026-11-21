@@ -9,6 +9,7 @@
 #include "plat.h"
 
 #define RING_FRAMES 65536               // 1.4 s of 48 kHz stereo per stem
+#define LOOK_FRAMES 16000               // how far ahead a stem's level is read (a third of a second)
 #define CHUNK_FRAMES 4096
 #define MAX_MIX 2048
 #define MAX_VOICES 24
@@ -34,6 +35,7 @@ typedef struct {
     float vol_target, vol;
     float bend_target, bend;            // the whammy: how far the bar is down, 0..1
     float power;                        // how loud it's been, the mute not counted
+    float level, ahead;                 // how loud it is now, and a third of a second on (mean squares, smoothed)
 } Stream;
 
 struct Sound {
@@ -433,9 +435,23 @@ static void mix(int16_t * out, int frames)
             float dv = take > 0 ? (v1 - v0) / take : 0;
             float v = v0;
             uint32_t r = st->rpos;
+            float now = 0, next = 0;
+            int got = 0;
+            bool see = avail > LOOK_FRAMES + (uint32_t)take;     // (decoded that far ahead)
             for (int i = 0; i < take; i += 16) {
                 const int16_t * smp = &st->ring[((r + i) % RING_FRAMES) * 2];
-                st->power += (float)smp[0] * smp[0] + (float)smp[1] * smp[1];
+                float e = (float)smp[0] * smp[0] + (float)smp[1] * smp[1];
+                st->power += e;
+                now += e;
+                if (see) {
+                    const int16_t * a = &st->ring[((r + LOOK_FRAMES + i) % RING_FRAMES) * 2];
+                    next += (float)a[0] * a[0] + (float)a[1] * a[1];
+                }
+                got++;
+            }
+            if (got) {
+                st->level += (now / got - st->level) * 0.2f;
+                st->ahead += ((see ? next : now) / got - st->ahead) * 0.2f;
             }
             if (st->bend > 0.0005f || st->bend_target > 0) {
                 mix_bent(st, r, dst + offset * 2, take, v, dv);
@@ -682,7 +698,7 @@ static bool song_load(const char * dir, const char * const * stems, int count)
         st->eof = !st->open;
         st->wpos = st->rpos = st->skip = 0;
         st->vol = st->vol_target = 1;
-        st->bend = st->bend_target = st->power = 0;
+        st->bend = st->bend_target = st->power = st->level = st->ahead = 0;
     }
     stream_count = count < MAX_STEMS ? count : MAX_STEMS;
     unlock_decoders();
@@ -933,6 +949,14 @@ float audio_stems_share(const int * stems, int count)
     for (int i = 0; i < stream_count; i++)
         all += streams[i].power;
     return all > 0 ? mine / all : 0;
+}
+
+float audio_stem_level(int stem, bool ahead)
+{
+    if (stem < 0 || stem >= stream_count)
+        return 0;
+    float ms = ahead ? streams[stem].ahead : streams[stem].level;
+    return ms > 0 ? sqrtf(ms / 2) / 32768.0f : 0;
 }
 
 void audio_stem_volume(int stem, float volume)
