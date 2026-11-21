@@ -659,14 +659,18 @@ def open_tex(src):
         return im
     a = np.asarray(im).astype(np.float32)
     on = a[:, :, 3] > 128
-    if on.mean() < 0.05 or (~on).mean() < 0.05 or a[:, :, :3][on].mean() > 70:
-        return im                       # not a cut-out (hair cards are), or light enough to show its own strands
+    cut = 0.05 <= on.mean() <= 0.95
+    if not on.any() or a[:, :, :3][on].mean() > (70 if cut else 40):
+        return im                       # light enough to show its own strands and folds
+    # (an opaque one too, darker still: a jacket or a head of hair dyed black came out one flat black mass, its folds
+    # and stitching gone, and with black hair over it read as a black slab; a little less of the grey's light there)
     base = Image.open(m.group(1) + '.png').convert('RGBA')
     if base.size != im.size:
         base = base.resize(im.size, Image.LANCZOS)
     L = np.asarray(base.convert('L')).astype(np.float32) / 255
     Lm = L[on].mean() if on.any() else 0.5
-    rgb = a[:, :, :3] + ((L - Lm) * 110 + L * 22)[:, :, None]
+    k, b = (110, 22) if cut else (80, 16)
+    rgb = a[:, :, :3] + ((L - Lm) * k + L * b)[:, :, None]
     a[:, :, :3] = np.clip(rgb, 0, 255)
     return Image.fromarray(a.astype(np.uint8), 'RGBA')
 
@@ -1383,6 +1387,13 @@ def bake(path, work, tex_dir, alt=False):
         mid = np.mean([sk[1][:3, 3] for sk in skins], axis=0)
         sb = [N[b] for b in ('Bone_Mic_Stand', 'Bone_Mic_Adjust_Height', 'Bone_Mic_Adjust_Angle') if b in N]
         joint = np.r_[rest[N['Bone_Mic_Stand']][:3, 3], 1.0]
+        # in front of where the hips end up in the game, not the root's place: band3d.c pulls each frame 80% of the
+        # way back over the root's average, and some singers' roots are a third of a metre behind their hips (the
+        # stand stood inside one of them). Averaged over the frames she sings at it
+        pj = np.r_[rest[N['bone_pelvis']][:3, 3], 1.0]
+        hips = [(sk[N['bone_pelvis']] @ pj)[:3] - 0.8 * (sk[1][:3, 3] - mid) for sk in skins[:REST]]
+        mid = mid.copy()
+        mid[0], mid[2] = np.mean([h[0] for h in hips]), np.mean([h[2] for h in hips])
         for f, sk in enumerate(skins):
             if alt is False and f >= JUMP:
                 continue                    # the jump hides it
@@ -1394,6 +1405,22 @@ def bake(path, work, tex_dir, alt=False):
             T[2, 3] = (mid[2] - STAND_AHEAD) - at[2]
             for b in sb:
                 sk[b] = T @ sk[b]
+            if os.environ.get('STANDLOG') and f % 4 == 0 and f < len(skins):
+                st = (sk[N['Bone_Mic_Stand']] @ joint)[:3]
+                pel = (sk[N['bone_pelvis']] @ np.r_[rest[N['bone_pelvis']][:3, 3], 1.0])[:3]
+                b1 = sk[1][:3, 3] - np.mean([q[1][:3, 3] for q in skins], axis=0)
+                print('stand', f, 'in game pelvis-stand xz %.2f %.2f' % (pel[0] - 0.8 * b1[0] - st[0], pel[2] - 0.8 * b1[2] - st[2]))
+        # one and the same stand in every frame (each frame had turned it a little with the singer, so the game didn't
+        # see it as never moving and carried it about with her: it jumped from one side of a singer to the other as
+        # the mic came up)
+        ref = next((f for f in range(len(skins)) if not (alt is False and f >= JUMP) and
+                    np.abs(skins[f][N['Bone_Mic_Stand']][:3, :3]).sum() > 1e-6), None)
+        if ref is not None:
+            for f, sk in enumerate(skins):
+                if alt is False and f >= JUMP:
+                    continue
+                for b in sb:
+                    sk[b] = skins[ref][b].copy()
     c = np.mean(centre, axis=0) if centre else np.zeros(3)
     if THREED:
         layers = None

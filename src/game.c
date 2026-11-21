@@ -1431,7 +1431,9 @@ static void cine_direct(double beat, bool solo)
         shot = shot == CS_MEDIUM ? CS_WAIST : CS_MEDIUM;        // never the same shot twice running
     G.cine_slot = slot;
     // (the drummer from the side he looks to, his hi-hat's: from the other, some had their hair and horns to the lens)
-    float side = who == 2 ? 1 : who == 3 ? -1 : who == 0 ? -1 : (slot & 1) ? 1 : -1;
+    // (the singer on the screen's right: on the left the rock meter and the highway's edge covered her from the chest
+    // down)
+    float side = who == 2 ? 1 : who == 3 ? -1 : who == 0 ? -1 : 1;
     if (shot >= 0 && G.venue3d) {
         // the venue's really there: a camera with an amp or a wall between it and them tries the other side, then a
         // plainer shot, then gives the cut to the whole stage
@@ -1846,7 +1848,7 @@ static void draw_stage(void)
         }
         G.cine_shot = cs >= CS_COUNT ? -1 : cs;
         G.cine_who = cw & 3;
-        G.cine_side = cw == 2 ? 1 : -1;
+        G.cine_side = cw == 2 || cw == 1 ? 1 : -1;
         if (getenv("GHV_SIDE"))         // tests: the camera on this side of them (1 or -1)
             G.cine_side = (float)atof(getenv("GHV_SIDE"));
     }
@@ -2387,9 +2389,10 @@ static void draw_band(double beat)
         }
         bp->pulse *= powf(0.82f, G.fstep);
         if (r == 1) {
-            // the mic comes up for a line and goes down after it
-            float want = playing ? 1 : 0, step = want - bp->mic;
-            bp->mic += (step > 0.17f ? 0.17f : step < -0.17f ? -0.17f : step) * fminf(G.fstep, 2);
+            // the mic comes up for a line and goes down after it: raised over a third of a second, starting half a
+            // second before the words (it snapped up in a tenth, just before them)
+            float want = playing || vox_singing(G.t + 0.45) ? 1 : 0, step = want - bp->mic;
+            bp->mic += (step > 0.05f ? 0.05f : step < -0.04f ? -0.04f : step) * fminf(G.fstep, 2);
         }
         Band3D * m3 = G.band3d[r];
         // a close shot is of one of them, and the rest are still on the stage behind (their far bodies): it was empty
@@ -2495,7 +2498,7 @@ static void draw_band(double beat)
                     d3.fa = 32 + (int)(phase * 16) % 16;          // mic down
                     d3.fb = (int)(phase * 32) % 32;               // singing
                     d3.alt_b = alt3;
-                    d3.wb = bp->mic;
+                    d3.wb = bp->mic * bp->mic * (3 - 2 * bp->mic);     // eased in and out
                 }
             }
             if (r >= 2 && jump_f < 0 && f < 48 && band3d_has_hands(m3)) {
