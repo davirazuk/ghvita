@@ -1986,6 +1986,8 @@ bool songconv_install(const char * src_path, const char * dest_root, const ConvO
             }
             if (opt->source_id)
                 fprintf(f, "source = %s\n", opt->source_id);
+            if (ms_value(ini_get(&S, "instrumental"), 0) > 0)
+                fprintf(f, "instrumental = 1\n");
             fprintf(f, "chart = %d\n", CHART_VERSION);
             ok = fclose(f) == 0;
         } else

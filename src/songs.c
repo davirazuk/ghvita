@@ -132,6 +132,8 @@ static bool load_song(const char * folder)
             s->length_ms = atoi(v);
         else if (strcmp(k, "preview_start_time") == 0)
             s->preview_ms = atoi(v);
+        else if (strcmp(k, "instrumental") == 0)
+            s->instrumental = atoi(v) != 0;
         else if (strcmp(k, "parts") == 0) {
             for (char * t = strtok(v, ","); t; t = strtok(NULL, ","))
                 for (int p = 0; p < PART_COUNT; p++)
@@ -181,7 +183,7 @@ static bool has_ext(const char * name, const char * ext)
 // What every folder said last time, so a library of thousands doesn't mean opening thousands of files at each start.
 // A folder whose time has changed is read afresh. New songs, gone songs and a new Song layout all just rewrite it
 
-#define LIB_MAGIC 0x3242494cu         // bump when Song's fields change meaning (2: chart_ver)
+#define LIB_MAGIC 0x3342494cu         // bump when Song's fields change meaning (2: chart_ver, 3: instrumental)
 
 typedef struct {
     uint32_t magic, size;
@@ -592,8 +594,21 @@ static void starter_install(void)
             continue;
         char line[260];
         snprintf(line, sizeof(line), "%s\n", name);
-        if (strstr(have, line))
+        if (strstr(have, line)) {
+            // copied by a build before the songs were marked instrumental: marked now (the singer keeps quiet)
+            char gi[700], buf[2048];
+            snprintf(gi, sizeof(gi), "%ssongs/%s/ghvita.ini", plat_data_dir(), name);
+            FILE * g = fopen(gi, "r");
+            size_t n = g ? fread(buf, 1, sizeof(buf) - 1, g) : 0;
+            if (g)
+                fclose(g);
+            buf[n] = 0;
+            if (n && !strstr(buf, "instrumental") && (g = fopen(gi, "a"))) {
+                fputs("instrumental = 1\n", g);
+                fclose(g);
+            }
             continue;
+        }
         char dir[600];
         snprintf(dir, sizeof(dir), "%ssongs/%s", plat_data_dir(), name);
         char ini[700];

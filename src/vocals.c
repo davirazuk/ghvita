@@ -470,6 +470,38 @@ bool vox_singing(double t)
     return lo < V.note_count && V.notes[lo].t - ms < 200;
 }
 
+float vox_mouth(double t)
+{
+    if (!V.note_count)
+        return -1;
+    int ms = (int)(t * 1000), lo = 0, hi = V.note_count;
+    while (lo < hi) {
+        int mid = (lo + hi) / 2;
+        if (V.notes[mid].t > ms + 30)
+            hi = mid;
+        else
+            lo = mid + 1;
+    }
+    // the last note begun (or about to be): a clap isn't sung
+    for (int k = lo - 1; k >= 0 && k >= lo - 2; k--) {
+        const VNote * n = &V.notes[k];
+        if (n->perc)
+            continue;
+        int in = ms - n->t, len = n->len > 120 ? n->len : 120;
+        if (in < -30 || in > len + 30)
+            continue;
+        if (in < 80)
+            return 0.4f + 0.6f * (in < 0 ? 0 : in / 80.0f);    // the syllable's start: opening wide
+        // held: a little open, with the vowel's wobble, and closing over its last bit when the next syllable joins on
+        float open = 0.55f + 0.2f * sinf((float)t * 9);
+        int left = len - in;
+        if (left < 60)
+            open *= left < 0 ? 0.3f : 0.3f + 0.7f * left / 60.0f;
+        return open;
+    }
+    return 0;
+}
+
 int vox_phrases(void)
 {
     return V.phrase_count;

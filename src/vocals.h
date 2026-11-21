@@ -12,6 +12,7 @@ void vox_seek(double t);
 void vox_lyrics(double t);                    // the phrases before t are over, unsung and ungraded
 void vox_autoplay(bool on);
 bool vox_singing(double t);                 // in a phrase at time t (no vocals: true)
+float vox_mouth(double t);                  // the singer's mouth on the sung notes, 0 shut..1 wide (no vocals: -1)
 double vox_end(void);                       // when the last note ends, seconds
 double vox_base_score(void);                // the score with no multiplier
 int vox_phrases(void);

@@ -2109,7 +2109,7 @@ static int band_cell(int r, const BandPart * b, double beat)
 static bool band_playing(int r, double beat_len)
 {
     if (r == 1)
-        return vox_singing(G.t);
+        return !(G.song && G.song->instrumental && !G.vocal) && vox_singing(G.t);
     BandPart * b = &G.band_part[r];
     const Part * p = b->part;
     if (!p)
@@ -2399,7 +2399,8 @@ static void draw_band(double beat)
         if (r == 1) {
             // the mic comes up for a line and goes down after it: raised over a third of a second, starting half a
             // second before the words (it snapped up in a tenth, just before them)
-            float want = playing || vox_singing(G.t + 0.45) ? 1 : 0, step = want - bp->mic;
+            bool words = !(G.song && G.song->instrumental && !G.vocal);     // an instrumental: the mic stays down
+            float want = playing || (words && vox_singing(G.t + 0.45)) ? 1 : 0, step = want - bp->mic;
             bp->mic += (step > 0.05f ? 0.05f : step < -0.04f ? -0.04f : step) * fminf(G.fstep, 2);
         }
         Band3D * m3 = G.band3d[r];
@@ -2446,17 +2447,8 @@ static void draw_band(double beat)
             if (r == 1 && bp->mic > 0.3f && jump_f < 0) {
                 // the singer's mouth: open on the sung notes (a syllable's start wide, then held a little open),
                 // shut between them; with no chart for them, in time with the beat while the mic's up
-                float open = 0;
-                if (bp->part) {
-                    const Part * vp = bp->part;
-                    for (int k = bp->next > 0 ? bp->next - 1 : 0; k < vp->note_count && k <= bp->next + 1; k++) {
-                        double t0 = vp->notes[k].time / 1e6, t1 = t0 + vp->notes[k].len / 1e6;
-                        if (G.t >= t0 - 0.03 && G.t <= t1 + 0.03) {
-                            float in = (float)(G.t - t0);
-                            open = in < 0.08f ? 0.4f + in * 7.5f : 0.55f + 0.25f * sinf((float)G.t * 9);
-                        }
-                    }
-                } else
+                float open = vox_mouth(G.t);
+                if (open < 0)
                     open = 0.3f + 0.4f * fabsf(sinf((float)(phase * 3.14159265 * 4)));
                 d3.mouth = open * bp->mic;
             }
@@ -3216,12 +3208,23 @@ static void reset_play(void)
     G.metro_next = 0;
     while (G.metro_next < G.chart->beat_count && G.chart->beats[G.metro_next].time / 1e6 < G.t)
         G.metro_next++;
-    static const int band_parts[4] = {PART_DRUMS, -1, PART_GUITAR, PART_BASS};
+    // each plays their own part of the chart, or the nearest it has: a bass line charted as "rhythm" (as older charts
+    // have it), a guitar only as co-op. Whoever you are on the stage plays what you play
+    static const int band_parts[4][4] = {{PART_DRUMS, -1}, {-1}, {PART_GUITAR, PART_COOP, PART_RHYTHM, -1},
+                                         {PART_BASS, PART_RHYTHM, -1}};
+    int me = member_me();
     for (int r = 0; r < 4; r++) {
         memset(&G.band_part[r], 0, sizeof(G.band_part[r]));
-        for (int d = 3; r != 1 && d >= 0 && !G.band_part[r].part; d--)
-            G.band_part[r].part = chart_part(G.chart, band_parts[r], d);
+        G.band_part[r].held = -1e9;     // (nothing's rung yet: 0 had them playing the song's first beat, before any note)
+        if (r == me && r != 1 && !G.vocal && G.part)
+            G.band_part[r].part = G.part;
+        for (int k = 0; r != 1 && !G.band_part[r].part && band_parts[r][k] >= 0; k++)
+            for (int d = 3; d >= 0 && !G.band_part[r].part; d--)
+                G.band_part[r].part = chart_part(G.chart, band_parts[r][k], d);
     }
+    // two on one part (no bass line but a rhythm part the guitarist took): the second mimes rather than doubles
+    if (G.band_part[3].part && G.band_part[3].part == G.band_part[2].part)
+        G.band_part[3].part = NULL;
     set_my_stem(1);
     audio_song_fade(1, 0);
     G.song_speed = practice.on ? practice.speed : (cfg.song_speed >= 50 && cfg.song_speed <= 150 ? cfg.song_speed : 100) / 100.0f;
@@ -3594,20 +3597,6 @@ static int stars_for(double score)
         if (G.base_score > 0 && score >= cut[i] * G.base_score)
             s = i + 1;
     return s;
-}
-
-// the stars so far and how far along to the next (0..1), by the same cuts
-static float star_progress(int * stars)
-{
-    static const double guitar[6] = {0.06, 0.12, 0.2, 0.47, 0.78, 1.15}, bass[6] = {0.05, 0.1, 0.19, 0.47, 0.78, 1.15};
-    const double * cut = G.part_id == PART_BASS ? bass : guitar;
-    int s = stars_for(G.score);
-    *stars = s;
-    if (s >= 6 || G.base_score <= 0)
-        return 0;
-    double lo = s ? cut[s - 1] * G.base_score : 0, hi = cut[s] * G.base_score;
-    double f = hi > lo ? (G.score - lo) / (hi - lo) : 0;
-    return (float)(f < 0 ? 0 : f > 1 ? 1 : f);
 }
 
 void game_versus(const char * name)

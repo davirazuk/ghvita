@@ -925,7 +925,7 @@ def make(song, out, pack=False):
                 f'genre = {song["genre"]}\nyear = 2026\ncharter = GH Vita\nsong_length = {int(length * 1000)}\n'
                 f'preview_start_time = {int(chorus * beat_s(song) * 1000)}\ndelay = 0\n'
                 f'diff_guitar = {t["guitar"]}\ndiff_rhythm = {t["rhythm"]}\ndiff_bass = {t["bass"]}\n'
-                f'diff_drums = {t["drums"]}\ndiff_band = {round(sum(t.values()) / 4)}\n'
+                f'diff_drums = {t["drums"]}\ndiff_band = {round(sum(t.values()) / 4)}\ninstrumental = 1\n'
                 f'loading_phrase = An original song made for GH Vita: play it, share it, keep it.\n')
     print(f'{folder}: {length:.0f} s, notes {counts}')
     return folder

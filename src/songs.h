@@ -33,6 +33,7 @@ typedef struct {
     int plays;
     long last_played;                       // when it was last finished (0 never, or only before times were kept)
     bool fav;
+    bool instrumental;                      // no one sings in it (song.ini's instrumental = 1): the singer doesn't
 } Song;
 
 enum { SORT_TITLE, SORT_ARTIST, SORT_ALBUM, SORT_YEAR, SORT_GENRE, SORT_CHARTER, SORT_HARD, SORT_LENGTH, SORT_NEW, SORT_PLAYS,
