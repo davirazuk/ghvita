@@ -29,6 +29,7 @@ typedef struct {
     int rival_score;
     int attacks_thrown, attacks_taken, rival_pct, rival_level;
     char rival_name[24];
+    int versus;                 // against another device: 0 no, 1 won, 2 lost, 3 level
     int perfects, greats, goods;    // the hits by timing: within 25 ms, 50 ms, the rest of the window
     int accuracy_x10;               // Perfect 100%, Great 70%, Good 40%, a miss 0, over every note: in tenths of a percent
     char rank[3];                   // S+ S A B C D, F when failed
@@ -37,8 +38,13 @@ typedef struct {
 enum { GAME_PLAYING, GAME_DONE, GAME_FAILED, GAME_PAUSE };
 
 bool game_start(Song * song, int part, int diff);
-bool game_vocal_part(void);
-double game_time(void);                         // where the song is, seconds                      // the part being played is the vocals
+bool game_vocal_part(void);                     // the part being played is the vocals
+double game_time(void);                         // where the song is, seconds
+// against another device (main.c, mp.h): the next game_start shows them across the top (NULL: nobody); their latest
+void game_versus(const char * name);
+void game_versus_update(int score, int streak, float rock, int pct, bool done);
+// how it's going now: for the other device
+void game_live(int * score, int * streak, int * mult, float * rock, int * pct, bool * sp);
 // the venue the next songs play in (the tour's), NULL to leave it to the options
 void game_force_venue(const char * zone);
 // the frets are played on the screen: five wide pads along its bottom, drawn and taken as lanes (main.c sets it once

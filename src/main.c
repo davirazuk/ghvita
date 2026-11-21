@@ -31,9 +31,16 @@
 #include "vocals.h"
 #include "dl.h"
 #include "update.h"
+#include "mp.h"
+#include "p2p.h"
 
+static bool mp_picking;             // the song list picks the lobby's song (PLAY TOGETHER)
+static bool mp_round;               // a song played together is on (its results go back to the lobby)
+static int mp_row;
+static void mp_round_over(void);
 enum { S_TITLE, S_MAIN, S_TOUR, S_SONGS, S_SELECT, S_PRACTICE, S_PLAY, S_PAUSE, S_RESUME, S_RESULTS, S_OPTIONS, S_CALIBRATE, S_EMPTY,
-       S_DOWNLOAD, S_UPDATE, S_CAREER, S_NEWS, S_PLAYERS, S_PLAYER_EDIT, S_FACEOFF, S_GIGDONE, S_REPLAYS, S_ROCKERS };
+       S_DOWNLOAD, S_UPDATE, S_CAREER, S_NEWS, S_PLAYERS, S_PLAYER_EDIT, S_FACEOFF, S_GIGDONE, S_REPLAYS, S_ROCKERS, S_MULTI,
+       S_MLOBBY, S_MSHARE };
 
 static int screen = S_TITLE;
 static double now_s, screen_t;
@@ -1255,10 +1262,10 @@ static void main_menu(void)
         go(S_UPDATE);
         return;
     }
-    static const char * items[] = {"QUICKPLAY", "DAILY SONG", "WORLD TOUR", "DOWNLOAD SONGS", "OPTIONS", "CALIBRATE",
-                                   "CAREER", "ROCKERS", "EXIT"};
-    enum { M_QUICK, M_DAILY, M_TOUR, M_DOWNLOAD, M_OPTIONS, M_CALIBRATE, M_CAREER, M_ROCKERS, M_EXIT };
-    const int n = 9;
+    static const char * items[] = {"QUICKPLAY", "DAILY SONG", "WORLD TOUR", "PLAY TOGETHER", "DOWNLOAD SONGS", "OPTIONS",
+                                   "CALIBRATE", "CAREER", "ROCKERS", "EXIT"};
+    enum { M_QUICK, M_DAILY, M_TOUR, M_TOGETHER, M_DOWNLOAD, M_OPTIONS, M_CALIBRATE, M_CAREER, M_ROCKERS, M_EXIT };
+    const int n = 10;
     if (repeat & BTN_UP) {
         menu_index = (menu_index + n - 1) % n;
         ui_sound(SND_UI_MOVE);
@@ -1293,6 +1300,10 @@ static void main_menu(void)
             }
         } else if (which == M_TOUR)
             tour_enter();
+        else if (which == M_TOGETHER) {
+            mp_row = 0;
+            go(S_MULTI);
+        }
         else if (which == M_DOWNLOAD)
             go(S_DOWNLOAD);
         else if (which == M_OPTIONS) {
@@ -1338,7 +1349,7 @@ static void main_menu(void)
         gfx_sprite(&(Sprite){res.logo, 0, 0, 1, 1, 512, 370}, 34, 8, 196, 142, WHITE);
     // the list down the left, no box: the choice big, on a wedge of light cut on the slant; the rest smaller, waiting
     for (int i = 0; i < n; i++) {
-        float y = 156 + i * 37.0f;
+        float y = 156 + i * 34.0f;
         bool on = i == menu_index;
         tap_item(0, y - 4, 470, 37, i - menu_index);
         if (on) {
@@ -1502,6 +1513,7 @@ static int dl_panel_row;            // which row is being looked at
 enum { FROW_CHARTER, FROW_ARTIST, FROW_GENRE, FROW_INSTRUMENT, FROW_DIFFICULTY, FROW_DECADE, FROW_YEAR, FROW_SORT,
        FROW_STEMS, FROWS };
 static void (*kb_apply)(const char * text);     // when set, the keyboard hands its words here instead of the search
+static const char * kb_title;                   // the phone's own keyboard's title for those words (NULL "Search")
 
 static void dl_panel_search(void)   // filters changed, the results must know
 {
@@ -2043,7 +2055,7 @@ static void kb_update(void)
     // keyboard types straight in (Enter searches, Esc cancels), the on-screen keys still there for the mouse
     if (touch_only || game_pc_keys) {
         if (!sys_on) {
-            plat_text_begin("Search", dl_typed);
+            plat_text_begin(kb_apply && kb_title ? kb_title : "Search", dl_typed);
             snprintf(sys_last, sizeof(sys_last), "%s", dl_typed);
             sys_on = true;
         }
@@ -2116,6 +2128,7 @@ static void kb_update(void)
             // the filter panel asked for them
             void (*apply)(const char *) = kb_apply;
             kb_apply = NULL;
+            kb_title = NULL;
             plat_log("typed for a filter \"%s\"", t);
             apply(t);
             kb_sync();
@@ -2917,6 +2930,13 @@ static int nearest_diff(int part, int want)
 // the part and difficulty screen for a song
 static void open_select(const Song * s)
 {
+    if (mp_picking) {
+        // the lobby's song, picked: back there with it
+        mp_picking = false;
+        mp_choose((Song *)s);
+        go(S_MLOBBY);
+        return;
+    }
     read_diffs(s);
     sel_part = first_part(s);
     for (int p = 0; !sel_diffs[sel_part] && p < PART_COUNT; p++)
@@ -4758,6 +4778,15 @@ static void results_screen(void)
         go(S_FACEOFF);
         return;
     }
+    if ((pressed & (BTN_CROSS | BTN_CIRCLE)) && mp_round) {
+        // a song played together: the lobby again for the next
+        ui_sound(SND_UI_SELECT);
+        mp_round_over();
+        go(mp_active() ? S_MLOBBY : S_MULTI);
+        return;
+    }
+    if (mp_round)       // a retry or practice alone would leave the other one waiting: the next is picked together
+        pressed &= ~(uint32_t)(BTN_TRIANGLE | BTN_SQUARE | BTN_START);
     if (pressed & (BTN_CROSS | BTN_CIRCLE)) {
         ui_sound(SND_UI_SELECT);
         // on to the next of the setlist, on the same part and difficulty when it has them
@@ -4825,7 +4854,14 @@ static void results_screen(void)
     draw_background(res.bg_results, WHITE);
     gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(0, 0, 0, 90));
     panel(40, 30, 880, 470);
-    if (result.battle)
+    if (result.versus) {
+        char vt[80];
+        snprintf(vt, sizeof(vt), "%s", result.versus == 1 ? "YOU WIN!" : result.versus == 3 ? "A DRAW!" : "");
+        if (result.versus == 2)
+            snprintf(vt, sizeof(vt), "%s WINS", result.rival_name);
+        font_draw_fit(res.title, vt, SCREEN_W / 2, 48, 52, 820,
+                      result.versus == 2 ? RGBA(255, 90, 70, 255) : RGBA(120, 230, 120, 255), ALIGN_CENTER);
+    } else if (result.battle)
         font_draw_fit(res.title, result.battle == 1 ? "YOU WIN!" : "RIVAL WINS", SCREEN_W / 2, 48, 52, 820,
                       result.battle == 1 ? RGBA(120, 230, 120, 255) : RGBA(255, 90, 70, 255), ALIGN_CENTER);
     else
@@ -4835,7 +4871,7 @@ static void results_screen(void)
         // failed, the big line doesn't name the song
         char who[200];
         snprintf(who, sizeof(who), "%s  -  %s", s->name, s->artist);
-        if (result.battle) {
+        if (result.battle || result.versus) {
             // head to head: a bar each, as long as its score, the winner's lit
             int top = result.score > result.rival_score ? result.score : result.rival_score;
             if (top < 1)
@@ -4844,18 +4880,22 @@ static void results_screen(void)
             for (int k = 0; k < 2; k++) {
                 bool me = k == 0;
                 int sc = me ? result.score : result.rival_score;
-                bool won = me == (result.battle == 1);
-                float y = 98 + k * 22;
-                font_draw_fit(res.ui, me ? "You" : result.rival_name, bx - 12, y - 2, 18, 160,
+                bool won = result.versus ? result.versus == 3 || me == (result.versus == 1) : me == (result.battle == 1);
+                float y = 96 + k * 17;
+                font_draw_fit(res.ui, me ? "You" : result.rival_name, bx - 12, y - 3, 16, 160,
                               me ? RGBA(150, 215, 255, 255) : RGBA(255, 160, 140, 255), ALIGN_RIGHT);
-                gfx_rect(bx, y, bw, 14, RGBA(0, 0, 0, 170));
-                gfx_rect(bx, y, bw * sc / top, 14, me ? RGBA(70, 190, 255, won ? 255 : 150)
+                gfx_rect(bx, y, bw, 12, RGBA(0, 0, 0, 170));
+                gfx_rect(bx, y, bw * sc / top, 12, me ? RGBA(70, 190, 255, won ? 255 : 150)
                                                      : RGBA(235, 70, 55, won ? 255 : 150));
                 snprintf(who, sizeof(who), "%d", sc);
-                font_draw(res.ui, who, bx + bw + 10, y - 2, 18, WHITE, ALIGN_LEFT);
+                font_draw(res.ui, who, bx + bw + 10, y - 3, 16, WHITE, ALIGN_LEFT);
             }
-            snprintf(who, sizeof(who), "%s hit %d%% of notes   attacks thrown %d, taken %d", result.rival_name,
-                     result.rival_pct, result.attacks_thrown, result.attacks_taken);
+            if (result.versus)
+                snprintf(who, sizeof(who), "%s  -  %s      %s hit %d%% of notes", s->name, s->artist, result.rival_name,
+                         result.rival_pct);
+            else
+                snprintf(who, sizeof(who), "%s hit %d%% of notes   attacks thrown %d, taken %d", result.rival_name,
+                         result.rival_pct, result.attacks_thrown, result.attacks_taken);
             font_draw_fit(res.ui, who, SCREEN_W / 2, 464, 17, 820, RGBA(200, 195, 185, 255), ALIGN_CENTER);
         } else
             font_draw_fit(res.ui, result.failed ? who : s->artist, SCREEN_W / 2, 104, 26, 820, RGBA(230, 230, 230, 255),
@@ -4881,12 +4921,13 @@ static void results_screen(void)
             ticked = shown;
             sound_play(res.snd[SND_STAR], 0.35f, false);
         }
-        draw_stars(shown >= 6 || (result.stars >= 6 && a >= 1) ? 6 : shown, 460, 136, 56);
+        bool h2h = result.battle || result.versus;     // the two score bars are over them: a little smaller, lower
+        draw_stars(shown >= 6 || (result.stars >= 6 && a >= 1) ? 6 : shown, 460, h2h ? 148 : 136, h2h ? 46 : 56);
         if (result.rank[0] && result.part != PART_VOCALS && a >= 1) {
             // the rank lands once the stars are in
             uint32_t rc = result.rank[0] == 'S' ? RGBA(255, 214, 70, 255) : result.rank[0] == 'A' ? RGBA(120, 230, 130, 255)
                           : result.rank[0] == 'F' ? RGBA(255, 80, 60, 255) : RGBA(220, 220, 230, 255);
-            font_draw_shadow(res.title, result.rank, 395, 112, 72, rc, ALIGN_CENTER);
+            font_draw_shadow(res.title, result.rank, 395, h2h ? 132 : 112, h2h ? 58 : 72, rc, ALIGN_CENTER);
         }
     }
     int pct = result.notes_total ? result.notes_hit * 100 / result.notes_total : 0;
@@ -5079,9 +5120,11 @@ static void results_screen(void)
     }
     const char * help[8] = {"btn_cross", "Continue", "btn_triangle", "Retry"};
     int nh = 4;
-    if (results_can_practice())
+    if (mp_round)
+        help[1] = "Back to the lobby", nh = 2;
+    else if (results_can_practice())
         help[nh++] = "btn_square", help[nh++] = "Practice it";
-    if (result_replay && nh < 8)
+    if (result_replay && nh < 8 && !mp_round)
         help[nh++] = "btn_start", help[nh++] = "Replay";
     if (hist_n >= (hist_has_this ? 2 : 1))
         help[nh++] = "btn_r", help[nh++] = results_history ? "This play" : "History";
@@ -7005,18 +7048,18 @@ static void rockers_screen(void)
 static void news_screen(void)
 {
     static const char * const lines[] = {
+        "PLAY TOGETHER (main menu): two devices play the same song at the same moment, each one's score racing the other's across the top. Any mix: Vita, phone, PC. On the same Wi-Fi (or one on the other's phone hotspot) they find each other; far apart, each types the other's code. No server, no port forwarding.",
+        "Share songs between them: the song the host picks comes over by itself, and Share songs copies any of the other one's songs here (or all the ones you're missing).",
+        "Five songs come with the game now, made for GH Vita: Highway Ignition, Paper Kings, Glass Thunder, Last Light Run and Midnight Overdrive, each with guitar, rhythm, bass and drums on all four difficulties.",
         "The band nods to the music: guitarists and bassists dip their heads on every beat, the singer a little too.",
         "Basses and guitars hang at the hips, out in front of each player: one bassist held his bass at his chest like a violin, another's was inside his belt buckle. The Star Power jump keeps the guitar in their hands too.",
         "Song downloads find everything the sites have: the search had quietly kept only charts with an Expert guitar part, and Chorus found nothing for an artist and a song name together (\"metallica one\").",
         "Dark dyed hair shows its strands instead of a flat black slab, and the drummer's close-up looks down over his cymbals at his face.",
-        "Fixed a crash: starting a song after another (Practice especially) could read the last song's chart after it was gone.",
         "No more mashing: holding a fret above a note's highest one stops it counting, as in Guitar Hero.",
         "Strum mode plays like Clone Hero: every note wants a strum except taps, and hammer-ons after a hit note; every extra strum breaks your streak.",
         "Singers hold the mic at the mouth and their mouths move with the words. Guitars are held right-handed, across the body, strings to the crowd.",
         "Phones: 32-bit phones work too. Updates also come from the game's own build branch, so every device keeps updating.",
-        "Phones held upright: the menus show their list big across the top, the songs big pads across the bottom.",
         "Windows and Linux (AppImage) versions: full screen (F11 or Alt+Enter for a window), keyboard, controllers and USB guitars, and they update themselves.",
-        "Big notes and two-hand touch are the defaults on phones.",
     };
     int n = (int)(sizeof(lines) / sizeof(lines[0]));
     gfx_begin(0, 0, 0);
@@ -7192,6 +7235,516 @@ static void scan_progress(int found, const char * converting)
     res_loading(1, t);
 }
 
+// ----------------------------------------------------------------------------------------------- playing together
+// PLAY TOGETHER: devices on the same Wi-Fi (or one on the other's hotspot) find each other; one picks the other, and
+// they're in a lobby: the host picks the song (copied to the other if it hasn't it), each picks a part and difficulty,
+// both ready, and it starts on both at the same moment, each one's score across the top of the other's screen
+static int mp_list_sel, mp_list_top;
+static double mp_sent_t, mp_note_t;
+static char mp_note[120];           // a word on the screen for a moment ("couldn't reach them")
+static char mp_want[256][96];       // songs asked for from the other's list, not yet asked of it
+static int mp_want_n, mp_asked, mp_got_at_ask;
+static const Song * mp_diffs_for;
+
+static void mp_say(const char * t)
+{
+    snprintf(mp_note, sizeof(mp_note), "%s", t);
+    mp_note_t = now_s;
+}
+
+static bool mp_by_code;             // the connection being tried is to an internet code
+static double mp_code_t;            // since when
+
+static void mp_address_typed(const char * t)
+{
+    uint32_t ip;
+    uint16_t port;
+    char mine[24];
+    if (p2p_my_code(mine, sizeof(mine)) == 1) {
+        uint32_t mi;
+        uint16_t mport;
+        if (p2p_parse_code(t, &mi, &mport) && p2p_parse_code(mine, &ip, &port) && mi == ip && mport == port) {
+            mp_say("That's this one's own code: type the other one's");
+            return;
+        }
+    }
+    if (p2p_parse_code(t, &ip, &port)) {
+        p2p_connect_code(ip, port);
+        mp_by_code = true;
+        mp_code_t = now_s;
+    } else if (p2p_parse_address(t, &ip, &port)) {
+        p2p_connect(ip, port);
+        mp_by_code = false;
+        mp_say("Connecting...");
+    } else
+        mp_say("That's not a code (ten letters and numbers, like K7Q2M-XH4PB) or an address (like 192.168.1.5)");
+}
+
+// the round's over (the song finished, or quit): the other told, the lobby again
+static void mp_round_over(void)
+{
+    if (!mp_round)
+        return;
+    mp_round = false;
+    MpState st = {0};
+    bool sp;
+    game_live(&st.score, &st.streak, &st.mult, &st.rock, &st.pct, &sp);
+    st.done = true;
+    mp_send_state(&st);
+    mp_song_over();
+    game_versus(NULL);
+}
+
+static void multi_screen(void)
+{
+    static double opened = -1;
+    if (opened != screen_t) {           // the screen's first frame (go() came in the middle of the last one)
+        opened = screen_t;
+        if (!p2p_open(player_name(player_current())))
+            mp_say("No network: connect this device to Wi-Fi (or the other one's hotspot)");
+        p2p_code_begin();
+    }
+    bool waiting = p2p_state() == P2P_CONNECTING;
+    if (mp_active()) {
+        mp_row = 0;
+        go(S_MLOBBY);
+        return;
+    }
+    P2PPeer peers[12];
+    int n = p2p_is_open() ? p2p_peers(peers, 12) : 0, rows = n + 1;
+    if (dl_typing) {
+        kb_update();
+    } else {
+        if (repeat & BTN_UP)
+            mp_row = (mp_row + rows - 1) % rows;
+        if (repeat & BTN_DOWN)
+            mp_row = (mp_row + 1) % rows;
+        if (mp_row >= rows)
+            mp_row = rows - 1;
+        if ((pressed & BTN_CIRCLE) && waiting) {
+            ui_sound(SND_UI_BACK);      // stop trying (and stay)
+            p2p_hangup();
+            mp_say("Stopped");
+        } else if (pressed & BTN_CIRCLE) {
+            ui_sound(SND_UI_BACK);
+            p2p_close();
+            go(S_MAIN);
+            return;
+        }
+        if ((pressed & BTN_CROSS) && p2p_is_open()) {
+            ui_sound(SND_UI_SELECT);
+            if (mp_row < n) {
+                mp_by_code = false;
+                p2p_connect(peers[mp_row].ip, peers[mp_row].port);
+                char t[80];
+                snprintf(t, sizeof(t), "Connecting to %s...", peers[mp_row].name);
+                mp_say(t);
+            } else {
+                dl_typed[0] = 0;
+                dl_typing = true;
+                kb_apply = mp_address_typed;
+                kb_title = "The other one's code or address";
+            }
+        }
+    }
+    if (p2p_state() == P2P_LOST) {
+        mp_say(mp_by_code ? "Couldn't reach them: check both codes were typed (each one types the other's). Some phone "
+                            "networks don't let this through: try Wi-Fi"
+                          : "Couldn't reach them: is the game open on PLAY TOGETHER there, on the same network?");
+        p2p_hangup();
+    }
+    gfx_begin(0, 0, 0);
+    gfx_2d();
+    draw_background(res.bg_menu, WHITE);
+    banner("PLAY TOGETHER");
+    panel(40, 96, 500, 380);
+    font_draw_shadow(res.ui, "Nearby", 60, 108, 22, RGBA(255, 230, 150, 255), ALIGN_LEFT);
+    for (int i = 0; i < rows; i++) {
+        float y = 142 + i * 44;
+        bool on = i == mp_row;
+        gfx_rect(56, y, 468, 40, on ? RGBA(70, 58, 30, 255) : RGBA(0, 0, 0, 70));
+        tap_item(56, y, 468, 40, i - mp_row);
+        if (i < n) {
+            char t[80];
+            snprintf(t, sizeof(t), "%s", peers[i].name);
+            font_draw_fit(res.ui, t, 70, y + 4, 22, 300, on ? WHITE : RGBA(220, 220, 225, 255), ALIGN_LEFT);
+            snprintf(t, sizeof(t), "%s, %d songs", peers[i].device, peers[i].songs);
+            font_draw_fit(res.ui, t, 512, y + 8, 17, 170, RGBA(180, 180, 190, 255), ALIGN_RIGHT);
+        } else
+            font_draw(res.ui, "Type the other one's code or address...", 70, y + 8, 20, on ? WHITE : RGBA(200, 200, 210, 255),
+                      ALIGN_LEFT);
+    }
+    if (!n && p2p_is_open()) {
+        float k = 0.6f + 0.4f * sinf((float)(now_s - opened) * 3);
+        font_draw_fit(res.ui, "Looking for other devices...", 60, 142 + 44 + 10, 18, 460, RGBA(200, 200, 210, (int)(255 * k)), ALIGN_LEFT);
+    }
+    panel(560, 96, 360, 380);
+    char me[48], code[24], t[160];
+    p2p_my_address(me, sizeof(me));
+    int have_code = p2p_is_open() ? p2p_my_code(code, sizeof(code)) : -1;
+    static const char * const how[] = {
+        "Same Wi-Fi, or one on the other's phone hotspot: open PLAY TOGETHER on both and pick the other one here.",
+        "Far apart: send each other your codes (a message, a call), and both type the other's.",
+    };
+    float y = 112;
+    for (int i = 0; i < 2; i++)
+        y += draw_wrapped(how[i], 578, y, 18, 324, 4, RGBA(225, 225, 230, 255)) + 10;
+    font_draw_fit(res.ui, "Your code", 578, 268, 18, 324, RGBA(200, 200, 210, 255), ALIGN_LEFT);
+    if (have_code == 1)
+        font_draw_shadow(res.title, code, 578, 290, 40, RGBA(255, 222, 120, 255), ALIGN_LEFT);
+    else
+        font_draw_fit(res.ui, have_code == 0 ? "asking the internet..." : "none (no internet here)", 578, 298, 20, 324,
+                      RGBA(200, 200, 210, 255), ALIGN_LEFT);
+    draw_wrapped("It carries your internet address: give it only to who you play with.", 578, 336, 15, 324, 2,
+                 RGBA(170, 170, 180, 255));
+    snprintf(t, sizeof(t), "This one: %s", player_name(player_current()));
+    font_draw_fit(res.ui, t, 578, 380, 20, 324, RGBA(255, 236, 190, 255), ALIGN_LEFT);
+    snprintf(t, sizeof(t), "Address: %s", p2p_is_open() ? me : "no network");
+    font_draw_fit(res.ui, t, 578, 410, 20, 324, RGBA(255, 236, 190, 255), ALIGN_LEFT);
+    if (waiting && mp_by_code) {
+        // the other one may still be typing this one's code: say so, and how long it's been
+        float k = 0.6f + 0.4f * sinf((float)now_s * 3);
+        snprintf(t, sizeof(t), "Reaching them... %d s   (they type your code too)", (int)(now_s - mp_code_t));
+        font_draw_fit(res.ui, t, SCREEN_W / 2, 482, 18, 860, RGBA(150, 220, 255, (int)(255 * k)), ALIGN_CENTER);
+    }
+    if (mp_note[0] && now_s - mp_note_t < 6 && !(waiting && mp_by_code))
+        font_draw_fit(res.ui, mp_note, SCREEN_W / 2, 482, 18, 860, RGBA(255, 200, 150, 255), ALIGN_CENTER);
+    static const char * help[] = {"btn_cross", "Connect", "btn_circle", "Back"};
+    static const char * help_wait[] = {"btn_circle", "Stop"};
+    if (waiting)
+        help_bar(help_wait, 2);
+    else
+        help_bar(help, 4);
+    if (dl_typing)
+        kb_draw();
+    draw_toast();
+    gfx_end();
+}
+
+// the part and difficulty rows: what the song has (sel_diffs), stepped through
+static void mp_step_part(Song * s, int d, int * part, int * diff)
+{
+    if (!s)
+        return;
+    for (int k = 0; k < PART_COUNT; k++) {
+        *part = (*part + d + PART_COUNT) % PART_COUNT;
+        if (sel_diffs[*part])
+            break;
+    }
+    if (!(sel_diffs[*part] & 1 << *diff))
+        for (int k = DIFF_COUNT - 1; k >= 0; k--)
+            if (sel_diffs[*part] & 1 << k) {
+                *diff = k;
+                break;
+            }
+}
+
+static void lobby_screen(void)
+{
+    static int part = 0, diff = DIFF_EXPERT;
+    if (!mp_active()) {
+        if (pressed & (BTN_CROSS | BTN_CIRCLE)) {
+            p2p_hangup();
+            go(S_MULTI);
+            return;
+        }
+    }
+    Song * s = mp_song();
+    if (s != mp_diffs_for) {
+        mp_diffs_for = s;
+        if (s) {
+            read_diffs(s);
+            if (!sel_diffs[part])
+                mp_step_part(s, 1, &part, &diff);
+            mp_step_part(s, 0, &part, &diff);
+        }
+    }
+    bool host = p2p_hosting();
+    double start = mp_start_at();
+    enum { L_SONG, L_PART, L_DIFF, L_READY, L_SHARE, L_LEAVE, L_ROWS };
+    if (mp_active() && start <= 0) {
+        if (repeat & BTN_UP)
+            mp_row = (mp_row + L_ROWS - 1) % L_ROWS;
+        if (repeat & BTN_DOWN)
+            mp_row = (mp_row + 1) % L_ROWS;
+        int lr = repeat & BTN_LEFT ? -1 : repeat & BTN_RIGHT ? 1 : 0;
+        if (lr && s && !mp_am_ready()) {
+            if (mp_row == L_PART)
+                mp_step_part(s, lr, &part, &diff);
+            else if (mp_row == L_DIFF)
+                for (int k = 0; k < DIFF_COUNT; k++) {
+                    diff = (diff + lr + DIFF_COUNT) % DIFF_COUNT;
+                    if (sel_diffs[part] & 1 << diff)
+                        break;
+                }
+            ui_sound(SND_UI_MOVE);
+        }
+        if (pressed & BTN_CROSS) {
+            ui_sound(SND_UI_SELECT);
+            if (mp_row == L_SONG && host) {
+                mp_picking = true;
+                go(songs_count() ? S_SONGS : S_EMPTY);
+                return;
+            } else if (mp_row == L_READY || mp_row == L_PART || mp_row == L_DIFF) {
+                if (!s)
+                    mp_say(host ? "Pick a song first" : "Waiting for the song");
+                else
+                    mp_ready(!mp_am_ready());
+            } else if (mp_row == L_SHARE) {
+                mp_list_sel = mp_list_top = 0;
+                mp_ask_list();
+                go(S_MSHARE);
+                return;
+            } else if (mp_row == L_LEAVE) {
+                p2p_hangup();
+                go(S_MULTI);
+                return;
+            }
+        }
+        if (pressed & BTN_CIRCLE) {
+            ui_sound(SND_UI_BACK);
+            if (mp_am_ready())
+                mp_ready(false);
+            else {
+                p2p_hangup();
+                go(S_MULTI);
+                return;
+            }
+        }
+        mp_pick(part, diff);
+    }
+    // the moment comes: the song starts here as it starts there
+    if (start > 0 && plat_now_us() / 1e6 >= start && s) {
+        int idx = songs_find(s->folder);
+        game_versus(p2p_other());
+        if (idx >= 0 && game_start(s, part, diff)) {
+            sel = idx;
+            mp_started();
+            mp_round = true;
+            practicing = false;
+            game_set_autoplay(autoplay);
+            menu_music_stop();
+            go(S_PLAY);
+            return;
+        }
+        mp_started();
+        game_versus(NULL);
+        mp_say("The song wouldn't start here");
+    }
+    gfx_begin(0, 0, 0);
+    gfx_2d();
+    draw_background(res.bg_menu, WHITE);
+    banner("PLAY TOGETHER");
+    char t[200];
+    if (!mp_active()) {
+        panel(180, 180, 600, 160);
+        font_draw_shadow(res.title, "CONNECTION LOST", SCREEN_W / 2, 200, 40, RGBA(255, 120, 100, 255), ALIGN_CENTER);
+        font_draw_fit(res.ui, "The other device left, or the network dropped.", SCREEN_W / 2, 262, 22, 560, WHITE, ALIGN_CENTER);
+        static const char * help[] = {"btn_cross", "OK"};
+        help_bar(help, 2);
+        gfx_end();
+        return;
+    }
+    snprintf(t, sizeof(t), "With %s (%s)   %.0f ms", p2p_other(), p2p_other_device(), p2p_ping_ms());
+    font_draw_fit(res.ui, t, SCREEN_W - 30, 30, 20, 420, RGBA(200, 220, 255, 255), ALIGN_RIGHT);
+    panel(40, 96, 880, 380);
+    static const char * names[L_ROWS] = {"Song", "Your part", "Difficulty", "Ready", "Share songs", "Leave"};
+    for (int i = 0; i < L_ROWS; i++) {
+        float y = 110 + i * 46;
+        bool on = i == mp_row;
+        gfx_rect(56, y, 848, 42, on ? RGBA(70, 58, 30, 255) : RGBA(0, 0, 0, 70));
+        tap_item(56, y, 848, 42, i - mp_row);
+        font_draw(res.ui, names[i], 72, y + 9, 22, on ? WHITE : RGBA(200, 200, 210, 255), ALIGN_LEFT);
+        t[0] = 0;
+        uint32_t c = RGBA(255, 236, 190, 255);
+        if (i == L_SONG) {
+            if (mp_song_name()[0])
+                snprintf(t, sizeof(t), "%s - %s", mp_song_name(), mp_song_artist());
+            else
+                snprintf(t, sizeof(t), "%s", host ? "Choose one (X)" : "The other one's choosing...");
+        } else if (i == L_PART && s)
+            snprintf(t, sizeof(t), "<  %s  >", part_name(part));
+        else if (i == L_DIFF && s)
+            snprintf(t, sizeof(t), "<  %s  >", diff_name(diff));
+        else if (i == L_READY) {
+            snprintf(t, sizeof(t), "%s", mp_am_ready() ? "READY" : "not yet (X)");
+            c = mp_am_ready() ? RGBA(130, 235, 130, 255) : c;
+        }
+        font_draw_fit(res.ui, t, 888, y + 9, 22, 560, c, ALIGN_RIGHT);
+    }
+    // the other one, and the song on its way here
+    int tp, td;
+    mp_their_pick(&tp, &td);
+    char them[120] = "";
+    if (tp >= 0 && tp < PART_COUNT && td >= 0 && td < DIFF_COUNT)
+        snprintf(them, sizeof(them), "%s: %s, %s%s", p2p_other(), part_name(tp), diff_name(td), mp_they_ready() ? ", READY" : "");
+    else
+        snprintf(them, sizeof(them), "%s is here", p2p_other());
+    font_draw_fit(res.ui, them, 72, 392, 20, 820, mp_they_ready() ? RGBA(130, 235, 130, 255) : RGBA(220, 220, 225, 255), ALIGN_LEFT);
+    char in[96], out[96];
+    int ip, op, q;
+    if (mp_transfer(in, sizeof(in), &ip, out, sizeof(out), &op, &q)) {
+        if (in[0])
+            snprintf(t, sizeof(t), "Copying %s from %s: %d%%", in, p2p_other(), ip);
+        else
+            snprintf(t, sizeof(t), "Sending a song to %s: %d%%", p2p_other(), op);
+        font_draw_fit(res.ui, t, 72, 420, 20, 820, RGBA(150, 210, 255, 255), ALIGN_LEFT);
+    } else if (mp_song_name()[0] && !s)
+        font_draw_fit(res.ui, "This one hasn't that song: asking for it...", 72, 420, 20, 820, RGBA(255, 210, 150, 255), ALIGN_LEFT);
+    else if (host && s && !mp_they_have())
+        font_draw_fit(res.ui, "Sending it over...", 72, 420, 20, 820, RGBA(150, 210, 255, 255), ALIGN_LEFT);
+    if (start > 0) {
+        double left = start - plat_now_us() / 1e6;
+        gfx_rect(0, 0, SCREEN_W, SCREEN_H, RGBA(0, 0, 0, 170));
+        snprintf(t, sizeof(t), "%d", (int)ceil(left > 0 ? left : 0));
+        font_draw_shadow(res.title, t, SCREEN_W / 2, 190, 120, RGBA(255, 220, 120, 255), ALIGN_CENTER);
+        font_draw_fit(res.ui, mp_song_name(), SCREEN_W / 2, 330, 26, 820, WHITE, ALIGN_CENTER);
+    }
+    if (mp_note[0] && now_s - mp_note_t < 5)
+        font_draw_fit(res.ui, mp_note, SCREEN_W / 2, 482, 18, 860, RGBA(255, 200, 150, 255), ALIGN_CENTER);
+    static const char * help[] = {"btn_cross", "Choose", "btn_left", "Change", "btn_circle", "Back"};
+    help_bar(help, 6);
+    draw_toast();
+    gfx_end();
+}
+
+static bool mp_queued(const char * k)
+{
+    for (int i = 0; i < mp_want_n; i++)
+        if (!strcmp(mp_want[i], k))
+            return true;
+    return false;
+}
+
+// SHARE SONGS: the other one's songs, any of them copied here
+static void share_screen(void)
+{
+    static MpSong list[2048];
+    int n = mp_list(list, 2048);
+    n = n > 2048 ? 2048 : n;
+    if (!mp_active()) {
+        go(S_MLOBBY);
+        return;
+    }
+    if (repeat & BTN_UP)
+        mp_list_sel--;
+    if (repeat & BTN_DOWN)
+        mp_list_sel++;
+    if (repeat & BTN_LEFT)
+        mp_list_sel -= 8;
+    if (repeat & BTN_RIGHT)
+        mp_list_sel += 8;
+    mp_list_sel = mp_list_sel < 0 ? 0 : mp_list_sel >= n ? (n ? n - 1 : 0) : mp_list_sel;
+    // a song asked for, once: it's queued here, a few asked of the other one at a time
+#define ASKED(k) mp_queued(k)
+    if ((pressed & BTN_CROSS) && n && !list[mp_list_sel].have && !ASKED(list[mp_list_sel].key) && mp_want_n < 256) {
+        snprintf(mp_want[mp_want_n++], 96, "%s", list[mp_list_sel].key);
+        ui_sound(SND_UI_SELECT);
+    }
+    if (pressed & BTN_TRIANGLE) {
+        int added = 0;
+        for (int i = 0; i < n && mp_want_n < 256; i++)
+            if (!list[i].have && !ASKED(list[i].key)) {
+                snprintf(mp_want[mp_want_n++], 96, "%s", list[i].key);
+                added++;
+            }
+        ui_sound(added ? SND_UI_SELECT : SND_UI_BACK);
+    }
+    if (pressed & BTN_CIRCLE) {
+        ui_sound(SND_UI_BACK);
+        go(S_MLOBBY);
+        return;
+    }
+    gfx_begin(0, 0, 0);
+    gfx_2d();
+    draw_background(res.bg_menu, WHITE);
+    banner("SHARE SONGS");
+    char t[200];
+    int have = 0;
+    for (int i = 0; i < n; i++)
+        have += list[i].have;
+    snprintf(t, sizeof(t), "%s's songs: %d%s, %d here already", p2p_other(), n, mp_list_done() ? "" : "...", have);
+    font_draw_fit(res.ui, t, SCREEN_W - 30, 30, 20, 460, RGBA(200, 220, 255, 255), ALIGN_RIGHT);
+    panel(40, 96, 880, 360);
+    const int R = 9;
+    if (mp_list_sel < mp_list_top)
+        mp_list_top = mp_list_sel;
+    if (mp_list_sel >= mp_list_top + R)
+        mp_list_top = mp_list_sel - R + 1;
+    for (int r = 0; r < R && mp_list_top + r < n; r++) {
+        int i = mp_list_top + r;
+        float y = 108 + r * 38;
+        bool on = i == mp_list_sel;
+        gfx_rect(56, y, 848, 34, on ? RGBA(70, 58, 30, 255) : RGBA(0, 0, 0, 70));
+        tap_item(56, y, 848, 34, i - mp_list_sel);
+        uint32_t c = list[i].have ? RGBA(140, 140, 150, 255) : on ? WHITE : RGBA(225, 225, 230, 255);
+        snprintf(t, sizeof(t), "%s - %s", list[i].name, list[i].artist);
+        font_draw_fit(res.ui, t, 70, y + 6, 20, 640, c, ALIGN_LEFT);
+        const char * tag = list[i].have ? "HERE" : ASKED(list[i].key) ? "QUEUED" : "";
+        font_draw(res.ui, tag, 888, y + 8, 17, list[i].have ? RGBA(140, 140, 150, 255) : RGBA(150, 210, 255, 255), ALIGN_RIGHT);
+    }
+    if (!n)
+        font_draw_fit(res.ui, mp_list_done() ? "They have no songs" : "Asking for their list...", SCREEN_W / 2, 250, 22, 800,
+                      RGBA(200, 200, 210, 255), ALIGN_CENTER);
+    char in[96], out[96];
+    int ip, op, q;
+    if (mp_transfer(in, sizeof(in), &ip, out, sizeof(out), &op, &q) && in[0])
+        snprintf(t, sizeof(t), "Copying %s: %d%%   (%d more queued)   %d copied", in, ip,
+                 mp_want_n - (mp_got() - mp_got_at_ask) - 1 > 0 ? mp_want_n - (mp_got() - mp_got_at_ask) - 1 : 0, mp_got());
+    else
+        snprintf(t, sizeof(t), "%d copied so far", mp_got());
+    font_draw_fit(res.ui, t, SCREEN_W / 2, 462, 18, 860, RGBA(150, 210, 255, 255), ALIGN_CENTER);
+    static const char * help[] = {"btn_cross", "Copy here", "btn_triangle", "Copy all missing", "btn_circle", "Back"};
+    help_bar(help, 6);
+    draw_toast();
+    gfx_end();
+#undef ASKED
+}
+
+// every frame: the network, the songs asked for from the list (a few at a time), the score both ways in a round
+static void mp_frame(void)
+{
+    mp_poll();
+    if (!mp_active()) {
+        if (mp_round && screen != S_PLAY && screen != S_PAUSE && screen != S_RESUME) {
+            mp_round = false;
+            game_versus(NULL);
+        }
+        mp_want_n = mp_asked = 0;
+        return;
+    }
+    // the queue of songs to copy here: four asked at a time of the other one
+    int arrived = mp_got() - mp_got_at_ask;
+    while (mp_asked < mp_want_n && mp_asked - arrived < 4) {
+        mp_get(mp_want[mp_asked++]);
+    }
+    if (mp_asked == mp_want_n && arrived >= mp_asked && mp_want_n) {
+        mp_want_n = mp_asked = 0;
+        mp_got_at_ask = mp_got();
+    }
+    if (mp_round) {
+        if (screen == S_PLAY && now_s - mp_sent_t > 0.1) {
+            mp_sent_t = now_s;
+            MpState st = {0};
+            game_live(&st.score, &st.streak, &st.mult, &st.rock, &st.pct, &st.sp);
+            mp_send_state(&st);
+        }
+        const MpState * th = mp_their_state();
+        if (th)
+            game_versus_update(th->score, th->streak, th->rock, th->pct, th->done);
+        // left the song some way other than its results (quit from the pause menu): the round's over
+        if (screen != S_PLAY && screen != S_PAUSE && screen != S_RESUME && screen != S_RESULTS) {
+            mp_round_over();
+            go(S_MLOBBY);
+        }
+    }
+    // the song list was opened to pick for the lobby and backed out of
+    if (mp_picking && screen == S_MAIN) {
+        mp_picking = false;
+        go(S_MLOBBY);
+    }
+}
+
 static void run_screen(void)
 {
     switch (screen) {
@@ -7208,6 +7761,9 @@ static void run_screen(void)
     case S_GIGDONE: gigdone_screen(); break;
     case S_NEWS: news_screen(); break;
     case S_ROCKERS: rockers_screen(); break;
+    case S_MULTI: multi_screen(); break;
+    case S_MLOBBY: lobby_screen(); break;
+    case S_MSHARE: share_screen(); break;
     case S_PLAY: play_screen(); break;
     case S_PAUSE: pause_screen(); break;
     case S_RESUME: resume_screen(); break;
@@ -7336,6 +7892,7 @@ int main(void)
 #if !defined(__vita__) && !defined(__ANDROID__)
         game_pc_keys = !touch_only;     // a PC played on its keyboard
 #endif   // the drawn pads are a phone's: a Vita's screen plays its cups as it always did
+        mp_frame();
         int drawn = screen;
         plat_menu_pass(0);
 #ifndef __vita__

@@ -34,9 +34,39 @@ public class GHVitaActivity extends SDLActivity {
     private long lastCheck;
     private java.io.File pending;       // downloaded, waiting for the phone to allow installing it
 
+    // PLAY TOGETHER finds the other device by a broadcast on the Wi-Fi each second, which most phones throw away to
+    // save power unless an app holds this while it's in front
+    private android.net.wifi.WifiManager.MulticastLock multicast;
+
+    private void hearNetwork(boolean on) {
+        try {
+            if (multicast == null) {
+                android.net.wifi.WifiManager wm = (android.net.wifi.WifiManager) getApplicationContext()
+                    .getSystemService(android.content.Context.WIFI_SERVICE);
+                if (wm == null)
+                    return;
+                multicast = wm.createMulticastLock("ghvita-together");
+                multicast.setReferenceCounted(false);
+            }
+            if (on)
+                multicast.acquire();
+            else if (multicast.isHeld())
+                multicast.release();
+        } catch (Exception e) {
+            android.util.Log.w("GHVita", "multicast lock", e);
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        hearNetwork(false);
+        super.onPause();
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
+        hearNetwork(true);
         if (pending != null && pending.exists())
             install(pending);
         else if (System.currentTimeMillis() - lastCheck > 10 * 60 * 1000)

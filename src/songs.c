@@ -272,7 +272,7 @@ static void lib_save(void)
     if (!f)
         return;
     LibHead h = {LIB_MAGIC, sizeof(Song)};
-    bool ok = fwrite(&h, sizeof(h), 1, f) == 1 && fwrite(songs, sizeof(Song), count, f) == (size_t)count;
+    bool ok = fwrite(&h, sizeof(h), 1, f) == 1 && (!count || fwrite(songs, sizeof(Song), count, f) == (size_t)count);
     ok &= fclose(f) == 0;
     remove(path);
     if (!ok || rename(fresh, path) != 0)
@@ -556,8 +556,101 @@ void songs_set_fav(Song * s, bool fav)
     fclose(f);
 }
 
+// The songs the game comes with (assets/starter, made by tools/mkstarter.py): copied into the songs folder the first
+// time a build that has them starts, so a new player has something to play, and they're songs like any other (shared,
+// deleted). starter.txt beside the saves lists the ones copied: one deleted stays deleted, a new one in a later build
+// still comes in.
+static void starter_install(void)
+{
+    char list[400], have_path[400];
+    snprintf(list, sizeof(list), "%sstarter/list.txt", plat_asset_dir());
+    snprintf(have_path, sizeof(have_path), "%sstarter.txt", plat_data_dir());
+    FILE * l = fopen(list, "r");
+    if (!l)
+        return;
+    // what's come in before
+    static char have[4096];
+    have[0] = 0;
+    FILE * h = fopen(have_path, "r");
+    if (h) {
+        size_t n = fread(have, 1, sizeof(have) - 1, h);
+        have[n] = 0;
+        fclose(h);
+    }
+    static const char * const files[] = {"song.ini", "notes.chart", "guitar.ogg", "song.ogg", "album.png"};
+    char row[320];
+    int copied = 0;
+    while (fgets(row, sizeof(row), l)) {
+        // each: its folder in assets/starter (no spaces: the Vita's packager), a tab, its folder's name in songs/
+        row[strcspn(row, "\r\n")] = 0;
+        char * name = strchr(row, '\t');
+        if (!name)
+            continue;
+        *name++ = 0;
+        const char * key = row;
+        if (!name[0] || !key[0] || strstr(name, "..") || strchr(name, '/') || strstr(key, "..") || strchr(key, '/'))
+            continue;
+        char line[260];
+        snprintf(line, sizeof(line), "%s\n", name);
+        if (strstr(have, line))
+            continue;
+        char dir[600];
+        snprintf(dir, sizeof(dir), "%ssongs/%s", plat_data_dir(), name);
+        char ini[700];
+        snprintf(ini, sizeof(ini), "%s/song.ini", dir);
+        struct stat st;
+        bool there = stat(ini, &st) == 0;   // (a folder a copy failed in, with no song.ini, is copied again)
+        bool ok = true;
+        if (!there) {
+            dl_mkdirs(dir);
+            for (int i = 0; i < 5 && ok; i++) {
+                char from[700], to[700];
+                snprintf(from, sizeof(from), "%sstarter/%s/%s", plat_asset_dir(), key, files[i]);
+                snprintf(to, sizeof(to), "%s/%s", dir, files[i]);
+                FILE * in = fopen(from, "rb");
+                FILE * out = in ? fopen(to, "wb") : NULL;
+                static uint8_t buf[64 * 1024];
+                size_t n;
+                ok = in && out;
+                while (ok && (n = fread(buf, 1, sizeof(buf), in)) > 0)
+                    ok = fwrite(buf, 1, n, out) == n;
+                if (in)
+                    fclose(in);
+                if (out && fclose(out) != 0)
+                    ok = false;
+            }
+            if (ok)
+                copied++;
+            else {
+                plat_log("starter: couldn't copy %s", name);
+                for (int i = 0; i < 5; i++) {
+                    char to[700];
+                    snprintf(to, sizeof(to), "%s/%s", dir, files[i]);
+                    remove(to);
+                }
+            }
+        }
+        if (ok && strlen(have) + strlen(line) < sizeof(have)) {
+            strcat(have, line);
+            FILE * w = fopen(have_path, "w");
+            if (w) {
+                fputs(have, w);
+                fclose(w);
+            }
+        }
+    }
+    fclose(l);
+    if (copied)
+        plat_log("starter: %d songs added", copied);
+}
+
 int songs_scan(void (*progress)(int found, const char * converting))
 {
+    static bool starter_done;
+    if (!starter_done) {
+        starter_done = true;
+        starter_install();
+    }
     scan_progress = progress;
     count = 0;
     char dir[400];

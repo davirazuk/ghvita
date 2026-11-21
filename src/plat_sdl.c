@@ -435,9 +435,15 @@ void plat_quit(void)
 
 int64_t plat_now_us(void)
 {
+    static int64_t skew;                // tests: this copy's clock set ahead (seconds, two copies playing together)
+    static bool skew_read;
+    if (!skew_read) {
+        skew_read = true;
+        skew = getenv("GHV_CLOCK_SKEW") ? (int64_t)(atof(getenv("GHV_CLOCK_SKEW")) * 1e6) : 0;
+    }
     if (fixed_clock)
-        return frame_number * 1000000 / 60 + skip_us;
-    return (int64_t)(SDL_GetPerformanceCounter() * 1000000.0 / SDL_GetPerformanceFrequency()) - start_us;
+        return frame_number * 1000000 / 60 + skip_us + skew;
+    return (int64_t)(SDL_GetPerformanceCounter() * 1000000.0 / SDL_GetPerformanceFrequency()) - start_us + skew;
 }
 
 bool plat_poll(Pad * pad)

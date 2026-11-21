@@ -330,6 +330,14 @@ static bool lefty_now(void);
 static void battle_reset(void);
 static void battle_update(void);
 static void draw_battle(void);
+static struct {
+    bool on, done;
+    char name[32];
+    long score;
+    int streak, pct;
+    float rock;
+} versus;
+static void draw_versus(void);
 static void popup_always(const char * text);
 static void ghost_start(const Song * song, int part, int diff);
 static void ghost_track(void);
@@ -3602,6 +3610,37 @@ static float star_progress(int * stars)
     return (float)(f < 0 ? 0 : f > 1 ? 1 : f);
 }
 
+void game_versus(const char * name)
+{
+    memset(&versus, 0, sizeof(versus));
+    if (name) {
+        versus.on = true;
+        snprintf(versus.name, sizeof(versus.name), "%s", name);
+        versus.rock = 0.5f;
+    }
+}
+
+void game_versus_update(int score, int streak, float rock, int pct, bool done)
+{
+    versus.score = score;
+    versus.streak = streak;
+    versus.rock = rock;
+    versus.pct = pct;
+    versus.done = done;
+}
+
+void game_live(int * score, int * streak, int * mult, float * rock, int * pct, bool * sp)
+{
+    *score = (int)G.score;
+    *streak = G.streak;
+    int m = 1 + G.streak / 10;
+    *mult = (m > 4 ? 4 : m) * (G.sp_active ? 2 : 1);
+    *rock = G.rock;
+    int judged = G.hits + G.misses;
+    *pct = judged ? G.hits * 100 / judged : 100;
+    *sp = G.sp_active;
+}
+
 double game_time(void)
 {
     return G.t;
@@ -3632,6 +3671,12 @@ Result game_result(void)
         r.rival_pct = battle.played ? battle.hits * 100 / battle.played : 0;
         r.rival_level = battle.level;
         snprintf(r.rival_name, sizeof(r.rival_name), "%s", battle.name);
+    }
+    if (versus.on) {
+        r.versus = (long)G.score > versus.score ? 1 : (long)G.score < versus.score ? 2 : 3;
+        r.rival_score = (int)versus.score;
+        r.rival_pct = versus.pct;
+        snprintf(r.rival_name, sizeof(r.rival_name), "%.23s", versus.name);
     }
     r.part = G.part_id;
     r.diff = G.diff;
@@ -6403,6 +6448,29 @@ static void battle_update(void)
     G.speed += (want - G.speed) * 0.1f;
 }
 
+// against another device: the tug of war across the top (as a battle's), their name and score beside it
+static void draw_versus(void)
+{
+    if (!versus.on || battle.on || G.view_mode)
+        return;
+    const float w = 360, x = (SCREEN_W - w) / 2, y = 12, h = 12;
+    long mine = (long)G.score;
+    float split = mine + versus.score > 0 ? (float)mine / (float)(mine + versus.score) : 0.5f;
+    gfx_rect(x - 3, y - 3, w + 6, h + 6, RGBA(0, 0, 0, 200));
+    gfx_rect(x, y, w * split, h, RGBA(70, 190, 255, 255));
+    gfx_rect(x + w * split, y, w * (1 - split), h, RGBA(235, 70, 55, 255));
+    gfx_rect(x + w * split - 2, y - 4, 4, h + 8, WHITE);
+    char t[64];
+    font_draw_shadow(res.ui, "YOU", x - 10, y - 3, 18, RGBA(150, 215, 255, 255), ALIGN_RIGHT);
+    font_draw_fit(res.ui, versus.name, x + w + 10, y - 3, 18, 150, RGBA(255, 160, 140, 255), ALIGN_LEFT);
+    snprintf(t, sizeof(t), "%ld%s", versus.score, versus.done ? "  done" : "");
+    font_draw_shadow(res.ui, t, x + w + 10, y + 16, 16, WHITE, ALIGN_LEFT);
+    if (versus.streak >= 10) {
+        snprintf(t, sizeof(t), "%d streak", versus.streak);
+        font_draw_shadow(res.ui, t, x + w + 10, y + 33, 14, RGBA(200, 200, 210, 255), ALIGN_LEFT);
+    }
+}
+
 static void draw_battle(void)
 {
     if (!battle.on)
@@ -6968,6 +7036,7 @@ vocal_strip_done:
     }
     draw_ghost();
     draw_battle();
+    draw_versus();
     if (G.sing && !G.vocal && G.vox_graded) {
         // the singer's own tally, over the lyrics' side
         char t[48];

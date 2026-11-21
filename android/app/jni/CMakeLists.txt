@@ -10,7 +10,7 @@ add_library(main SHARED
     ${S}/main.c ${S}/player.c ${S}/achieve.c ${S}/game.c ${S}/gfx.c ${S}/font.c ${S}/audio.c ${S}/decoder.c ${S}/resamp.c
     ${S}/cues.c ${S}/chart.c ${S}/songs.c ${S}/career.c ${S}/songconv.c ${S}/res.c ${S}/json.c ${S}/net.c ${S}/dl.c
     ${S}/mega.c ${S}/aes128.c ${S}/moggdec.c ${S}/rar.c ${S}/ppmd7.c ${S}/tour.c ${S}/vocals.c ${S}/rbcon.c ${S}/shrink.c
-    ${S}/band3d.c ${S}/replay.c ${S}/voicefx.c ${S}/aec.c ${S}/update.c ${S}/update_apply.c ${S}/plat_sdl.c)
+    ${S}/band3d.c ${S}/replay.c ${S}/voicefx.c ${S}/aec.c ${S}/update.c ${S}/update_apply.c ${S}/p2p.c ${S}/mp.c ${S}/plat_sdl.c)
 target_compile_options(main PRIVATE -O2 -Wall -Wno-unused-parameter -Wno-missing-field-initializers)
 target_compile_definitions(main PRIVATE GHV_BUILD=${GHV_BUILD})
 set_source_files_properties(${S}/ppmd7.c PROPERTIES COMPILE_FLAGS -fno-strict-aliasing)
